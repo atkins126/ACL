@@ -740,7 +740,6 @@ end;
 procedure TACLHexViewSubClass.MakeVisible(const ACharPosition: Int64);
 var
   ACharBounds: TRect;
-  ADelta: TPoint;
   ASelection: TACLHexViewSubClassSelectionViewInfo;
   AViewBounds: TRect;
 begin
@@ -752,9 +751,8 @@ begin
   AViewBounds := ViewInfo.RowsAreaClipRect;
   ACharBounds := ASelection.CalculateCharBounds(ACharPosition, False);
   ACharBounds := acRectOffset(ACharBounds, ViewInfo.RowsArea.TopLeft);
-  ADelta.X := acCalculateMakeVisibleDelta(ACharBounds.Left, ACharBounds.Right, AViewBounds.Left, AViewBounds.Right);
-  ADelta.Y := acCalculateMakeVisibleDelta(ACharBounds.Top, ACharBounds.Bottom, AViewBounds.Top, AViewBounds.Bottom);
-  ViewInfo.Viewport := acPointOffset(ViewInfo.Viewport, ADelta);
+  ViewInfo.Viewport := acPointOffset(ViewInfo.Viewport,
+    acCalculateScrollToDelta(ACharBounds, AViewBounds, TACLScrollToMode.MakeVisible));
 end;
 
 procedure TACLHexViewSubClass.SelectAll;
@@ -1100,7 +1098,7 @@ begin
   AWindowOrg := acMoveWindowOrg(ACanvas.Handle, AOrigin);
   try
     ACanvas.Font.Color := FLabelTextColor;
-    acTextOut(ACanvas.Handle, FLabelRect.Left, FLabelRect.Top, LabelText, 0);
+    acTextOut(ACanvas, FLabelRect.Left, FLabelRect.Top, LabelText, 0);
     HexView.Draw(ACanvas, AData, ADataSize);
     TextView.Draw(ACanvas, AData, ADataSize);
   finally

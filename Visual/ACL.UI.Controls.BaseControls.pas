@@ -63,13 +63,6 @@ const
   AnchorBottomLeft = [akLeft, akBottom];
   AnchorBottomRight = [akRight, akBottom];
 
-  acTextFlagsCenterV = DT_END_ELLIPSIS or DT_NOPREFIX or DT_VCENTER;
-  acTextFlagsCenter = acTextFlagsCenterV or DT_CENTER;
-  acTextFlagsMultiLine = DT_END_ELLIPSIS or DT_NOPREFIX or DT_WORDBREAK;
-
-  acTextAligns: array[TAlignment] of Integer = (DT_LEFT, DT_RIGHT, DT_CENTER);
-  acTextWordWrap: array[Boolean] of Integer = (acTextFlagsCenterV, acTextFlagsMultiLine);
-
 type
   TACLMouseWheelDirection = (
     mwdDown, // Scroll the mouse wheel down (to yourself), the list must be scrolled to next item. equals to LB_LINEDOWN.
@@ -665,6 +658,12 @@ type
     property Bounds[AControl: TWinControl]: TRect read GetBounds;
   end;
 
+  { TACLScrollToMode }
+
+  {$SCOPEDENUMS ON}
+  TACLScrollToMode = (MakeVisible, MakeTop, MakeCenter);
+  {$SCOPEDENUMS OFF}
+
 var
   acUIFadingEnabled: Boolean = True;
   acUIFadingTime: Integer = 200;
@@ -676,7 +675,11 @@ procedure CreateControl(var Obj; AClass: TControlClass; AParent: TWinControl;
   const R: TRect; AAlign: TAlign = alNone; AAnchors: TAnchors = [akLeft, akTop]); overload;
 function GetElementWidthIncludeOffset(const R: TRect; AScaleFactor: TACLScaleFactor): Integer;
 
-function acCalculateMakeVisibleDelta(AObjectTopValue, AObjectBottomValue, AAreaTopValue, AAreaBottomValue: Integer): Integer;
+function acCalculateScrollToDelta(
+  const AObjectBounds, AAreaBounds: TRect; AScrollToMode: TACLScrollToMode): TPoint; overload;
+function acCalculateScrollToDelta(AObjectTopValue, AObjectBottomValue: Integer;
+  AAreaTopValue, AAreaBottomValue: Integer; AScrollToMode: TACLScrollToMode): Integer; overload;
+
 function acCanStartDragging(const ADeltaX, ADeltaY: Integer; AScaleFactor: TACLScaleFactor): Boolean; overload;
 function acCanStartDragging(const P0, P1: TPoint; AScaleFactor: TACLScaleFactor): Boolean; overload;
 procedure acDesignerSetModified(AInvoker: TPersistent);
@@ -811,15 +814,32 @@ begin
   end;
 end;
 
-function acCalculateMakeVisibleDelta(AObjectTopValue, AObjectBottomValue, AAreaTopValue, AAreaBottomValue: Integer): Integer;
+function acCalculateScrollToDelta(const AObjectBounds, AAreaBounds: TRect; AScrollToMode: TACLScrollToMode): TPoint;
 begin
-  if AObjectTopValue < AAreaTopValue then
-    Result := AObjectTopValue - AAreaTopValue
-  else
-    if AObjectBottomValue > AAreaBottomValue then
+  Result.X := acCalculateScrollToDelta(AObjectBounds.Left, AObjectBounds.Right, AAreaBounds.Left, AAreaBounds.Right, AScrollToMode);
+  Result.Y := acCalculateScrollToDelta(AObjectBounds.Top, AObjectBounds.Bottom, AAreaBounds.Top, AAreaBounds.Bottom, AScrollToMode);
+end;
+
+function acCalculateScrollToDelta(AObjectTopValue, AObjectBottomValue: Integer;
+  AAreaTopValue, AAreaBottomValue: Integer; AScrollToMode: TACLScrollToMode): Integer;
+begin
+  case AScrollToMode of
+    TACLScrollToMode.MakeTop:
+      Result := AObjectTopValue - AAreaTopValue;
+    TACLScrollToMode.MakeCenter:
+      if AAreaBottomValue - AAreaTopValue > AObjectBottomValue - AObjectTopValue then
+        Result := (AAreaTopValue + AAreaBottomValue - AObjectBottomValue + AObjectTopValue) div 2
+      else
+        Result := AObjectTopValue - AAreaTopValue;
+
+  else // MakeVisible
+    if AObjectTopValue < AAreaTopValue then
+      Result := AObjectTopValue - AAreaTopValue
+    else if AObjectBottomValue > AAreaBottomValue then
       Result := Min(AObjectBottomValue - AAreaBottomValue, AObjectTopValue - AAreaTopValue)
     else
       Result := 0;
+  end;
 end;
 
 function acCanStartDragging(const ADeltaX, ADeltaY: Integer; AScaleFactor: TACLScaleFactor): Boolean;
