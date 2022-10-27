@@ -38,8 +38,8 @@ uses
   ACL.Classes.Timer,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Gdiplus,
-  ACL.Graphics.Layers,
+  ACL.Graphics.Ex,
+  ACL.Graphics.Ex.Gdip,
   ACL.Graphics.SkinImage,
   ACL.MUI,
   ACL.ObjectLinks,
@@ -835,9 +835,10 @@ begin
   case AScrollToMode of
     TACLScrollToMode.MakeTop:
       Result := AObjectTopValue - AAreaTopValue;
+
     TACLScrollToMode.MakeCenter:
       if AAreaBottomValue - AAreaTopValue > AObjectBottomValue - AObjectTopValue then
-        Result := (AAreaTopValue + AAreaBottomValue - AObjectBottomValue + AObjectTopValue) div 2
+        Result := (AObjectBottomValue + AObjectTopValue) div 2 - (AAreaTopValue + AAreaBottomValue) div 2
       else
         Result := AObjectTopValue - AAreaTopValue;
 

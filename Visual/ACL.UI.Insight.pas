@@ -40,7 +40,7 @@ uses
   ACL.Classes.Timer,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Gdiplus,
+  ACL.Graphics.Ex.Gdip,
   ACL.Math,
   ACL.Threading,
   ACL.UI.Controls.BaseControls,
@@ -774,8 +774,8 @@ begin
   try
     GpPaintCanvas.SmoothingMode := smNone;
     GpPaintCanvas.PixelOffsetMode := pomHalf;
-    GpPaintCanvas.FillRectangle(TAlphaColor.FromColor(Color), ClientRect);
-    GpPaintCanvas.DrawLine(TAlphaColor.FromColor(FBorderColor), FPolyline, gpsSolid, 2);
+    GpPaintCanvas.FillRectangle(ClientRect, TAlphaColor.FromColor(Color));
+    GpPaintCanvas.Line(FPolyline, TAlphaColor.FromColor(FBorderColor), 2);
   finally
     GpPaintCanvas.EndPaint;
   end;

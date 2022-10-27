@@ -4,7 +4,7 @@
 {*          Binding Diagram Control          *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2021                 *}
+{*                 2006-2022                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -31,7 +31,8 @@ uses
   ACL.Classes.Timer,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Gdiplus,
+  ACL.Graphics.Ex,
+  ACL.Graphics.Ex.Gdip,
   ACL.Math,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Controls.CompoundControl,
@@ -50,7 +51,6 @@ const
 
 type
   TACLBindingDiagramSubClass = class;
-  TACLBindingDiagramSubClassController = class;
   TACLBindingDiagramSubClassViewInfo = class;
   TACLBindingDiagramLinkViewInfo = class;
 
@@ -145,6 +145,7 @@ type
     FData: TACLBindingDiagramData;
     FOptionsBehavior: TACLBindingDiagramOptionsBehavior;
     FOptionsView: TACLBindingDiagramOptionsView;
+    FSelectedObject: TObject;
     FStyle: TACLStyleBindingDiagram;
 
     FOnLinkChanged: TACLBindingDiagramLinkNotifyEvent;
@@ -155,17 +156,22 @@ type
     FOnObjectRemoving: TACLBindingDiagramObjectAcceptEvent;
     FOnSelectionChanged: TNotifyEvent;
 
-    function GetController: TACLBindingDiagramSubClassController;
     function GetViewInfo: TACLBindingDiagramSubClassViewInfo;
     procedure HandlerObjectsChanged(Sender: TObject; AChanges: TACLPersistentChanges);
+    procedure SetSelectedObject(const Value: TObject);
   protected
-    function CreateController: TACLCompoundControlSubClassController; override;
-    function CreateViewInfo: TACLCompoundControlSubClassCustomViewInfo; override;
+    function CreateViewInfo: TACLCompoundControlCustomViewInfo; override;
     function DoLinkChanging(ALink: TACLBindingDiagramLink; ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean; virtual;
     procedure DoLinkChanged(ALink: TACLBindingDiagramLink); virtual;
     function DoLinkCreating(ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean; virtual;
     procedure DoLinkCreated(ALink: TACLBindingDiagramLink); virtual;
     procedure DoSelectionChanged; virtual;
+    procedure DoDragStarted; override;
+    procedure DoHoveredObjectChanged; override;
+    procedure ProcessChanges(AChanges: TIntegerSet); override;
+    procedure ProcessKeyUp(AKey: Word; AShift: TShiftState); override;
+    procedure ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState); override;
+    procedure ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState); override;
     procedure ResourceChanged; override;
     procedure UpdateFonts;
   public
@@ -176,10 +182,10 @@ type
     procedure RemoveSelected;
     //
     property CaptionFont: TFont read FCaptionFont;
-    property Controller: TACLBindingDiagramSubClassController read GetController;
     property Data: TACLBindingDiagramData read FData;
     property OptionsBehavior: TACLBindingDiagramOptionsBehavior read FOptionsBehavior;
     property OptionsView: TACLBindingDiagramOptionsView read FOptionsView;
+    property SelectedObject: TObject read FSelectedObject write SetSelectedObject;
     property Style: TACLStyleBindingDiagram read FStyle;
     property ViewInfo: TACLBindingDiagramSubClassViewInfo read GetViewInfo;
     //
@@ -192,30 +198,9 @@ type
     property OnSelectionChanged: TNotifyEvent read FOnSelectionChanged write FOnSelectionChanged;
   end;
 
-  { TACLBindingDiagramSubClassController }
-
-  TACLBindingDiagramSubClassController = class(TACLCompoundControlSubClassController)
-  strict private
-    FSelectedObject: TObject;
-
-    function GetSubClass: TACLBindingDiagramSubClass; inline;
-    procedure SetSelectedObject(const Value: TObject);
-  protected
-    procedure DragStarted; override;
-    procedure HoveredObjectChanged; override;
-    procedure ProcessKeyUp(AKey: Word; AShift: TShiftState); override;
-    procedure ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState); override;
-    procedure ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState); override;
-  public
-    procedure ProcessChanges(AChanges: TIntegerSet); override;
-    //
-    property SelectedObject: TObject read FSelectedObject write SetSelectedObject;
-    property SubClass: TACLBindingDiagramSubClass read GetSubClass;
-  end;
-
   { TACLBindingDiagramObjectDragObject }
 
-  TACLBindingDiagramObjectDragObject = class(TACLCompoundControlSubClassDragObject)
+  TACLBindingDiagramObjectDragObject = class(TACLCompoundControlDragObject)
   strict private
     FObject: TACLBindingDiagramObject;
   public
@@ -227,7 +212,7 @@ type
 
   { TACLBindingDiagramObjectViewInfo }
 
-  TACLBindingDiagramObjectViewInfo = class(TACLCompoundControlSubClassContainerViewInfo,
+  TACLBindingDiagramObjectViewInfo = class(TACLCompoundControlContainerViewInfo,
     IACLDraggableObject)
   protected const
     BorderWidth = 2;
@@ -254,7 +239,7 @@ type
     procedure FlushCache; inline;
     procedure RecreateSubCells; override;
     // IACLDraggableObject
-    function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+    function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   public
     constructor Create(AOwner: TACLBindingDiagramSubClassViewInfo; AObject: TACLBindingDiagramObject); reintroduce;
     function IsSelected: Boolean;
@@ -273,7 +258,7 @@ type
 
   { TACLBindingDiagramObjectPinViewInfo }
 
-  TACLBindingDiagramObjectPinViewInfo = class(TACLCompoundControlSubClassCustomViewInfo,
+  TACLBindingDiagramObjectPinViewInfo = class(TACLCompoundControlCustomViewInfo,
     IACLDraggableObject)
   strict private
     FInputConnectorRect: TRect;
@@ -298,7 +283,7 @@ type
     procedure DoDrawBackground(ACanvas: TCanvas);
     procedure DoDrawConnector(ACanvas: TCanvas; const R: TRect; AMode: TACLBindingDiagramObjectPinMode);
     // IACLDraggableObject
-    function CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+    function CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   public
     constructor Create(AOwner: TACLBindingDiagramObjectViewInfo; APin: TACLBindingDiagramObjectPin); reintroduce;
     destructor Destroy; override;
@@ -360,7 +345,7 @@ type
 
   { TACLBindingDiagramCustomLinkDragObject }
 
-  TACLBindingDiagramCustomLinkDragObject = class(TACLCompoundControlSubClassDragObject)
+  TACLBindingDiagramCustomLinkDragObject = class(TACLCompoundControlDragObject)
   strict private
     FLineFinish: TPoint;
     FLineStart: TPoint;
@@ -393,7 +378,7 @@ type
 
   { TACLBindingDiagramLinkViewInfo }
 
-  TACLBindingDiagramLinkViewInfo = class(TACLCompoundControlSubClassCustomViewInfo,
+  TACLBindingDiagramLinkViewInfo = class(TACLCompoundControlCustomViewInfo,
     IACLDraggableObject)
   public const
     ArrowSize = 3;
@@ -415,7 +400,7 @@ type
     procedure DoCalculateHitTest(const AInfo: TACLHitTestInfo); override;
     procedure DoDraw(ACanvas: TCanvas); override;
     // IACLDraggableObject
-    function CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+    function CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   public
     constructor Create(ALink: TACLBindingDiagramLink; AOwner: TACLBindingDiagramSubClassViewInfo;
       ASourcePin, ATargetPin: TACLBindingDiagramObjectPinViewInfo; AColor: TColor); reintroduce;
@@ -456,7 +441,7 @@ type
 
   { TACLBindingDiagramScrollDragObject }
 
-  TACLBindingDiagramScrollDragObject = class(TACLCompoundControlSubClassDragObject)
+  TACLBindingDiagramScrollDragObject = class(TACLCompoundControlDragObject)
   strict private
     FOwner: TACLBindingDiagramSubClassViewInfo;
   public
@@ -468,7 +453,7 @@ type
 
   { TACLBindingDiagramSubClassViewInfo }
 
-  TACLBindingDiagramSubClassViewInfo = class(TACLCompoundControlSubClassScrollContainerViewInfo,
+  TACLBindingDiagramSubClassViewInfo = class(TACLCompoundControlScrollContainerViewInfo,
     IACLDraggableObject)
   strict private const
     CellSize = 10;
@@ -478,7 +463,7 @@ type
  strict private
     function GetSubClass: TACLBindingDiagramSubClass;
     // IACLDraggableObject
-    function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+    function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   protected
     FLineOffset: Integer;
     FLinkColors: TACLColorList;
@@ -677,7 +662,7 @@ procedure TACLBindingDiagramSubClass.RemoveSelected;
 var
   ASelectedObject: TObject;
 begin
-  ASelectedObject := Controller.SelectedObject;
+  ASelectedObject := SelectedObject;
   if ASelectedObject is TACLBindingDiagramObject then
     RemoveObject(TACLBindingDiagramObject(ASelectedObject));
   if ASelectedObject is TACLBindingDiagramLink then
@@ -729,12 +714,7 @@ begin
   CaptionFont.Style := [fsBold];
 end;
 
-function TACLBindingDiagramSubClass.CreateController: TACLCompoundControlSubClassController;
-begin
-  Result := TACLBindingDiagramSubClassController.Create(Self);
-end;
-
-function TACLBindingDiagramSubClass.CreateViewInfo: TACLCompoundControlSubClassCustomViewInfo;
+function TACLBindingDiagramSubClass.CreateViewInfo: TACLCompoundControlCustomViewInfo;
 begin
   Result := TACLBindingDiagramSubClassViewInfo.Create(Self);
 end;
@@ -755,49 +735,42 @@ begin
   Changed(C);
 end;
 
-function TACLBindingDiagramSubClass.GetController: TACLBindingDiagramSubClassController;
-begin
-  Result := TACLBindingDiagramSubClassController(inherited Controller);
-end;
-
 function TACLBindingDiagramSubClass.GetViewInfo: TACLBindingDiagramSubClassViewInfo;
 begin
   Result := TACLBindingDiagramSubClassViewInfo(inherited ViewInfo);
 end;
 
-{ TACLBindingDiagramSubClassController }
-
-procedure TACLBindingDiagramSubClassController.DragStarted;
+procedure TACLBindingDiagramSubClass.DoDragStarted;
 begin
   inherited;
   SelectedObject := nil;
 end;
 
-procedure TACLBindingDiagramSubClassController.HoveredObjectChanged;
+procedure TACLBindingDiagramSubClass.DoHoveredObjectChanged;
 begin
   inherited;
-  SubClass.Invalidate;
+  Invalidate;
 end;
 
-procedure TACLBindingDiagramSubClassController.ProcessChanges(AChanges: TIntegerSet);
+procedure TACLBindingDiagramSubClass.ProcessChanges(AChanges: TIntegerSet);
 begin
   if cccnStruct in AChanges then
     SelectedObject := nil;
   inherited;
 end;
 
-procedure TACLBindingDiagramSubClassController.ProcessKeyUp(AKey: Word; AShift: TShiftState);
+procedure TACLBindingDiagramSubClass.ProcessKeyUp(AKey: Word; AShift: TShiftState);
 begin
   if AKey = VK_DELETE then
-    SubClass.RemoveSelected
+    RemoveSelected
   else
     inherited;
 end;
 
-procedure TACLBindingDiagramSubClassController.ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState);
+procedure TACLBindingDiagramSubClass.ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState);
 begin
   if HitTest.HitObjectFlags[htObjectRemoveButton] then
-    SubClass.RemoveObject((HitTest.HitObject as TACLBindingDiagramObjectViewInfo).&Object)
+    RemoveObject((HitTest.HitObject as TACLBindingDiagramObjectViewInfo).&Object)
   else
     if HitTest.HitObject is TACLBindingDiagramObjectViewInfo then
       SelectedObject := TACLBindingDiagramObjectViewInfo(HitTest.HitObject).&Object
@@ -807,23 +780,18 @@ begin
       SelectedObject := nil;
 end;
 
-procedure TACLBindingDiagramSubClassController.ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState);
+procedure TACLBindingDiagramSubClass.ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState);
 begin
-  SubClass.ViewInfo.ScrollByMouseWheel(ADirection, AShift);
+  ViewInfo.ScrollByMouseWheel(ADirection, AShift);
 end;
 
-function TACLBindingDiagramSubClassController.GetSubClass: TACLBindingDiagramSubClass;
-begin
-  Result := TACLBindingDiagramSubClass(inherited SubClass);
-end;
-
-procedure TACLBindingDiagramSubClassController.SetSelectedObject(const Value: TObject);
+procedure TACLBindingDiagramSubClass.SetSelectedObject(const Value: TObject);
 begin
   if FSelectedObject <> Value then
   begin
     FSelectedObject := Value;
-    SubClass.DoSelectionChanged;
-    SubClass.Invalidate;
+    DoSelectionChanged;
+    Invalidate;
   end;
 end;
 
@@ -871,7 +839,7 @@ end;
 
 function TACLBindingDiagramObjectViewInfo.IsSelected: Boolean;
 begin
-  Result := SubClass.Controller.SelectedObject = &Object;
+  Result := SubClass.SelectedObject = &Object;
 end;
 
 function TACLBindingDiagramObjectViewInfo.MeasureSize: TSize;
@@ -988,10 +956,12 @@ begin
   begin
     GpPaintCanvas.BeginPaint(ACanvas.Handle);
     try
-      GPPaintCanvas.DrawLine(Style.ColorObjectCaptionText.Value,
-        RemoveButtonRect.Left, RemoveButtonRect.Top, RemoveButtonRect.Right, RemoveButtonRect.Bottom, gpsSolid, 2);
-      GPPaintCanvas.DrawLine(Style.ColorObjectCaptionText.Value,
-        RemoveButtonRect.Right, RemoveButtonRect.Top, RemoveButtonRect.Left, RemoveButtonRect.Bottom, gpsSolid, 2);
+      GPPaintCanvas.Line(
+        RemoveButtonRect.Left, RemoveButtonRect.Top, RemoveButtonRect.Right, RemoveButtonRect.Bottom,
+        Style.ColorObjectCaptionText.Value, 2, ssSolid);
+      GPPaintCanvas.Line(
+        RemoveButtonRect.Right, RemoveButtonRect.Top, RemoveButtonRect.Left, RemoveButtonRect.Bottom,
+        Style.ColorObjectCaptionText.Value, 2, ssSolid);
     finally
       GPPaintCanvas.EndPaint;
     end;
@@ -1011,7 +981,7 @@ begin
     FChildren.Add(TACLBindingDiagramObjectPinViewInfo.Create(Self, &Object.Pins[I]));
 end;
 
-function TACLBindingDiagramObjectViewInfo.CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+function TACLBindingDiagramObjectViewInfo.CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
 begin
   if SubClass.OptionsBehavior.AllowMoveObjects then
     Result := TACLBindingDiagramObjectDragObject.Create(&Object)
@@ -1128,7 +1098,7 @@ var
 begin
   inherited;
 
-  if (FLinks.Count > 0) and PtInRect(Bounds, AInfo.HitPoint) and not SubClass.Controller.DragAndDropController.IsActive then
+  if (FLinks.Count > 0) and PtInRect(Bounds, AInfo.HitPoint) and not SubClass.DragAndDropController.IsActive then
   begin
     AIndex := (AInfo.HitPoint.X - Bounds.Left) div Max(Bounds.Width div FLinks.Count, 1);
     if InRange(AIndex, 0, FLinks.Count - 1) then
@@ -1181,7 +1151,7 @@ begin
   end;
 end;
 
-function TACLBindingDiagramObjectPinViewInfo.CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+function TACLBindingDiagramObjectPinViewInfo.CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
 begin
   if TACLBindingDiagramSubClass(SubClass).OptionsBehavior.AllowCreateLinks and (Pin.Mode <> []) then
     Result := TACLBindingDiagramCreateLinkDragObject.Create(Self)
@@ -1732,7 +1702,7 @@ begin
   Result := TACLBindingDiagramSubClass(inherited SubClass);
 end;
 
-function TACLBindingDiagramSubClassViewInfo.CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+function TACLBindingDiagramSubClassViewInfo.CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
 begin
   Result := TACLBindingDiagramScrollDragObject.Create(Self);
 end;
@@ -1926,8 +1896,8 @@ end;
 function TACLBindingDiagramLinkViewInfo.IsHighlighted: Boolean;
 begin
   Result :=
-    (TACLBindingDiagramSubClassController(SubClass.Controller).HoveredObject = Self) or
-    (TACLBindingDiagramSubClassController(SubClass.Controller).SelectedObject = Link);
+    (TACLBindingDiagramSubClass(SubClass).HoveredObject = Self) or
+    (TACLBindingDiagramSubClass(SubClass).SelectedObject = Link);
 end;
 
 procedure TACLBindingDiagramLinkViewInfo.CalculateArrows;
@@ -1985,7 +1955,7 @@ begin
     ACanvas.Polygon(FArrowInput);
 end;
 
-function TACLBindingDiagramLinkViewInfo.CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlSubClassDragObject;
+function TACLBindingDiagramLinkViewInfo.CreateDragObject(const AInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
 begin
   if TACLBindingDiagramSubClass(SubClass).OptionsBehavior.AllowEditLinks then
     Result := TACLBindingDiagramEditLinkDragObject.Create(Self)

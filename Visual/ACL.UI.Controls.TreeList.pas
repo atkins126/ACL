@@ -52,7 +52,7 @@ type
   strict private
     function GetAbsoluteVisibleNodes: TACLTreeListNodeList; inline;
     function GetColumns: TACLTreeListColumns;
-    function GetEditingController: TACLTreeListSubClassEditingController;
+    function GetEditingController: TACLTreeListEditingController;
     function GetFocusedColumn: TACLTreeListColumn;
     function GetFocusedGroup: TACLTreeListGroup;
     function GetFocusedNode: TACLTreeListNode; inline;
@@ -60,7 +60,7 @@ type
     function GetGroup(Index: Integer): TACLTreeListGroup;
     function GetGroupCount: Integer;
     function GetHasSelection: Boolean; inline;
-    function GetHitTest: TACLTreeListSubClassHitTest;
+    function GetHitTest: TACLTreeListHitTest;
     function GetOnCanDeleteSelected: TACLTreeListConfirmationEvent;
     function GetOnColumnClick: TACLTreeListColumnClickEvent;
     function GetOnCompare: TACLTreeListNodeCompareEvent;
@@ -252,7 +252,7 @@ type
 
     // Data Properties
     property AbsoluteVisibleNodes: TACLTreeListNodeList read GetAbsoluteVisibleNodes;
-    property EditingController: TACLTreeListSubClassEditingController read GetEditingController;
+    property EditingController: TACLTreeListEditingController read GetEditingController;
     property FocusedColumn: TACLTreeListColumn read GetFocusedColumn write SetFocusedColumn;
     property FocusedGroup: TACLTreeListGroup read GetFocusedGroup write SetFocusedGroup;
     property FocusedNode: TACLTreeListNode read GetFocusedNode write SetFocusedNode;
@@ -260,7 +260,7 @@ type
     property Group[Index: Integer]: TACLTreeListGroup read GetGroup;
     property GroupCount: Integer read GetGroupCount;
     property HasSelection: Boolean read GetHasSelection;
-    property HitTest: TACLTreeListSubClassHitTest read GetHitTest;
+    property HitTest: TACLTreeListHitTest read GetHitTest;
     property RootNode: TACLTreeListNode read GetRootNode;
     property Selected[Index: Integer]: TACLTreeListNode read GetSelected;
     property SelectedCheckState: TCheckBoxState read GetSelectedCheckState;
@@ -370,8 +370,8 @@ end;
 
 function TACLCustomTreeList.ObjectAtPos(const X, Y: Integer): TObject;
 begin
-  SubClass.Controller.UpdateHitTest(X, Y);
-  Result := SubClass.Controller.HitTest.HitObject;
+  SubClass.UpdateHitTest(X, Y);
+  Result := SubClass.HitTest.HitObject;
 end;
 
 procedure TACLCustomTreeList.ReloadData;
@@ -517,7 +517,7 @@ begin
   Result := SubClass.Columns;
 end;
 
-function TACLCustomTreeList.GetEditingController: TACLTreeListSubClassEditingController;
+function TACLCustomTreeList.GetEditingController: TACLTreeListEditingController;
 begin
   Result := SubClass.EditingController;
 end;
@@ -557,9 +557,9 @@ begin
   Result := SubClass.HasSelection;
 end;
 
-function TACLCustomTreeList.GetHitTest: TACLTreeListSubClassHitTest;
+function TACLCustomTreeList.GetHitTest: TACLTreeListHitTest;
 begin
-  Result := SubClass.Controller.HitTest;
+  Result := SubClass.HitTest;
 end;
 
 function TACLCustomTreeList.GetOnCanDeleteSelected: TACLTreeListConfirmationEvent;

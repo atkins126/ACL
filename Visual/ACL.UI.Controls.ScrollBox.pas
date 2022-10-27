@@ -28,7 +28,7 @@ uses
   // ACL
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Layers,
+  ACL.Graphics.Ex,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Controls.CompoundControl,
   ACL.UI.Controls.CompoundControl.SubClass,
@@ -38,7 +38,7 @@ uses
   ACL.Utils.Common;
 
 type
-  TACLScrollBoxSubClassViewInfo = class;
+  TACLScrollBoxViewInfo = class;
 
   { TACLScrollBoxStyle }
 
@@ -67,7 +67,7 @@ type
 
     function GetBordersWidth: TRect;
     function GetStyle: TACLScrollBoxStyle;
-    function GetViewInfo: TACLScrollBoxSubClassViewInfo;
+    function GetViewInfo: TACLScrollBoxViewInfo;
     function GetViewPoint: TPoint;
     procedure SetBorders(AValue: TACLBorders);
     procedure SetStyle(AValue: TACLScrollBoxStyle);
@@ -99,7 +99,7 @@ type
     procedure WMNCPaint(var Message: TWMNCPaint); message WM_NCPAINT;
     procedure WMSetRedraw(var Message: TMessage); message WM_SETREDRAW;
 
-    property ViewInfo: TACLScrollBoxSubClassViewInfo read GetViewInfo;
+    property ViewInfo: TACLScrollBoxViewInfo read GetViewInfo;
 
     property OnCustomDraw: TACLCustomDrawEvent read FOnCustomDraw write FOnCustomDraw;
   public
@@ -132,12 +132,12 @@ type
   TACLScrollBoxSubClass = class(TACLCompoundControlSubClass)
   protected
     function CreateStyleScrollBox: TACLStyleScrollBox; override;
-    function CreateViewInfo: TACLCompoundControlSubClassCustomViewInfo; override;
+    function CreateViewInfo: TACLCompoundControlCustomViewInfo; override;
   end;
 
-  { TACLScrollBoxSubClassViewInfo }
+  { TACLScrollBoxViewInfo }
 
-  TACLScrollBoxSubClassViewInfo = class(TACLCompoundControlSubClassScrollContainerViewInfo)
+  TACLScrollBoxViewInfo = class(TACLCompoundControlScrollContainerViewInfo)
   strict private
     function GetControl: TACLCustomScrollBox;
   protected
@@ -441,8 +441,8 @@ begin
     Exit;
   end;
 
-  SubClass.Controller.UpdateHitTest(TranslatePoint(Message.XPos, Message.YPos));
-  if SubClass.Controller.HitTest.HitObject = SubClass.ViewInfo then
+  SubClass.UpdateHitTest(TranslatePoint(Message.XPos, Message.YPos));
+  if SubClass.HitTest.HitObject = SubClass.ViewInfo then
     Message.Result := HTCLIENT
   else
     Message.Result := HTOBJECT;
@@ -453,7 +453,8 @@ begin
   if IsDesigning then
     inherited
   else
-    SubClass.Controller.MouseDown(mbLeft, KeyboardStateToShiftState, TranslatePoint(Message.XCursor, Message.YCursor));
+    with TranslatePoint(Message.XCursor, Message.YCursor) do
+      SubClass.MouseDown(mbLeft, KeyboardStateToShiftState, X, Y);
 end;
 
 procedure TACLCustomScrollBox.WMNCLButtonUp(var Message: TWMNCLButtonUp);
@@ -461,7 +462,8 @@ begin
   if IsDesigning then
     inherited
   else
-    SubClass.Controller.MouseUp(mbLeft, KeyboardStateToShiftState, TranslatePoint(Message.XCursor, Message.YCursor));
+    with TranslatePoint(Message.XCursor, Message.YCursor) do
+      SubClass.MouseUp(mbLeft, KeyboardStateToShiftState, X, Y);
 end;
 
 procedure TACLCustomScrollBox.WMNCMouseMove(var Message: TWMNCMouseMove);
@@ -470,7 +472,8 @@ begin
     inherited
   else
   begin
-    SubClass.Controller.MouseMove(KeyboardStateToShiftState, TranslatePoint(Message.XCursor, Message.YCursor));
+    with TranslatePoint(Message.XCursor, Message.YCursor) do
+      SubClass.MouseMove(KeyboardStateToShiftState, X, Y);
     MouseTracker.Add(Self);
   end;
 end;
@@ -519,9 +522,9 @@ begin
   Result := TACLScrollBoxStyle(StyleScrollBox);
 end;
 
-function TACLCustomScrollBox.GetViewInfo: TACLScrollBoxSubClassViewInfo;
+function TACLCustomScrollBox.GetViewInfo: TACLScrollBoxViewInfo;
 begin
-  Result := TACLScrollBoxSubClassViewInfo(SubClass.ViewInfo);
+  Result := TACLScrollBoxViewInfo(SubClass.ViewInfo);
 end;
 
 function TACLCustomScrollBox.GetViewPoint: TPoint;
@@ -580,29 +583,29 @@ begin
   Result := TACLScrollBoxStyle.Create(Self);
 end;
 
-function TACLScrollBoxSubClass.CreateViewInfo: TACLCompoundControlSubClassCustomViewInfo;
+function TACLScrollBoxSubClass.CreateViewInfo: TACLCompoundControlCustomViewInfo;
 begin
-  Result := TACLScrollBoxSubClassViewInfo.Create(Self);
+  Result := TACLScrollBoxViewInfo.Create(Self);
 end;
 
-{ TACLScrollBoxSubClassViewInfo }
+{ TACLScrollBoxViewInfo }
 
-procedure TACLScrollBoxSubClassViewInfo.CalculateContentLayout;
+procedure TACLScrollBoxViewInfo.CalculateContentLayout;
 begin
   FContentSize := GetControl.CalculateRange;
 end;
 
-procedure TACLScrollBoxSubClassViewInfo.ContentScrolled(ADeltaX, ADeltaY: Integer);
+procedure TACLScrollBoxViewInfo.ContentScrolled(ADeltaX, ADeltaY: Integer);
 begin
   GetControl.ScrollBy(ADeltaX, ADeltaY);
 end;
 
-procedure TACLScrollBoxSubClassViewInfo.RecreateSubCells;
+procedure TACLScrollBoxViewInfo.RecreateSubCells;
 begin
   // do nothing
 end;
 
-function TACLScrollBoxSubClassViewInfo.GetControl: TACLCustomScrollBox;
+function TACLScrollBoxViewInfo.GetControl: TACLCustomScrollBox;
 begin
   Result := SubClass.Container.GetControl as TACLCustomScrollBox;
 end;
