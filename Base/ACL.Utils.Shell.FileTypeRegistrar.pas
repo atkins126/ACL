@@ -375,7 +375,12 @@ begin
   end;
 
   if not AResult then
-    ShellExecute('control.exe', '/NAME Microsoft.DefaultPrograms /PAGE pageDefaultProgram');
+  begin
+    if IsWinVistaOrLater then
+      ShellExecute('control.exe', '/NAME Microsoft.DefaultPrograms /PAGE pageDefaultProgram')
+    else
+      ShellExecute('control.exe', 'appwiz.cpl,,3');
+  end;
 end;
 
 class function TACLFileTypeRegistrar.AppDisplayName: string;
@@ -432,7 +437,7 @@ begin
       AIconIndex := 0;
 
     ATypeRoot := AInfo.GetProgID(AppName);
-    acRegWriteDefaultStr(AKey, ATypeRoot, AppDisplayName + ': ' + AInfo.Title);
+    acRegWriteDefaultStr(AKey, ATypeRoot, {AppDisplayName + ': ' +}AInfo.Title);
     acRegWriteDefaultStr(AKey, ATypeRoot + '\DefaultIcon', ALibrary.FileName + ',' + IntToStr(AIconIndex));
     if AppDropTargetClass <> '' then
       acRegWriteDefaultStr(AKey, ATypeRoot + '\CLSID', AppDropTargetClass);

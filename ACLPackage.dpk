@@ -25,7 +25,7 @@
 {$IMAGEBASE $400000}
 {$DEFINE DEBUG}
 {$ENDIF IMPLICITBUILDING}
-{$DESCRIPTION 'Artem''s Components Library v2022.10'}
+{$DESCRIPTION 'Artem''s Components Library v2022.11'}
 {$IMPLICITBUILD ON}
 
 requires
@@ -57,6 +57,8 @@ contains
   ACL.Graphics.Images in 'Base\ACL.Graphics.Images.pas',
   ACL.Graphics.FontCache in 'Base\ACL.Graphics.FontCache.pas',
   ACL.Graphics.Ex in 'ACL\Base\ACL.Graphics.Ex.pas',
+  ACL.Graphics.Ex.D2D in 'ACL\Base\ACL.Graphics.Ex.D2D.pas',
+  ACL.Graphics.Ex.D2D.Types in 'ACL\Base\ACL.Graphics.Ex.D2D.Types.pas',
   ACL.Graphics.Ex.Gdip in 'ACL\Base\ACL.Graphics.Ex.Gdip.pas',
   ACL.Graphics.SkinImage in 'Base\ACL.Graphics.SkinImage.pas',
   ACL.Graphics.SkinImageSet in 'Base\ACL.Graphics.SkinImageSet.pas',
@@ -106,6 +108,7 @@ contains
   ACL.UI.Controls.Panel in 'Visual\ACL.UI.Controls.Panel.pas',
   ACL.UI.Controls.ProgressBar in 'Visual\ACL.UI.Controls.ProgressBar.pas',
   ACL.UI.Controls.ProgressBox in 'Visual\ACL.UI.Controls.ProgressBox.pas',
+  ACL.UI.Controls.Scene2D in 'Visual\ACL.UI.Controls.Scene2D.pas',
   ACL.UI.Controls.ScrollBar in 'Visual\ACL.UI.Controls.ScrollBar.pas',
   ACL.UI.Controls.ScrollBox in 'Visual\ACL.UI.Controls.ScrollBox.pas',
   ACL.UI.Controls.SearchBox in 'Visual\ACL.UI.Controls.SearchBox.pas',
