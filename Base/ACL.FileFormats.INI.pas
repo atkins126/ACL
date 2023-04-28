@@ -35,7 +35,6 @@ uses
   ACL.Utils.Common,
   ACL.Utils.FileSystem,
   ACL.Utils.Stream,
-  ACL.Utils.Strings.Transcode,
   ACL.Utils.Strings;
 
 type
@@ -1294,7 +1293,7 @@ procedure TACLIniFile.LoadFromString(const AString: PWideChar; ACount: Integer);
     ALength := acStringLength(S, F);
     if ALength > 0 then
     begin
-      if Ord(S^) = Ord('[') then
+      if S^ = '[' then
         ASection := GetSection(acMakeString(S + 1, ALength - 2), True)
       else if ASection <> nil then
         ASection.Add(acMakeString(S, ALength));

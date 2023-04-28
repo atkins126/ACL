@@ -65,7 +65,6 @@ type
   { TACLDirect2DAbstractRender }
 
   TACLDirect2DAbstractRender = class(TACL2DRender)
-  strict private type
   strict private
     FCacheHatchBrushes: TACLValueCacheManager<UInt64, ID2D1Brush>;
     FCacheSolidBrushes: TACLValueCacheManager<TAlphaColor, ID2D1SolidColorBrush>;
@@ -1055,19 +1054,35 @@ const
   );
 var
   ATextFormat: IDWriteTextFormat;
+  ATextLayout: IDWriteTextLayout;
   ATextLength: Integer;
+  ATextRange: TDwriteTextRange;
 begin
   ATextLength := Length(Text);
   if (ATextLength > 0) and Color.IsValid then
   begin
-    TACLDirect2D.DWriteFactory.CreateTextFormat(PChar(Font.Name), nil,
+    if Succeeded(TACLDirect2D.DWriteFactory.CreateTextFormat(PChar(Font.Name), nil,
       TACLMath.IfThen(fsBold in Font.Style, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL),
       TACLMath.IfThen(fsItalic in Font.Style, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL),
-      DWRITE_FONT_STRETCH_NORMAL, -Font.Height, 'en-us', ATextFormat);
-    ATextFormat.SetTextAlignment(HorzAlignMap[HorzAlign]);
-    ATextFormat.SetParagraphAlignment(VertAlignMap[VertAlign]);
-    ATextFormat.SetWordWrapping(WordWrapMap[WordWrap]);
-    FDeviceContext.DrawText(PChar(Text), ATextLength, ATextFormat, R, CacheGetSolidBrush(Color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+      DWRITE_FONT_STRETCH_NORMAL, -Font.Height, 'en-us', ATextFormat)) then
+    begin
+      ATextFormat.SetTextAlignment(HorzAlignMap[HorzAlign]);
+      ATextFormat.SetParagraphAlignment(VertAlignMap[VertAlign]);
+      ATextFormat.SetWordWrapping(WordWrapMap[WordWrap]);
+
+      if fsUnderline in Font.Style then
+      begin
+        if Succeeded(TACLDirect2D.DWriteFactory.CreateTextLayout(PChar(Text), ATextLength, ATextFormat, R.Width, R.Height, ATextLayout)) then
+        begin
+          ATextRange.startPosition := 0;
+          ATextRange.length := ATextLength;
+          ATextLayout.SetUnderline(True, ATextRange);
+          FDeviceContext.DrawTextLayout(D2D1PointF(R.Left, R.Top), ATextLayout, CacheGetSolidBrush(Color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        end;
+      end
+      else
+        FDeviceContext.DrawText(PChar(Text), ATextLength, ATextFormat, R, CacheGetSolidBrush(Color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    end
   end;
 end;
 

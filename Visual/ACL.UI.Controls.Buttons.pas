@@ -549,6 +549,7 @@ type
     // Messages
     procedure CMEnabledChanged(var Message: TMessage); override;
     procedure CMHitTest(var Message: TCMHitTest); message CM_HITTEST;
+    procedure WMMove(var Message: TWMMove); message WM_MOVE;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
     //
     property Checked: Boolean read GetChecked write SetChecked;
@@ -1738,8 +1739,7 @@ end;
 
 procedure TACLCheckBoxSubControlOptions.Changed;
 begin
-  if Control <> nil then
-    Control.Enabled := Enabled;
+  SyncEnabled;
   inherited;
 end;
 
@@ -2089,6 +2089,13 @@ begin
     PtInRect(ViewInfo.LineRect, P));
 end;
 
+procedure TACLCustomCheckBox.WMMove(var Message: TWMMove);
+begin
+  inherited;
+  if (SubControl <> nil) and (SubControl.Control <> nil) then
+    BoundsChanged;
+end;
+
 procedure TACLCustomCheckBox.WMNCHitTest(var Message: TCMHitTest);
 begin
   if Perform(CM_HITTEST, 0, PointToLParam(ScreenToClient(SmallPointToPoint(Message.Pos)))) <> 0 then
@@ -2163,7 +2170,7 @@ end;
 
 procedure TACLCustomCheckBox.UpdateSubControlEnabled;
 begin
-  SubControl.Enabled := Enabled and Checked;
+  SubControl.Enabled := Enabled and (not ShowCheckMark or Checked);
 end;
 
 procedure TACLCustomCheckBox.SetWordWrap(AValue: Boolean);

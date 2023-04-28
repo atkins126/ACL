@@ -4,7 +4,7 @@
 {*              Label Controls               *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -35,6 +35,7 @@ uses
   ACL.Graphics,
   ACL.Graphics.Ex,
   ACL.Graphics.SkinImage,
+  ACL.Graphics.SkinImageSet,
   ACL.Math,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Forms,
@@ -141,6 +142,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    procedure SetBounds(ALeft, ATop, AWidth, AHeight: Integer); override;
   published
     property Alignment: TAlignment read FAlignment write SetAlignment default taLeftJustify;
     property AlignmentVert: TVerticalAlignment read FAlignmentVert write SetAlignmentVert default taVerticalCenter;
@@ -197,6 +199,7 @@ type
     function MeasureSize(AWidth: Integer = 0): TSize; override;
   public
     constructor Create(AOwner: TComponent); override;
+    procedure SetCaption(const AValue: UnicodeString; AIcon: TACLValidationLabelIcon);
   published
     property AutoSize default True;
     property Icon: TACLValidationLabelIcon read FIcon write SetIcon default vliWarning;
@@ -625,6 +628,13 @@ begin
   end;
 end;
 
+procedure TACLLabel.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
+begin
+  inherited;
+  if SubControl.Control <> nil then
+    Calculate;
+end;
+
 procedure TACLLabel.SetStyle(AValue: TACLStyleLabel);
 begin
   FStyle.Assign(AValue);
@@ -741,6 +751,12 @@ begin
   Result := inherited MeasureSize(AWidth);
   Result.cy := Max(Result.cy, Style.Icons.FrameHeight);
   Result.cx := Result.cx + GetTextOffset;
+end;
+
+procedure TACLValidationLabel.SetCaption(const AValue: UnicodeString; AIcon: TACLValidationLabelIcon);
+begin
+  Caption := AValue;
+  Icon := AIcon;
 end;
 
 procedure TACLValidationLabel.SetIcon(AValue: TACLValidationLabelIcon);

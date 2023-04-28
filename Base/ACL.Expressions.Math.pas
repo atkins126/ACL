@@ -141,11 +141,11 @@ begin
   RegisterOperator('=', OperatorEqual, 2, 9);
 
   RegisterOperator('not', OperatorNot, 1, 8);
-  RegisterOperator('!', OperatorNot, 1, 8);
+  RegisterOperator('!',   OperatorNot, 1, 8);
 
   RegisterOperator('and', OperatorAnd, 2, 7);
-  RegisterOperator('or', OperatorOr, 2, 7);
-  RegisterOperator('xor', OperatorXor, 2, 7);
+  RegisterOperator('or',  OperatorOr,  2, 6);
+  RegisterOperator('xor', OperatorXor, 2, 6);
 end;
 
 function TACLMathExpressionFactory.CreateCompiler: TACLExpressionCompiler;
@@ -340,13 +340,13 @@ const
   begin
     if CharInSet(C, ['0'..'9']) then
       Result := Ord(C) - Ord('0')
-    else if Ord(C) = Ord('+') then
+    else if C = '+' then
       Result := 10
-    else if Ord(C) = Ord('-') then
+    else if C = '-' then
       Result := 11
-    else if Ord(C) = Ord('.') then
+    else if C = '.' then
       Result := 12
-    else if Ord(C) = Ord('E') then
+    else if C = 'E' then
       Result := 13
     else if Contains(C, FDelimiters, FDelimitersLength) then
       Result := 14

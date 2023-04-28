@@ -4,7 +4,7 @@
 {*     Formatted Text based on BB Codes      *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -20,6 +20,7 @@ uses
   // System
   System.UITypes,
   System.Classes,
+  System.Contnrs,
   System.Generics.Collections,
   System.Generics.Defaults,
   System.Math,
@@ -35,9 +36,7 @@ uses
   ACL.FastCode,
   ACL.Geometry,
   ACL.Graphics,
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-  ACL.Graphics.FontCache,
-{$ENDIF}
+  ACL.Math,
   ACL.Utils.Common,
   ACL.Utils.FileSystem,
   ACL.Utils.Shell,
@@ -46,10 +45,11 @@ uses
 type
   TACLTextImporter = class;
   TACLTextLayoutBlock = class;
+  TACLTextLayoutBlockHyperlink = class;
   TACLTextLayoutBlockList = class;
-  TACLTextLayoutBlockStyleHyperlink = class;
   TACLTextLayoutExporter = class;
   TACLTextLayoutHitTest = class;
+  TACLTextLayoutRows = class;
 
   TACLTextReadingDirection = (trdNeutral, trdLeftToRight, trdRightToLeft);
 
@@ -85,20 +85,19 @@ type
     procedure SetVertAlignment(AValue: TVerticalAlignment);
   protected
     FBlocks: TACLTextLayoutBlockList;
-    FLayout: TACLTextLayoutBlockList;
+    FLayout: TACLTextLayoutRows;
     FLayoutIsDirty: Boolean;
     FTruncated: Boolean;
 
-    procedure ApplyAlignment(const AOrigin: TPoint; AMaxWidth, AMaxHeight: Integer;
-      AHorzAlignment: TAlignment; AVertAlignment: TVerticalAlignment);
+    procedure ApplyAlignment(const AOrigin: TPoint; AMaxWidth, AMaxHeight: Integer);
     procedure CalculateCore(AMaxWidth, AMaxHeight: Integer); virtual;
-    function CreateImporter(const AFormatSettings: TACLTextFormatSettings): TACLTextImporter; virtual;
     function CreateLayoutCalculator(AWidth, AHeight: Integer): TACLTextLayoutExporter; virtual;
     function CreateRender(ACanvas: TCanvas): TACLTextLayoutExporter; virtual;
     procedure DrawCore(ACanvas: TCanvas); virtual;
 
     function GetDefaultHyperLinkColor: TColor; virtual;
     function GetDefaultTextColor: TColor; virtual;
+    procedure Refresh;
   public
     constructor Create(AFont: TFont);
     destructor Destroy; override;
@@ -107,11 +106,10 @@ type
     procedure Draw(ACanvas: TCanvas; const AClipRect: TRect); overload;
     procedure DrawTo(ACanvas: TCanvas; const AClipRect: TRect; const AOrigin: TPoint);
     function FindBlock(APositionInText: Integer; out ABlock: TACLTextLayoutBlock): Boolean;
-    function FindHyperlink(const P: TPoint; out AHyperlink: TACLTextLayoutBlockStyleHyperlink): Boolean;
+    function FindHyperlink(const P: TPoint; out AHyperlink: TACLTextLayoutBlockHyperlink): Boolean;
     procedure HitTest(const P: TPoint; AHitTest: TACLTextLayoutHitTest);
     function IsTruncated: Boolean;
     function MeasureSize: TSize; virtual;
-    procedure Refresh;
     procedure SetOption(AOption: TACLTextLayoutOption; AState: Boolean);
     procedure SetText(const AText: string; const AFormatSettings: TACLTextFormatSettings);
     function ToString: string; override;
@@ -129,197 +127,141 @@ type
   TACLTextLayoutBlockClass = class of TACLTextLayoutBlock;
   TACLTextLayoutBlock = class abstract
   protected
-    FBounds: TRect;
     FLength: Word;
-    FPositionInText: Integer; // 1-based
+    FPosition: TPoint;
+    FPositionInText: PWideChar;
   public
-    class function IsMeta: Boolean; virtual;
-    procedure Export(AExporter: TACLTextLayoutExporter); virtual;
-    procedure Offset(dX, dY: Integer); virtual;
-    procedure ReduceWidth(AMaxRight: Integer); virtual;
-    //
-    property Bounds: TRect read FBounds;
+    function Bounds: TRect; dynamic;
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; dynamic;
+    procedure Shrink(AMaxRight: Integer); virtual;
   end;
 
   { TACLTextLayoutBlockList }
 
   TACLTextLayoutBlockList = class(TACLObjectList<TACLTextLayoutBlock>)
-  strict private
-    function GetBoundingRect: TRect;
+  protected
+    procedure AddInit(ABlock: TACLTextLayoutBlock; var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer);
   public
-    procedure Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean);
-    procedure Offset(dX, dY: Integer);
-    //
-    property BoundingRect: TRect read GetBoundingRect;
+    function BoundingRect: TRect; dynamic;
+    function Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean): Boolean; dynamic;
+    procedure Offset(ADeltaX, ADeltaY: Integer); dynamic;
   end;
 
   { TACLTextLayoutBlockLineBreak }
 
   TACLTextLayoutBlockLineBreak = class(TACLTextLayoutBlock)
   public
-    procedure Export(AExporter: TACLTextLayoutExporter); override;
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
   end;
 
   { TACLTextLayoutBlockSpace }
 
   TACLTextLayoutBlockSpace = class(TACLTextLayoutBlock)
+  protected
+    FSize: TSize;
   public
-    procedure Export(AExporter: TACLTextLayoutExporter); override;
+    function Bounds: TRect; override;
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
+    procedure Shrink(AMaxRight: Integer); override;
   end;
 
   { TACLTextLayoutBlockText }
 
   TACLTextLayoutBlockText = class(TACLTextLayoutBlock)
-  strict private
-  {$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-    function GetTextSize: TSize; inline;
-  {$ENDIF}
   protected
-  {$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-    FTextViewInfo: TACLTextViewInfo;
-  {$ELSE}
     FCharacterCount: Integer;
     FCharacterWidths: PInteger;
     FTextSize: TSize;
-  {$ENDIF}
-  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-    FReadingDirection: TACLTextReadingDirection;
-  {$ENDIF}
-    FText: PWideChar;
-    FVisibleLength: Integer;
   public
+    constructor Create(AText: PWideChar; ATextLength: Word);
     destructor Destroy; override;
-    procedure Export(AExporter: TACLTextLayoutExporter); override;
+    function Bounds: TRect; override;
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
     procedure Flush; inline;
-    procedure ReduceWidth(AMaxRight: Integer); override;
+    procedure Shrink(AMaxRight: Integer); override;
     function ToString: string; override;
 
-  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-    property ReadingDirection: TACLTextReadingDirection read FReadingDirection;
-  {$ENDIF}
-    property Text: PWideChar read FText;
+    property Text: PWideChar read FPositionInText;
     property TextLength: Word read FLength;
-  {$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-    property TextSize: TSize read GetTextSize;
-    property TextViewInfo: TACLTextViewInfo read FTextViewInfo;
-  {$ELSE}
     property TextSize: TSize read FTextSize;
-  {$ENDIF}
-    property VisibleLength: Integer read FVisibleLength;
   end;
 
   { TACLTextLayoutBlockStyle }
 
-  TACLTextLayoutBlockStyleClass = class of TACLTextLayoutBlockStyle;
   TACLTextLayoutBlockStyle = class(TACLTextLayoutBlock)
   strict private
-    FIsSetMode: Boolean;
-  protected
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); virtual;
-    procedure SetParameters(const AParameters: string); virtual;
-    //
-    property IsSetMode: Boolean read FIsSetMode;
+    FInclude: Boolean;
   public
-    constructor Create(AIsSetMode: Boolean);
-    class function IsMeta: Boolean; override;
-    procedure Export(AExporter: TACLTextLayoutExporter); override;
+    constructor Create(AInclude: Boolean);
+    property Include: Boolean read FInclude;
   end;
 
-  { TACLTextLayoutBlockStyleStack }
+  { TACLTextLayoutBlockFontColor }
 
-  TACLTextLayoutBlockStyleStack = class
+  TACLTextLayoutBlockFontColor = class(TACLTextLayoutBlockStyle)
   strict private
-    FList: TList;
-    FModified: Boolean;
-
-    function GetCount: Integer;
-    function GetItem(Index: Integer): TACLTextLayoutBlock;
-  public
-    constructor Create;
-    destructor Destroy; override;
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-    procedure Assign(ASource: TACLTextLayoutBlockStyleStack);
-    procedure Clear;
-    procedure Put(AStyle: TACLTextLayoutBlockStyle);
-
-    property Count: Integer read GetCount;
-    property Items[Index: Integer]: TACLTextLayoutBlock read GetItem; default;
-    property Modified: Boolean read FModified write FModified;
-  end;
-
-  { TACLTextLayoutBlockStyleBold }
-
-  TACLTextLayoutBlockStyleBold = class(TACLTextLayoutBlockStyle)
-  public
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
-  end;
-
-  { TACLTextLayoutBlockStyleColor }
-
-  TACLTextLayoutBlockStyleColor = class(TACLTextLayoutBlockStyle)
-  protected
     FColor: TColor;
-
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
-    procedure SetParameters(const AParameters: string); override;
+  public
+    constructor Create(const AColor: string; AInclude: Boolean);
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
+    property Color: TColor read FColor;
   end;
 
-  { TACLTextLayoutBlockStyleFill }
+  { TACLTextLayoutBlockFontStyle }
 
-  TACLTextLayoutBlockStyleFill = class(TACLTextLayoutBlockStyleColor)
-  protected
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
+  TACLTextLayoutBlockFontStyle = class(TACLTextLayoutBlockStyle)
+  strict private
+    FStyle: TFontStyle;
+  public
+    constructor Create(AStyle: TFontStyle; AInclude: Boolean);
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
+    property Style: TFontStyle read FStyle;
   end;
 
-  { TACLTextLayoutBlockStyleHyperlink }
+  { TACLTextLayoutBlockFillColor }
 
-  TACLTextLayoutBlockStyleHyperlink = class(TACLTextLayoutBlockStyle)
-  protected
+  TACLTextLayoutBlockFillColor = class(TACLTextLayoutBlockFontColor)
+  public
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
+  end;
+
+  { TACLTextLayoutBlockHyperlink }
+
+  TACLTextLayoutBlockHyperlink = class(TACLTextLayoutBlockFontStyle)
+  strict private
     FHyperlink: string;
-
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
-    procedure SetParameters(const AParameters: string); override;
   public
+    constructor Create(const AHyperlink: string; AInclude: Boolean);
+    function Export(AExporter: TACLTextLayoutExporter): Boolean; override;
     property Hyperlink: string read FHyperlink;
-  end;
-
-  { TACLTextLayoutBlockStyleItalic }
-
-  TACLTextLayoutBlockStyleItalic = class(TACLTextLayoutBlockStyle)
-  public
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
-  end;
-
-  { TACLTextLayoutBlockStyleStrikeOut }
-
-  TACLTextLayoutBlockStyleStrikeOut = class(TACLTextLayoutBlockStyle)
-  public
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
-  end;
-
-  { TACLTextLayoutBlockStyleUnderline }
-
-  TACLTextLayoutBlockStyleUnderline = class(TACLTextLayoutBlockStyle)
-  public
-    procedure AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout); override;
   end;
 
   { TACLTextLayoutRow }
 
-  TACLTextLayoutRow = class(TACLTextLayoutBlock)
+  TACLTextLayoutRow = class(TACLTextLayoutBlockList)
   strict private
-    FBlocks: TACLTextLayoutBlockList;
-    FEndEllipsis: TACLTextLayoutBlock;
+    FBaseline: Integer; 
+    FBounds: TRect;
+    FEndEllipsis: TACLTextLayoutBlockText;
 
-    procedure SetEndEllipsis(AValue: TACLTextLayoutBlock);
+    procedure SetBaseline(AValue: Integer);
+  protected
+    procedure SetEndEllipsis(ARightSide: Integer; AEndEllipsis: TACLTextLayoutBlockText);
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Export(AExporter: TACLTextLayoutExporter); override;
-    procedure Offset(dX, dY: Integer); override;
+    procedure Offset(ADeltaX, ADeltaY: Integer); override;
+    property Baseline: Integer read FBaseline write SetBaseline;
+    property Bounds: TRect read FBounds write FBounds;
+    property EndEllipsis: TACLTextLayoutBlockText read FEndEllipsis;
+  end;
 
-    property Blocks: TACLTextLayoutBlockList read FBlocks;
-    property EndEllipsis: TACLTextLayoutBlock read FEndEllipsis write SetEndEllipsis;
+  { TACLTextLayoutRows }
+
+  TACLTextLayoutRows = class(TACLObjectList<TACLTextLayoutRow>)
+  public
+    function BoundingRect: TRect;
+    function Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean): Boolean; inline;
   end;
 
   { TACLTextLayoutExporter }
@@ -328,80 +270,98 @@ type
   strict private
     FOwner: TACLTextLayout;
   protected
-    procedure AddLineBreak; virtual;
-    procedure AddSpace(ABlock: TACLTextLayoutBlockSpace); dynamic;
-    procedure AddStyle(ABlock: TACLTextLayoutBlockStyle); dynamic;
-    procedure AddText(ABlock: TACLTextLayoutBlockText); dynamic;
+    function OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean; dynamic;
+    function OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean; dynamic;
+    function OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean; dynamic;
+    function OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean; dynamic;
+    function OnLineBreak: Boolean; dynamic;
+    function OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean; dynamic;
+    function OnText(ABlock: TACLTextLayoutBlockText): Boolean; dynamic;
     //
     property Owner: TACLTextLayout read FOwner;
   public
-    constructor Create(AOwner: TACLTextLayout); virtual;
+    constructor Create(AOwner: TACLTextLayout);
+  end;
+
+  { TACLTextLayoutValueStack<T> }
+
+  TACLTextLayoutValueStack<T> = class
+  strict private
+    FCount: Integer;
+    FData: array of TPair<T, TClass>;
+  public
+    constructor Create;
+    function Peek: T;
+    procedure Pop(AInvoker: TClass);
+    procedure Push(const AValue: T; AInvoker: TClass);
+    property Count: Integer read FCount;
   end;
 
   { TACLTextLayoutVisualExporter }
 
   TACLTextLayoutVisualExporter = class(TACLTextLayoutExporter)
   strict private
-    FDefaultTextColor: TColor;
-    FHasBackground: Boolean;
-
-    function GetCanvas: TCanvas; inline;
-  protected
     FCanvas: TCanvas;
-    FStyleStack: TACLTextLayoutBlockStyleStack;
-
-    procedure AddStyle(ABlock: TACLTextLayoutBlockStyle); override;
-    procedure AssignCanvasParameters; virtual;
-    //
-    property HasBackground: Boolean read FHasBackground;
+    FFont: TFont;
+    FFontStyles: array[TFontStyle] of Word;
+  protected
+    function OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean; override;
+    property Canvas: TCanvas read FCanvas;
+    property Font: TFont read FFont write FFont;
   public
-    constructor Create(AOwner: TACLTextLayout); override;
-    destructor Destroy; override;
-    //
-    property Canvas: TCanvas read GetCanvas write FCanvas;
+    constructor Create(ACanvas: TCanvas; AOwner: TACLTextLayout);
   end;
 
   { TACLTextLayoutCalculator }
 
   TACLTextLayoutCalculator = class(TACLTextLayoutVisualExporter)
   strict private
-    function GetLineHeight: Integer; inline;
-    function GetSpaceSize: TSize;
-  protected
-    FAutoHeight: Boolean;
-    FAutoWidth: Boolean;
     FEditControl: Boolean;
     FEndEllipsis: Boolean;
     FMaxHeight: Integer;
     FMaxWidth: Integer;
     FWordWrap: Boolean;
 
-    FCurrentRow: TACLTextLayoutRow;
-  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-    FCurrentRowInRtlRange: Boolean;
-    FCurrentRowRtlRanges: TACLList<TACLRange>;
-  {$ENDIF}
-    FCurrentRowStartStyle: TACLTextLayoutBlockStyleStack;
-    FLayout: TACLTextLayoutBlockList;
+    FBaseline: Integer;
+    FLineHeight: Integer;
+    FSpaceWidth: Integer;
+
     FOrigin: TPoint;
-    FSpaceSize: TSize;
+    FRow: TACLTextLayoutRow;
+    FRowAlign: TAlignment;
+    FRowTruncated: Boolean;
+  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
+    FRowRtlRange: Boolean;
+    FRowRtlRanges: TACLList<TACLRange>;
+  {$ENDIF}
+    FRows: TACLTextLayoutRows;
+    FPrevRowEndEllipsis: TACLTextLayoutBlockText;
 
-    procedure AddLineBreak; override;
-    procedure AddSpace(ABlock: TACLTextLayoutBlockSpace); override;
-    procedure AddStyle(ABlock: TACLTextLayoutBlockStyle); override;
-    procedure AddText(ABlock: TACLTextLayoutBlockText); override;
+    function ActualOrigin: TPoint; inline;
+    function AddStyle(ABlock: TACLTextLayoutBlockStyle): Boolean; inline;
+    function CreateEndEllipsisBlock: TACLTextLayoutBlockText;
+    procedure CompleteRow;
+    procedure TruncateAll;
+    procedure TruncateRow;
+  protected
+    function OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean; override;
+    function OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean; override;
+    function OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean; override;
+    function OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean; override;
+    function OnLineBreak: Boolean; override;
+    function OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean; override;
+    function OnText(ABlock: TACLTextLayoutBlockText): Boolean; override;
 
-    procedure CompleteCurrentRow;
     procedure MeasureSize(ABlock: TACLTextLayoutBlockText); inline;
-    function MeasureSpaceSize: TSize; virtual;
     procedure Reorder(ABlocks: TACLTextLayoutBlockList; const ARange: TACLRange);
-    procedure SetEndEllipsis(ARow: TACLTextLayoutRow);
+    procedure UpdateMetrics;
 
-    property LineHeight: Integer read GetLineHeight;
-    property SpaceSize: TSize read GetSpaceSize;
+    property Baseline: Integer read FBaseline;
+    property LineHeight: Integer read FLineHeight;
+    property SpaceWidth: Integer read FSpaceWidth;
   public
     constructor Create(AOwner: TACLTextLayout; AWidth, AHeight: Integer); reintroduce;
-    procedure AfterConstruction; override;
+    destructor Destroy; override;
     procedure BeforeDestruction; override;
   end;
 
@@ -411,43 +371,53 @@ type
   strict private
     FHitObject: TACLTextLayoutBlock;
     FHitPoint: TPoint;
-    FHyperlink: TACLTextLayoutBlockStyleHyperlink;
-    FHyperlinkChecked: TACLBoolean;
-    FRiched: Boolean;
-    FStyleStack: TACLTextLayoutBlockStyleStack;
+    FHyperlinks: TStack;
 
-    function GetHyperlink: TACLTextLayoutBlockStyleHyperlink;
+    function GetHyperlink: TACLTextLayoutBlockHyperlink;
   protected
-    procedure AddBlock(ABlock: TACLTextLayoutBlock); inline;
-    procedure AddLineBreak; override;
-    procedure AddSpace(ABlock: TACLTextLayoutBlockSpace); override;
-    procedure AddStyle(ABlock: TACLTextLayoutBlockStyle); override;
-    procedure AddText(ABlock: TACLTextLayoutBlockText); override;
+    function OnBlock(ABlock: TACLTextLayoutBlock): Boolean; inline;
+    function OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean; override;
+    function OnLineBreak: Boolean; override;
+    function OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean; override;
+    function OnText(ABlock: TACLTextLayoutBlockText): Boolean; override;
   public
-    constructor Create(AOwner: TACLTextLayout); override;
     destructor Destroy; override;
     procedure Reset;
     //
     property HitObject: TACLTextLayoutBlock read FHitObject;
     property HitPoint: TPoint read FHitPoint write FHitPoint;
-    property Hyperlink: TACLTextLayoutBlockStyleHyperlink read GetHyperlink;
+    property Hyperlink: TACLTextLayoutBlockHyperlink read GetHyperlink;
   end;
 
   { TACLTextLayoutRender }
 
   TACLTextLayoutRender = class(TACLTextLayoutVisualExporter)
+  strict private
+    FDefaultTextColor: TColor;
+    FFillColors: TACLTextLayoutValueStack<TColor>;
+    FFontColors: TACLTextLayoutValueStack<TColor>;
+    FHasBackground: Boolean;
+
+    procedure UpdateFillColor; inline;
+    procedure UpdateFontColor; inline;
   protected
-    procedure AddSpace(ABlock: TACLTextLayoutBlockSpace); override;
-    procedure AddText(AText: TACLTextLayoutBlockText); override;
+    function OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean; override;
+    function OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean; override;
+    function OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean; override;
+    function OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean; override;
+    function OnText(AText: TACLTextLayoutBlockText): Boolean; override;
+
+    property HasBackground: Boolean read FHasBackground;
   public
     constructor Create(AOwner: TACLTextLayout; ACanvas: TCanvas); reintroduce;
+    destructor Destroy; override;
   end;
 
   { TACLTextImporter }
 
   TACLTextImporter = class
   protected type
-    TTokenController = function (ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+    TTokenController = function (ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
   protected const
     Delimiters = acParserDefaultIdentDelimiters +
       #$200B#$201c#$201D#$2018#$2019#$FF08#$FF09#$FF0C#$FF1A#$FF1B#$FF1F#$060C +
@@ -459,45 +429,41 @@ type
     UrlEndDelimiters = Spaces + '[]()';
   strict private
     class var FEmailValidator: TRegEx;
-    class var FStyleTokens: TACLStringList;
   protected
     FTokenControllers: TACLList<TTokenController>;
 
     procedure PopulateTokenControllers(const ASettings: TACLTextFormatSettings); virtual;
     //# Token Controllers
-    class function IsCppLikeLineBreakToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsDelimiterToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsEmail(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsLineBreakToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsSpaceToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsStyleToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsTextToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsURL(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsCppLikeLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsDelimiterToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsEmail(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsSpaceToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsStyleToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsTextToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsURL(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
     //# Utils
-    class procedure AddBlock(ATarget: TACLTextLayout; ABlock: TACLTextLayoutBlock;
-      const ABaseScan: PWideChar; var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer); static; inline;
-    class procedure AddTextBlock(ATarget: TACLTextLayout; ABaseScan, AText: PWideChar; ALength: Integer); static; inline;
+    class procedure AddTextBlock(ATarget: TACLTextLayout; AText: PWideChar; ALength: Integer); static; inline;
     class procedure ReplaceWithHyperlink(ATarget: TACLTextLayout;
       AFirstBlockToReplace: TACLTextLayoutBlockText; AScan: PWideChar; const AHyperlinkPrefix: string); static;
     class procedure ScanUntilDelimiter(var AScan: PWideChar; var ALength: Integer; const ADelimiters: UnicodeString); static; inline;
   public
     class constructor Create;
-    class destructor Destroy;
     constructor Create(const ASettings: TACLTextFormatSettings);
     destructor Destroy; override;
     procedure Run(ATarget: TACLTextLayout; const AText: string); virtual;
   end;
 
-  { TACLTextExporter }
+  { TACLTextPlainTextExporter }
 
-  TACLTextExporter = class(TACLTextLayoutExporter)
+  TACLTextPlainTextExporter = class(TACLTextLayoutExporter)
   strict private
     FTarget: TStringBuilder;
   public
     constructor Create(ASource: TACLTextLayout; ATarget: TStringBuilder); reintroduce;
-    procedure AddLineBreak; override;
-    procedure AddSpace(ABlock: TACLTextLayoutBlockSpace); override;
-    procedure AddText(ABlock: TACLTextLayoutBlockText); override;
+    function OnLineBreak: Boolean; override;
+    function OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean; override;
+    function OnText(ABlock: TACLTextLayoutBlockText): Boolean; override;
   end;
 
 procedure acDrawFormattedText(ACanvas: TCanvas; const S: UnicodeString; const R: TRect;
@@ -509,7 +475,7 @@ implementation
 type
   TACLTextLayoutRefreshHelper = class(TACLTextLayoutExporter)
   protected
-    procedure AddText(ABlock: TACLTextLayoutBlockText); override;
+    function OnText(ABlock: TACLTextLayoutBlockText): Boolean; override;
   end;
 
 {$REGION 'BiDi Support'}
@@ -888,9 +854,8 @@ var
 begin
   if not R.IsEmpty and (S <> '') and RectVisible(ACanvas.Handle, R) then
   begin
-    AFont := TFont.Create;
+    AFont := ACanvas.Font.Clone;
     try
-      AFont.Assign(ACanvas.Font);
       AText := TACLTextLayout.Create(AFont);
       try
         AText.SetOption(tloWordWrap, AWordWrap);
@@ -929,7 +894,7 @@ constructor TACLTextLayout.Create(AFont: TFont);
 begin
   FFont := AFont;
   FBlocks := TACLTextLayoutBlockList.Create;
-  FLayout := TACLTextLayoutBlockList.Create;
+  FLayout := TACLTextLayoutRows.Create;
 end;
 
 destructor TACLTextLayout.Destroy;
@@ -992,21 +957,27 @@ end;
 function TACLTextLayout.FindBlock(APositionInText: Integer; out ABlock: TACLTextLayoutBlock): Boolean;
 var
   AItem: TACLTextLayoutBlock;
-  I: Integer;
+  ASearchPosition: NativeUInt;
 begin
-  for I := 0 to FBlocks.Count - 1 do
+  if not InRange(APositionInText, 1, Length(FText)) then
+    Exit(False);
+
+  ASearchPosition := NativeUInt(PWideChar(FText) + APositionInText);
+  for var I := 0 to FBlocks.Count - 1 do
   begin
     AItem := FBlocks.List[I];
-    if (AItem.FPositionInText >= APositionInText) and (APositionInText < AItem.FPositionInText + AItem.FLength) then
-    begin
-      ABlock := AItem;
-      Exit(True);
-    end;
+    if (NativeUInt(AItem.FPositionInText) >= ASearchPosition) and
+       (NativeUInt(AItem.FPositionInText) <  ASearchPosition + AItem.FLength)
+    then
+      begin
+        ABlock := AItem;
+        Exit(True);
+      end;
   end;
   Result := False;
 end;
 
-function TACLTextLayout.FindHyperlink(const P: TPoint; out AHyperlink: TACLTextLayoutBlockStyleHyperlink): Boolean;
+function TACLTextLayout.FindHyperlink(const P: TPoint; out AHyperlink: TACLTextLayoutBlockHyperlink): Boolean;
 var
   AHitTest: TACLTextLayoutHitTest;
 begin
@@ -1038,7 +1009,7 @@ end;
 function TACLTextLayout.MeasureSize: TSize;
 begin
   Calculate;
-  Result := acSize(FBlocks.BoundingRect);
+  Result := acSize(FLayout.BoundingRect);
 end;
 
 procedure TACLTextLayout.Refresh;
@@ -1059,7 +1030,7 @@ procedure TACLTextLayout.SetText(const AText: string; const AFormatSettings: TAC
 var
   AImporter: TACLTextImporter;
 begin
-  AImporter := CreateImporter(AFormatSettings);
+  AImporter := TACLTextImporter.Create(AFormatSettings);
   try
     FLayout.Clear;
     FBlocks.Clear;
@@ -1113,16 +1084,11 @@ var
 begin
   B := TACLStringBuilderManager.Get(Length(Text));
   try
-    FBlocks.Export(TACLTextExporter.Create(Self, B), True);
+    FBlocks.Export(TACLTextPlainTextExporter.Create(Self, B), True);
     Result := B.ToString;
   finally
     TACLStringBuilderManager.Release(B);
   end;
-end;
-
-function TACLTextLayout.CreateImporter(const AFormatSettings: TACLTextFormatSettings): TACLTextImporter;
-begin
-  Result := TACLTextImporter.Create(AFormatSettings);
 end;
 
 function TACLTextLayout.CreateLayoutCalculator(AWidth, AHeight: Integer): TACLTextLayoutExporter;
@@ -1147,41 +1113,41 @@ begin
   end;
 end;
 
-procedure TACLTextLayout.ApplyAlignment(const AOrigin: TPoint; AMaxWidth, AMaxHeight: Integer;
-  AHorzAlignment: TAlignment; AVertAlignment: TVerticalAlignment);
+procedure TACLTextLayout.CalculateCore(AMaxWidth, AMaxHeight: Integer);
+begin
+  if FBlocks.Count > 0 then
+    FBlocks.Export(CreateLayoutCalculator(AMaxWidth, AMaxHeight), True);
+  ApplyAlignment(Bounds.TopLeft, AMaxWidth, AMaxHeight);
+end;
+
+procedure TACLTextLayout.ApplyAlignment(const AOrigin: TPoint; AMaxWidth, AMaxHeight: Integer);
 var
   AOffsetX: Integer;
   AOffsetY: Integer;
-  ARow: TACLTextLayoutBlock;
-  I: Integer;
+  ARow: TACLTextLayoutRow;
 begin
   AOffsetY := AOrigin.Y;
-  case AVertAlignment of
+  case VertAlignment of
     taAlignBottom:
       Inc(AOffsetY, Max(0, (AMaxHeight - FLayout.BoundingRect.Bottom)));
     taVerticalCenter:
       Inc(AOffsetY, Max(0, (AMaxHeight - FLayout.BoundingRect.Bottom) div 2));
   end;
 
-  for I := 0 to FLayout.Count - 1 do
+  for var I := 0 to FLayout.Count - 1 do
   begin
     ARow := FLayout.List[I];
     AOffsetX := AOrigin.X;
-    case AHorzAlignment of
+    case HorzAlignment of
       taRightJustify:
-        Inc(AOffsetX, Max(0, (AMaxWidth - ARow.FBounds.Right)));
+        Inc(AOffsetX, Max(0, (AMaxWidth - ARow.Bounds.Right)));
       taCenter:
-        Inc(AOffsetX, Max(0, (AMaxWidth - ARow.FBounds.Right) div 2));
+        Inc(AOffsetX, Max(0, (AMaxWidth - ARow.Bounds.Right) div 2));
+      taLeftJustify:
+        Dec(AOffsetX, ARow.Bounds.Left);
     end;
     ARow.Offset(AOffsetX, AOffsetY);
   end;
-end;
-
-procedure TACLTextLayout.CalculateCore(AMaxWidth, AMaxHeight: Integer);
-begin
-  if FBlocks.Count > 0 then
-    FBlocks.Export(CreateLayoutCalculator(AMaxWidth, AMaxHeight), True);
-  ApplyAlignment(Bounds.TopLeft, AMaxWidth, AMaxHeight, HorzAlignment, VertAlignment);
 end;
 
 function TACLTextLayout.GetDefaultHyperLinkColor: TColor;
@@ -1200,325 +1166,300 @@ end;
 
 { TACLTextLayoutBlock }
 
-class function TACLTextLayoutBlock.IsMeta: Boolean;
+function TACLTextLayoutBlock.Bounds: TRect; 
 begin
-  Result := False;
+  Result := TRect.Create(FPosition);
 end;
 
-procedure TACLTextLayoutBlock.Export(AExporter: TACLTextLayoutExporter);
-begin
-  // do nothing
-end;
-
-procedure TACLTextLayoutBlock.Offset(dX, dY: Integer);
-begin
-  FBounds := acRectOffset(FBounds, dX, dY);
-end;
-
-procedure TACLTextLayoutBlock.ReduceWidth(AMaxRight: Integer);
-begin
-  if FBounds.Right > AMaxRight then
-    FBounds.Right := Max(FBounds.Left, AMaxRight);
-end;
-
-{ TACLTextLayoutBlockList }
-
-procedure TACLTextLayoutBlockList.Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean);
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    List[I].Export(AExporter);
-  if AFreeExporter then
-    FreeAndNil(AExporter);
-end;
-
-procedure TACLTextLayoutBlockList.Offset(dX, dY: Integer);
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    List[I].Offset(dX, dY);
-end;
-
-function TACLTextLayoutBlockList.GetBoundingRect: TRect;
-var
-  I: Integer;
-begin
-  if Count = 0 then
-    Exit(NullRect);
-
-  Result := First.FBounds;
-  for I := 1 to Count - 1 do
-    acRectUnion(Result, List[I].FBounds);
-end;
-
-{ TACLTextLayoutBlockLineBreak }
-
-procedure TACLTextLayoutBlockLineBreak.Export(AExporter: TACLTextLayoutExporter);
-begin
-  AExporter.AddLineBreak;
-end;
-
-{ TACLTextLayoutBlockSpace }
-
-procedure TACLTextLayoutBlockSpace.Export(AExporter: TACLTextLayoutExporter);
-begin
-  AExporter.AddSpace(Self);
-end;
-
-{ TACLTextLayoutBlockText }
-
-destructor TACLTextLayoutBlockText.Destroy;
-begin
-  Flush;
-  inherited;
-end;
-
-procedure TACLTextLayoutBlockText.Export(AExporter: TACLTextLayoutExporter);
-begin
-  AExporter.AddText(Self);
-end;
-
-procedure TACLTextLayoutBlockText.Flush;
-begin
-  FVisibleLength := 0;
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-  FreeAndNil(FTextViewInfo);
-{$ELSE}
-  FCharacterCount := 0;
-  FTextSize := NullSize;
-  FreeMemAndNil(Pointer(FCharacterWidths));
-{$ENDIF}
-end;
-
-procedure TACLTextLayoutBlockText.ReduceWidth(AMaxRight: Integer);
-var
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-  AReducedCharacters: Integer;
-  AReducedWidth: Integer;
-{$ELSE}
-  ACount: Integer;
-  AScan: PInteger;
-{$ENDIF}
-begin
-  if Bounds.Right > AMaxRight then
-  begin
-  {$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-    FTextViewInfo.AdjustToWidth(AMaxRight - Bounds.Left, AReducedCharacters, AReducedWidth);
-    Dec(FVisibleLength, AReducedCharacters);
-    Dec(FBounds.Right, AReducedWidth);
-  {$ELSE}
-    ACount := FCharacterCount;
-    AScan := FCharacterWidths;
-    Inc(AScan, ACount - 1);
-    while (ACount > 0) and (Bounds.Right > AMaxRight) do
-    begin
-      Dec(FBounds.Right, AScan^);
-      Dec(FVisibleLength);
-      Dec(ACount);
-      Dec(AScan);
-    end;
-  {$ENDIF}
-  end;
-end;
-
-function TACLTextLayoutBlockText.ToString: string;
-begin
-  SetString(Result, FText, FLength);
-end;
-
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-function TACLTextLayoutBlockText.GetTextSize: TSize;
-begin
-  Result := FTextViewInfo.Size;
-end;
-{$ENDIF}
-
-{ TACLTextLayoutBlockStyle }
-
-constructor TACLTextLayoutBlockStyle.Create(AIsSetMode: Boolean);
-begin
-  FIsSetMode := AIsSetMode;
-end;
-
-class function TACLTextLayoutBlockStyle.IsMeta: Boolean;
+function TACLTextLayoutBlock.Export(AExporter: TACLTextLayoutExporter): Boolean;
 begin
   Result := True;
 end;
 
-procedure TACLTextLayoutBlockStyle.Export(AExporter: TACLTextLayoutExporter);
+procedure TACLTextLayoutBlock.Shrink(AMaxRight: Integer);
 begin
-  AExporter.AddStyle(Self);
+  FPosition.X := Min(FPosition.X, AMaxRight);
 end;
 
-procedure TACLTextLayoutBlockStyle.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
+{ TACLTextLayoutBlockList }
+
+procedure TACLTextLayoutBlockList.AddInit(ABlock: TACLTextLayoutBlock;
+  var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer);
 begin
-  // do nothing
+  Add(ABlock);
+  ABlock.FPositionInText := AScan;
+  ABlock.FLength := ABlockLength;
+  Dec(ALength, ABlockLength);
+  Inc(AScan, ABlockLength);
 end;
 
-procedure TACLTextLayoutBlockStyle.SetParameters(const AParameters: string);
+function TACLTextLayoutBlockList.BoundingRect: TRect;
 begin
-  // do nothing
+  if Count = 0 then
+    Exit(NullRect);
+
+  Result := First.Bounds;
+  for var I := 1 to Count - 1 do
+    acRectUnion(Result, List[I].Bounds);
 end;
 
-{ TACLTextLayoutBlockStyleStack }
-
-constructor TACLTextLayoutBlockStyleStack.Create;
+function TACLTextLayoutBlockList.Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean): Boolean;
 begin
-  FList := TList.Create;
+  Result := True;
+  try
+    for var I := 0 to Count - 1 do
+    begin
+      if not List[I].Export(AExporter) then
+        Exit(False);
+    end;
+  finally
+    if AFreeExporter then
+      FreeAndNil(AExporter);
+  end;
 end;
 
-destructor TACLTextLayoutBlockStyleStack.Destroy;
+procedure TACLTextLayoutBlockList.Offset(ADeltaX, ADeltaY: Integer);
 begin
-  FreeAndNil(FList);
+  for var I := 0 to Count - 1 do
+    List[I].FPosition.Offset(ADeltaX, ADeltaY);
+end;
+
+{ TACLTextLayoutBlockLineBreak }
+
+function TACLTextLayoutBlockLineBreak.Export(AExporter: TACLTextLayoutExporter): Boolean;
+begin
+  Result := AExporter.OnLineBreak;
+end;
+
+{ TACLTextLayoutBlockSpace }
+
+function TACLTextLayoutBlockSpace.Bounds: TRect;
+begin
+  Result := acRect(FPosition, FSize);
+end;
+
+function TACLTextLayoutBlockSpace.Export(AExporter: TACLTextLayoutExporter): Boolean;
+begin
+  Result := AExporter.OnSpace(Self);
+end;
+
+procedure TACLTextLayoutBlockSpace.Shrink(AMaxRight: Integer);
+begin
+  FSize.cx := MaxMin(AMaxRight - FPosition.X, 0, FSize.cx);
   inherited;
 end;
 
-procedure TACLTextLayoutBlockStyleStack.Put(AStyle: TACLTextLayoutBlockStyle);
-var
-  AClass: TClass;
-  I: Integer;
+{ TACLTextLayoutBlockText }
+
+constructor TACLTextLayoutBlockText.Create(AText: PWideChar; ATextLength: Word);
 begin
-  if AStyle.IsSetMode then
+  inherited Create;
+  FPositionInText := AText;
+  FLength := ATextLength;
+end;
+
+destructor TACLTextLayoutBlockText.Destroy;
+begin
+  FreeMemAndNil(Pointer(FCharacterWidths));
+  inherited;
+end;
+
+function TACLTextLayoutBlockText.Bounds: TRect;
+begin
+  Result := acRect(FPosition, TextSize);
+end;
+
+function TACLTextLayoutBlockText.Export(AExporter: TACLTextLayoutExporter): Boolean;
+begin
+  Result := AExporter.OnText(Self);
+end;
+
+procedure TACLTextLayoutBlockText.Flush;
+begin
+  FCharacterCount := 0;
+  FTextSize := NullSize;
+end;
+
+procedure TACLTextLayoutBlockText.Shrink(AMaxRight: Integer);
+var
+  AMaxWidth: Integer;
+  AScan: PInteger;
+begin
+  AMaxWidth := AMaxRight - FPosition.X;
+  if AMaxWidth <= 0 then
   begin
-    FModified := True;
-    FList.Add(AStyle);
-    Exit;
-  end;
-
-  AClass := AStyle.ClassType;
-  for I := FList.Count - 1 downto 0 do
-    if TObject(FList.List[I]).ClassType = AClass then
+    FCharacterCount := 0;
+    FTextSize.cx := 0;
+  end
+  else
+    if TextSize.cx > AMaxWidth then
     begin
-      FList.Delete(I);
-      FModified := True;
-      Break;
+      AScan := FCharacterWidths;
+      Inc(AScan, FCharacterCount - 1);
+      while (FCharacterCount > 0) and (TextSize.cx > AMaxWidth) do
+      begin
+        Dec(FTextSize.cx, AScan^);
+        Dec(FCharacterCount);
+        Dec(AScan);
+      end;
     end;
+
+  inherited;
 end;
 
-procedure TACLTextLayoutBlockStyleStack.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-var
-  I: Integer;
+function TACLTextLayoutBlockText.ToString: string;
 begin
-  for I := 0 to FList.Count - 1 do
-    TACLTextLayoutBlockStyle(FList.List[I]).AdjustCanvasParameters(ACanvas, ALayout);
+  SetString(Result, Text, TextLength);
 end;
 
-procedure TACLTextLayoutBlockStyleStack.Assign(ASource: TACLTextLayoutBlockStyleStack);
+{ TACLTextLayoutBlockStyle }
+
+constructor TACLTextLayoutBlockStyle.Create(AInclude: Boolean);
 begin
-  FList.Assign(ASource.FList);
-  FModified := True;
+  FInclude := AInclude;
 end;
 
-procedure TACLTextLayoutBlockStyleStack.Clear;
+{ TACLTextLayoutBlockFontColor }
+
+constructor TACLTextLayoutBlockFontColor.Create(const AColor: string; AInclude: Boolean);
 begin
-  FList.Clear;
-  FModified := True;
+  inherited Create(AInclude);
+  if not IdentToColor('cl' + AColor, Integer(FColor)) then
+    FColor := StringToColor(AColor);
 end;
 
-function TACLTextLayoutBlockStyleStack.GetCount: Integer;
+function TACLTextLayoutBlockFontColor.Export(AExporter: TACLTextLayoutExporter): Boolean;
 begin
-  Result := FList.Count;
+  Result := AExporter.OnFontColor(Self);
 end;
 
-function TACLTextLayoutBlockStyleStack.GetItem(Index: Integer): TACLTextLayoutBlock;
+{ TACLTextLayoutBlockFontStyle }
+
+constructor TACLTextLayoutBlockFontStyle.Create(AStyle: TFontStyle; AInclude: Boolean);
 begin
-  Result := TACLTextLayoutBlock(FList.List[Index]);
+  inherited Create(AInclude);
+  FStyle := AStyle;
 end;
 
-{ TACLTextLayoutBlockStyleBold }
-
-procedure TACLTextLayoutBlockStyleBold.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
+function TACLTextLayoutBlockFontStyle.Export(AExporter: TACLTextLayoutExporter): Boolean;
 begin
-  ACanvas.Font.Style := ACanvas.Font.Style + [fsBold];
+  Result := AExporter.OnFontStyle(Self);
 end;
 
-{ TACLTextLayoutBlockStyleColor }
+{ TACLTextLayoutBlockFillColor }
 
-procedure TACLTextLayoutBlockStyleColor.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
+function TACLTextLayoutBlockFillColor.Export(AExporter: TACLTextLayoutExporter): Boolean;
 begin
-  ACanvas.Font.Color := FColor;
+  Result := AExporter.OnFillColor(Self);
 end;
 
-procedure TACLTextLayoutBlockStyleColor.SetParameters(const AParameters: string);
+{ TACLTextLayoutBlockHyperlink }
+
+constructor TACLTextLayoutBlockHyperlink.Create(const AHyperlink: string; AInclude: Boolean);
 begin
-  if not IdentToColor('cl' + AParameters, Integer(FColor)) then
-    FColor := StringToColor(AParameters);
+  inherited Create(fsUnderline, AInclude);
+  FHyperlink := AHyperlink;
 end;
 
-{ TACLTextLayoutBlockStyleFill }
-
-procedure TACLTextLayoutBlockStyleFill.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
+function TACLTextLayoutBlockHyperlink.Export(AExporter: TACLTextLayoutExporter): Boolean;
 begin
-  ACanvas.Brush.Color := FColor;
-end;
-
-{ TACLTextLayoutBlockStyleHyperlink }
-
-procedure TACLTextLayoutBlockStyleHyperlink.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-begin
-  ACanvas.Font.Style := ACanvas.Font.Style + [fsUnderline];
-  ACanvas.Font.Color := ALayout.GetDefaultHyperLinkColor;
-end;
-
-procedure TACLTextLayoutBlockStyleHyperlink.SetParameters(const AParameters: string);
-begin
-  FHyperlink := AParameters;
-end;
-
-{ TACLTextLayoutBlockStyleItalic }
-
-procedure TACLTextLayoutBlockStyleItalic.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-begin
-  ACanvas.Font.Style := ACanvas.Font.Style + [fsItalic];
-end;
-
-{ TACLTextLayoutBlockStyleStrikeOut }
-
-procedure TACLTextLayoutBlockStyleStrikeOut.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-begin
-  ACanvas.Font.Style := ACanvas.Font.Style + [fsStrikeOut];
-end;
-
-{ TACLTextLayoutBlockStyleUnderline }
-
-procedure TACLTextLayoutBlockStyleUnderline.AdjustCanvasParameters(ACanvas: TCanvas; ALayout: TACLTextLayout);
-begin
-  ACanvas.Font.Style := ACanvas.Font.Style + [fsUnderline];
+  Result := AExporter.OnHyperlink(Self);
 end;
 
 { TACLTextLayoutRow }
 
 constructor TACLTextLayoutRow.Create;
 begin
-  FBlocks := TACLTextLayoutBlockList.Create(False);
+  inherited Create(False);
 end;
 
 destructor TACLTextLayoutRow.Destroy;
 begin
-  EndEllipsis := nil;
-  FreeAndNil(FBlocks);
+  FreeAndNil(FEndEllipsis);
   inherited;
 end;
 
-procedure TACLTextLayoutRow.Export(AExporter: TACLTextLayoutExporter);
+procedure TACLTextLayoutRow.Offset(ADeltaX, ADeltaY: Integer);
 begin
-  FBlocks.Export(AExporter, False);
-end;
-
-procedure TACLTextLayoutRow.Offset(dX, dY: Integer);
-begin
+  FBounds.Offset(ADeltaX, ADeltaY);
   inherited;
-  FBlocks.Offset(dX, dY);
 end;
 
-procedure TACLTextLayoutRow.SetEndEllipsis(AValue: TACLTextLayoutBlock);
+procedure TACLTextLayoutRow.SetBaseline(AValue: Integer);
 begin
-  if FEndEllipsis <> AValue then
+  if AValue <> FBaseline then
   begin
-    FreeAndNil(FEndEllipsis);
-    FEndEllipsis := AValue;
+    for var I := 0 to Count - 1 do
+      List[I].Bounds.Offset(0, AValue - FBaseline);
+    FBaseline := AValue;
+  end;
+end;
+
+procedure TACLTextLayoutRow.SetEndEllipsis(ARightSide: Integer; AEndEllipsis: TACLTextLayoutBlockText);
+var
+  ABlock: TACLTextLayoutBlock;
+begin
+{$IFDEF DEBUG}
+  if AEndEllipsis = nil then
+    raise EInvalidOperation.Create('Row: the EndEllipsis block must be specified');
+  if EndEllipsis <> nil then
+    raise EInvalidOperation.Create('Row: the EndEllipsis block is already specified');
+{$ENDIF}
+
+  FEndEllipsis := AEndEllipsis;
+  Dec(ARightSide, EndEllipsis.TextSize.Width);
+  FEndEllipsis.FPosition.X := Bounds.Right;
+
+  // Ищем последний видимый блок, после которого можно воткнуть '...'
+  for var I := Count - 1 downto 0 do
+  begin
+    ABlock := List[I];
+    ABlock.Shrink(ARightSide);
+    if ABlock.FPosition.X < ARightSide then
+    begin
+      EndEllipsis.FPosition.X := ABlock.Bounds.Right + 1;
+      Break;
+    end;
+  end;
+
+  // Позицию по Y берем от последнего блока,
+  // т.к. '...' был посчитан с его параметрами шрифта
+  if Count > 0 then
+    EndEllipsis.FPosition.Y := Last.FPosition.Y
+  else
+    EndEllipsis.FPosition.Y := Bounds.Top;
+
+  // Вставка так же идет в конец строки,
+  // дабы при отрисовке все необходимые style-блоки уже отработали.
+  Add(EndEllipsis);
+
+  // Корректируем ширину строки
+  FBounds.Right := EndEllipsis.Bounds.Right;
+end;
+
+{ TACLTextLayoutRows }
+
+function TACLTextLayoutRows.BoundingRect: TRect;
+begin
+  if Count = 0 then
+    Exit(NullRect);
+  Result := List[0].Bounds;
+  for var I := 1 to Count - 1 do
+    Result.Union(List[I].Bounds);
+end;
+
+function TACLTextLayoutRows.Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean): Boolean;
+begin
+  Result := True;
+  try
+    for var I := 0 to Count - 1 do
+    begin
+      if not List[I].Export(AExporter, False) then
+        Exit(False);
+    end;
+  finally
+    if AFreeExporter then
+      AExporter.Free;
   end;
 end;
 
@@ -1529,276 +1470,279 @@ begin
   FOwner := AOwner;
 end;
 
-procedure TACLTextLayoutExporter.AddLineBreak;
+function TACLTextLayoutExporter.OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean;
 begin
-  // do nothing
+  Result := True;
 end;
 
-procedure TACLTextLayoutExporter.AddSpace(ABlock: TACLTextLayoutBlockSpace);
+function TACLTextLayoutExporter.OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean;
 begin
-  // do nothing
+  Result := True;
 end;
 
-procedure TACLTextLayoutExporter.AddStyle(ABlock: TACLTextLayoutBlockStyle);
+function TACLTextLayoutExporter.OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean;
 begin
-  // do nothing
+  Result := True;
 end;
 
-procedure TACLTextLayoutExporter.AddText(ABlock: TACLTextLayoutBlockText);
+function TACLTextLayoutExporter.OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean;
 begin
-  // do nothing
+  Result := True;
+end;
+
+function TACLTextLayoutExporter.OnLineBreak: Boolean;
+begin
+  Result := True;
+end;
+
+function TACLTextLayoutExporter.OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean;
+begin
+  Result := True;
+end;
+
+function TACLTextLayoutExporter.OnText(ABlock: TACLTextLayoutBlockText): Boolean;
+begin
+  Result := True;
+end;
+
+{ TACLTextLayoutValueStack<T> }
+
+constructor TACLTextLayoutValueStack<T>.Create;
+begin
+  FCount := 0;
+  SetLength(FData, 16);
+end;
+
+function TACLTextLayoutValueStack<T>.Peek: T;
+begin
+  if Count = 0 then
+    raise Exception.Create('Stack is empty');
+  Result := FData[FCount - 1].Key;
+end;
+
+procedure TACLTextLayoutValueStack<T>.Pop(AInvoker: TClass);
+begin
+  for var I := FCount - 1 downto 0 do
+    if FData[I].Value = AInvoker then
+    begin
+      for var J := I to FCount - 2 do
+        FData[J] := FData[J + 1];
+      Dec(FCount);
+      Break;
+    end;
+end;
+
+procedure TACLTextLayoutValueStack<T>.Push(const AValue: T; AInvoker: TClass);
+begin
+  if FCount = Length(FData) then
+    SetLength(FData, 2 * Length(FData));
+  FData[FCount] := TPair<T, TClass>.Create(AValue, AInvoker);
+  Inc(FCount);
 end;
 
 { TACLTextLayoutVisualExporter }
 
-constructor TACLTextLayoutVisualExporter.Create(AOwner: TACLTextLayout);
+constructor TACLTextLayoutVisualExporter.Create(ACanvas: TCanvas; AOwner: TACLTextLayout);
 begin
-  inherited;
-  FDefaultTextColor := Owner.GetDefaultTextColor;
-  FStyleStack := TACLTextLayoutBlockStyleStack.Create;
-  FStyleStack.Modified := True;
-end;
-
-destructor TACLTextLayoutVisualExporter.Destroy;
-begin
-  FreeAndNil(FStyleStack);
-  inherited;
-end;
-
-procedure TACLTextLayoutVisualExporter.AddStyle(ABlock: TACLTextLayoutBlockStyle);
-begin
-  FStyleStack.Put(ABlock);
-end;
-
-procedure TACLTextLayoutVisualExporter.AssignCanvasParameters;
-begin
+  inherited Create(AOwner);
+  FCanvas := ACanvas;
   FCanvas.Font.Assign(Owner.Font);
-  FCanvas.Font.Color := FDefaultTextColor;
-  FCanvas.Brush.Style := bsClear;
-  FStyleStack.AdjustCanvasParameters(FCanvas, Owner);
-  FHasBackground := FCanvas.Brush.Style <> bsClear;
+  FFont := FCanvas.Font;
 end;
 
-function TACLTextLayoutVisualExporter.GetCanvas: TCanvas;
+function TACLTextLayoutVisualExporter.OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean;
 begin
-  if FStyleStack.Modified then
-  begin
-    FStyleStack.Modified := False;
-    AssignCanvasParameters;
-  end;
-  Result := FCanvas;
+  FFontStyles[ABlock.Style] := Max(FFontStyles[ABlock.Style] + Signs[ABlock.Include], 0);
+
+  if FFontStyles[ABlock.Style] > 0 then
+    Font.Style := Font.Style + [ABlock.Style]
+  else
+    Font.Style := Font.Style - [ABlock.Style];
+
+  Result := True;
 end;
 
 { TACLTextLayoutCalculator }
 
 constructor TACLTextLayoutCalculator.Create(AOwner: TACLTextLayout; AWidth, AHeight: Integer);
 begin
-  inherited Create(AOwner);
+  inherited Create(MeasureCanvas, AOwner);
+  FRows := Owner.FLayout;
 {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-  FCurrentRowRtlRanges := TACLList<TACLRange>.Create;
-  FCurrentRowRtlRanges.Capacity := 8;
+  FRowRtlRanges := TACLList<TACLRange>.Create;
+  FRowRtlRanges.Capacity := 8;
 {$ENDIF}
-  FCurrentRowStartStyle := TACLTextLayoutBlockStyleStack.Create;
-  FLayout := Owner.FLayout;
-  FAutoHeight := tloAutoHeight in Owner.Options;
-  FAutoWidth := tloAutoWidth in Owner.Options;
   FEditControl := tloEditControl in Owner.Options;
   FEndEllipsis := tloEndEllipsis in Owner.Options;
+  FMaxHeight := IfThen(tloAutoHeight in Owner.Options, MaxInt, AHeight);
+  FMaxWidth := IfThen(tloAutoWidth in Owner.Options, MaxInt, AWidth);
   FWordWrap := tloWordWrap in Owner.Options;
-  FMaxHeight := AHeight;
-  FMaxWidth := AWidth;
+
+  if tloAutoWidth in Owner.Options then
+    FRowAlign := taLeftJustify
+  else
+    FRowAlign := Owner.HorzAlignment;
+
+  FRow := TACLTextLayoutRow.Create;
+  UpdateMetrics;
 end;
 
-procedure TACLTextLayoutCalculator.AfterConstruction;
+destructor TACLTextLayoutCalculator.Destroy;
 begin
-  Canvas := MeasureCanvas;
+  FreeAndNil(FPrevRowEndEllipsis);
+{$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
+  FreeAndNil(FRowRtlRanges);
+{$ENDIF}
   inherited;
-  AddLineBreak;
 end;
 
 procedure TACLTextLayoutCalculator.BeforeDestruction;
 begin
   inherited;
-  CompleteCurrentRow;
-  FreeAndNil(FCurrentRowStartStyle);
-{$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-  FreeAndNil(FCurrentRowRtlRanges);
-{$ENDIF}
+  CompleteRow;
 end;
 
-procedure TACLTextLayoutCalculator.AddLineBreak;
+function TACLTextLayoutCalculator.OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean;
 begin
-  CompleteCurrentRow;
-  if (FOrigin.Y <= FMaxHeight) or FAutoHeight then
-    FCurrentRow := TACLTextLayoutRow.Create
-  else
-    FCurrentRow := nil;
+  Result := AddStyle(ABlock);
 end;
 
-procedure TACLTextLayoutCalculator.AddSpace(ABlock: TACLTextLayoutBlockSpace);
-var
-  ABlockWidth: Integer;
+function TACLTextLayoutCalculator.OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean;
 begin
-  if FCurrentRow = nil then
-    Exit;
-
-  ABlockWidth := SpaceSize.cx;
-  if FWordWrap and not FAutoWidth and (FOrigin.X + ABlockWidth > FMaxWidth) then
-    ABlockWidth := 0;
-  ABlock.FBounds := Bounds(FOrigin.X, FOrigin.Y, ABlockWidth, LineHeight);
-  FOrigin.X := ABlock.FBounds.Right;
-  FCurrentRow.Blocks.Add(ABlock);
+  Result := AddStyle(ABlock);
 end;
 
-procedure TACLTextLayoutCalculator.AddStyle(ABlock: TACLTextLayoutBlockStyle);
+function TACLTextLayoutCalculator.OnFontStyle(ABlock: TACLTextLayoutBlockFontStyle): Boolean;
 begin
   inherited;
-
-  if FCurrentRow <> nil then
-  begin
-    ABlock.FBounds := Bounds(FOrigin.X, FOrigin.Y, 0, 0);
-    FCurrentRow.Blocks.Add(ABlock);
-  end;
-
-  FSpaceSize := NullSize;
+  UpdateMetrics;
+  Result := AddStyle(ABlock);
 end;
 
-procedure TACLTextLayoutCalculator.AddText(ABlock: TACLTextLayoutBlockText);
+function TACLTextLayoutCalculator.OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean;
+begin
+  Result := AddStyle(ABlock);
+end;
+
+function TACLTextLayoutCalculator.OnLineBreak: Boolean;
+begin
+  Result := FRow <> nil;
+  if Result then  
+  begin
+    CompleteRow;
+    FRow := TACLTextLayoutRow.Create;
+    FRow.Bounds := Bounds(FOrigin.X, FOrigin.Y, 0, 0);
+    FRowTruncated := False;
+  end;
+end;
+
+function TACLTextLayoutCalculator.OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean;
+begin
+  if FRow = nil then
+    Exit(False);
+  if FRowTruncated then
+    Exit(True);  
+
+  ABlock.FPosition := ActualOrigin;
+  if not FWordWrap or (FOrigin.X + SpaceWidth <= FMaxWidth) then
+  begin
+    ABlock.FSize := acSize(SpaceWidth, LineHeight);
+    FOrigin.X := ABlock.FPosition.X + SpaceWidth;
+    FRow.Add(ABlock);
+  end;
+  Result := True;
+end;
+
+function TACLTextLayoutCalculator.OnText(ABlock: TACLTextLayoutBlockText): Boolean;
 {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
 var
   ARange: TACLRange;
+  AReadingDirection: TACLTextReadingDirection;
 {$ENDIF}
 begin
-  if FCurrentRow = nil then
-    Exit;
+  if FRow = nil then
+    Exit(False);
 
-  ABlock.FVisibleLength := ABlock.TextLength;
+  if FOrigin.Y >= FMaxHeight then
+  begin
+    TruncateAll;
+    Exit(False);
+  end;
+
   if not FWordWrap and (FOrigin.X >= FMaxWidth) then
   begin
-    Owner.FTruncated := True;
-    if not FAutoWidth then
-    begin
-      if FEndEllipsis then
-        SetEndEllipsis(FCurrentRow);
-      Exit;
-    end;
+    TruncateRow;
+    // В случае EndEllipsis = True, DrawText выравнивает обрезанный текст
+    if FEndEllipsis then 
+      Exit(True);
+    // если есть выравнивание - надо посчитать всю строку до конца,
+    // иначе выравнивание отработает некорректо
+    if FRowAlign = taLeftJustify then
+      Exit(True);
   end;
 
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-  if ABlock.TextViewInfo = nil then
-{$ELSE}
-  if ABlock.TextSize.cy = 0 then
-{$ENDIF}
+  // Блок был сжат - его метрики более невалидны
+  if (ABlock.TextSize.cy = 0) or (ABlock.FCharacterCount < ABlock.TextLength) then
     MeasureSize(ABlock);
 
-  if FOrigin.X > 0 then
+  if FWordWrap and (FOrigin.X + ABlock.TextSize.cx > FMaxWidth) and (FOrigin.X > 0) then
   begin
-    if FWordWrap and (FOrigin.X + ABlock.TextSize.cx > FMaxWidth) then
+    if not OnLineBreak then
     begin
-      AddLineBreak;
-      if FCurrentRow = nil then
-        Exit;
+      TruncateAll;
+      Exit(False);
     end;
   end;
 
+  if FRowTruncated then
+    Exit(True);
+
 {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-  if ABlock.ReadingDirection = trdLeftToRight then
-    FCurrentRowInRtlRange := False
+  AReadingDirection := acGetReadingDirection(ABlock.Text, ABlock.TextLength);
+  if AReadingDirection = trdLeftToRight then
+    FRowRtlRange := False
   else
-    if FCurrentRowInRtlRange then
+    if FRowRtlRange then
     begin
-      ARange := FCurrentRowRtlRanges.Last;
-      ARange.Finish := FCurrentRow.Blocks.Count;
-      FCurrentRowRtlRanges.Last := ARange;
+      ARange := FRowRtlRanges.Last;
+      ARange.Finish := FRow.Count;
+      FRowRtlRanges.Last := ARange;
     end
     else
-      if ABlock.ReadingDirection = trdRightToLeft then
+      if AReadingDirection = trdRightToLeft then
       begin
-        FCurrentRowRtlRanges.Add(TACLRange.Create(FCurrentRow.Blocks.Count, FCurrentRow.Blocks.Count));
-        FCurrentRowInRtlRange := True;
+        FRowRtlRanges.Add(TACLRange.Create(FRow.Count, FRow.Count));
+        FRowRtlRange := True;
       end;
 {$ENDIF}
 
-  ABlock.FBounds := Bounds(FOrigin.X, FOrigin.Y, ABlock.TextSize.cx, ABlock.TextSize.cy);
-  FOrigin.X := ABlock.FBounds.Right;
-  FCurrentRow.Blocks.Add(ABlock);
-end;
+  ABlock.FPosition := ActualOrigin;
+  FOrigin.X := ABlock.FPosition.X + ABlock.TextSize.Width;
+  FRow.Add(ABlock);
 
-procedure TACLTextLayoutCalculator.CompleteCurrentRow;
-{$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-var
-  I: Integer;
-{$ENDIF}
-begin
-  if FCurrentRow <> nil then
-  begin
-    if FCurrentRow.Blocks.Count > 0 then
-      FCurrentRow.FBounds := FCurrentRow.Blocks.BoundingRect
-    else
-      FCurrentRow.FBounds := Bounds(FOrigin.X, FOrigin.Y, 0, LineHeight);
-
-    FOrigin.Y := FCurrentRow.FBounds.Bottom;
-    FOrigin.X := 0;
-
-    if (FCurrentRow.FBounds.Bottom > FMaxHeight) and not FAutoHeight and FEditControl then
-    begin
-      Owner.FTruncated := True;
-      FStyleStack.Assign(FCurrentRowStartStyle); // Rollback style stack
-      FreeAndNil(FCurrentRow);
-      if FEndEllipsis and (FLayout.Count > 0) then
-        SetEndEllipsis(TACLTextLayoutRow(FLayout.Last));
-    end
-    else
-    begin
-      if not (FWordWrap or FAutoWidth) and (FCurrentRow.FBounds.Right > FMaxWidth) then
-      begin
-        Owner.FTruncated := True;
-        if FEndEllipsis then
-          SetEndEllipsis(FCurrentRow);
-      end;
-      FLayout.Add(FCurrentRow);
-    end;
-  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-    for I := 0 to FCurrentRowRtlRanges.Count - 1 do
-      Reorder(FCurrentRow.Blocks, FCurrentRowRtlRanges.List[I]);
-    FCurrentRowRtlRanges.Count := 0;
-    FCurrentRowInRtlRange := False;
-  {$ENDIF}
-    FCurrentRowStartStyle.Assign(FStyleStack);
-  end;
+  if FOrigin.X > FMaxWidth then
+    TruncateRow;
+  Result := True;
 end;
 
 procedure TACLTextLayoutCalculator.MeasureSize(ABlock: TACLTextLayoutBlockText);
-{$IFNDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
 var
   ADistance: Integer;
   AWidthScan: PInteger;
-  I: Integer;
-{$ENDIF}
 begin
-  ABlock.FVisibleLength := ABlock.TextLength;
-{$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-  FreeAndNil(ABlock.FTextViewInfo);
-  ABlock.FTextViewInfo := TACLTextViewInfo.Create(Canvas.Handle, Canvas.Font, ABlock.Text, ABlock.TextLength);
-{$ELSE}
   if ABlock.FCharacterWidths = nil then
     ABlock.FCharacterWidths := AllocMem(ABlock.TextLength * SizeOf(Integer));
-  GetTextExtentExPoint(Canvas.Handle, ABlock.Text, ABlock.TextLength, MaxInt, @ABlock.FCharacterCount, ABlock.FCharacterWidths, ABlock.FTextSize);
+  GetTextExtentExPoint(Canvas.Handle, ABlock.Text, ABlock.TextLength,
+    MaxInt, @ABlock.FCharacterCount, ABlock.FCharacterWidths, ABlock.FTextSize);
 
   ADistance := 0;
   AWidthScan := ABlock.FCharacterWidths;
-  for I := 0 to ABlock.FCharacterCount - 1 do
+  for var I := 0 to ABlock.FCharacterCount - 1 do
   begin
     AWidthScan^ := AWidthScan^ - ADistance;
     Inc(ADistance, AWidthScan^);
     Inc(AWidthScan);
   end;
-{$ENDIF}
-end;
-
-function TACLTextLayoutCalculator.MeasureSpaceSize: TSize;
-begin
-  GetTextExtentPoint32W(Canvas.Handle, Space, 1, Result);
 end;
 
 procedure TACLTextLayoutCalculator.Reorder(ABlocks: TACLTextLayoutBlockList; const ARange: TACLRange);
@@ -1812,240 +1756,304 @@ begin
     for I := ARange.Start + 1 to ARange.Finish do
       acRectUnion(R, ABlocks.List[I].Bounds);
     for I := ARange.Start to ARange.Finish do
-      ABlocks.List[I].FBounds := acRectMirror(ABlocks.List[I].Bounds, R);
+      ABlocks.List[I].FPosition := acRectMirror(ABlocks.List[I].Bounds, R).TopLeft;
   end;
 end;
 
-procedure TACLTextLayoutCalculator.SetEndEllipsis(ARow: TACLTextLayoutRow);
+function TACLTextLayoutCalculator.ActualOrigin: TPoint;
+begin
+  if FBaseline > FRow.Baseline then
+    FRow.Baseline := FBaseline;
+  Result := TPoint.Create(FOrigin.X, FOrigin.Y + FRow.Baseline - FBaseline);
+end;
 
-  procedure InsertEndEllipsisBlock(AEndEllipsisBlock: TACLTextLayoutBlockText; ABlockIndex: Integer; const ABlockBounds: TRect);
-  var
-    R: TRect;
-    I: Integer;
+function TACLTextLayoutCalculator.AddStyle(ABlock: TACLTextLayoutBlockStyle): Boolean;
+begin
+  Result := FRow <> nil;
+  if Result then
   begin
-    R := ABlockBounds;
-    R.Left := R.Right + 1;
-    AEndEllipsisBlock.FBounds := acRectSetSize(R, AEndEllipsisBlock.TextSize);
-    for I := ABlockIndex + 1 to ARow.Blocks.Count - 1 do
-      ARow.Blocks.List[I].Offset(AEndEllipsisBlock.TextSize.cx, 0);
-    ARow.Blocks.Insert(ABlockIndex + 1, AEndEllipsisBlock);
-    ARow.EndEllipsis := AEndEllipsisBlock;
-    ARow.FBounds := ARow.Blocks.BoundingRect;
+    ABlock.FPosition := ActualOrigin;
+    FRow.Add(ABlock);
+  end;
+end;
+
+function TACLTextLayoutCalculator.CreateEndEllipsisBlock: TACLTextLayoutBlockText;
+begin
+  Result := TACLTextLayoutBlockText.Create(PChar(acEndEllipsis), Length(acEndEllipsis));
+  MeasureSize(Result);
+end;
+
+procedure TACLTextLayoutCalculator.CompleteRow;
+begin
+  if FRow = nil then
+    Exit;
+  if FRow.Count > 0 then
+    FRow.Bounds := FRow.BoundingRect
+  else
+    FRow.Bounds.Height := LineHeight;
+
+  if (FRow.Bounds.Bottom > FMaxHeight) and FEditControl or (FRow.Bounds.Top > FMaxHeight) then
+  begin
+    TruncateAll;
+    Exit;
   end;
 
+  FOrigin.X := 0;
+  FOrigin.Y := FRow.Bounds.Bottom;
+  FRows.Add(FRow);
+
+{$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
+  for var I := 0 to FRowRtlRanges.Count - 1 do
+    Reorder(FRow, FRowRtlRanges.List[I]);
+  FRowRtlRanges.Count := 0;
+  FRowRtlRange := False;
+{$ENDIF}
+
+  if FEndEllipsis then
+  begin
+    // может так случиться, что следующая строка уже не влезет и нам понадобятся заветные три точки.
+    // поэтому считаем их сейчас (в кэш), пока у нас есть актуальный стиль и метрики.
+    if FPrevRowEndEllipsis = nil then
+      FPrevRowEndEllipsis := CreateEndEllipsisBlock;
+    MeasureSize(FPrevRowEndEllipsis);
+  end;
+end;
+
+procedure TACLTextLayoutCalculator.TruncateAll;
 var
-  ABlock: TACLTextLayoutBlock;
-  AEndEllipsisBlock: TACLTextLayoutBlockText;
-  AMaxRight: Integer;
-  ASavedStyleStack: TACLTextLayoutBlockStyleStack;
-  AStyleBlock: TACLTextLayoutBlock;
-  ABlockIndex, J: Integer;
+  ARow: TACLTextLayoutRow;
 begin
-  if ARow.EndEllipsis = nil then
+  Owner.FTruncated := True;
+  FreeAndNil(FRow);
+  if FEndEllipsis and (FPrevRowEndEllipsis <> nil) then
   begin
-    AEndEllipsisBlock := TACLTextLayoutBlockText.Create;
-    AEndEllipsisBlock.FText := PWideChar(acEndEllipsis);
-    AEndEllipsisBlock.FLength := Length(acEndEllipsis);
-
-    MeasureSize(AEndEllipsisBlock);
-    AMaxRight := FMaxWidth - AEndEllipsisBlock.TextSize.cx;
-
-    for ABlockIndex := ARow.Blocks.Count - 1 downto 0 do
+    ARow := FRows.Last;
+    if ARow.EndEllipsis = nil then
     begin
-      ABlock := ARow.Blocks.List[ABlockIndex];
-      if ABlock.Bounds.Left >= AMaxRight then
-      begin
-        if not ABlock.IsMeta then
-          ARow.Blocks.Delete(ABlockIndex);
-      end
-      else
-      begin
-        if ABlockIndex + 1 <> ARow.Blocks.Count then
-        begin
-          ASavedStyleStack := TACLTextLayoutBlockStyleStack.Create;
-          try
-            // Calculate an actual style after removing the blocks
-            acExchangePointers(ASavedStyleStack, FStyleStack);
-            FStyleStack.Assign(FCurrentRowStartStyle);
-            for J := 0 to ARow.Blocks.Count - 1 do
-            begin
-              AStyleBlock := ARow.Blocks.List[J];
-              if AStyleBlock = ABlock then
-                Break;
-              if AStyleBlock is TACLTextLayoutBlockStyle then
-                FStyleStack.Put(TACLTextLayoutBlockStyle(AStyleBlock));
-            end;
-            // Re-calculate EndEllipsisBlock size
-            MeasureSize(AEndEllipsisBlock);
-            AMaxRight := FMaxWidth - AEndEllipsisBlock.TextSize.cx;
-          finally
-            acExchangePointers(ASavedStyleStack, FStyleStack);
-            ASavedStyleStack.Free;
-          end;
-        end;
-        ABlock.ReduceWidth(AMaxRight);
-        InsertEndEllipsisBlock(AEndEllipsisBlock, ABlockIndex, ABlock.Bounds);
-        Exit;
-      end;
+      ARow.SetEndEllipsis(FMaxWidth, FPrevRowEndEllipsis);
+      FPrevRowEndEllipsis := nil;
     end;
-
-    // There are no blocks found
-    InsertEndEllipsisBlock(AEndEllipsisBlock, -1, ARow.Bounds);
   end;
 end;
 
-function TACLTextLayoutCalculator.GetLineHeight: Integer;
+procedure TACLTextLayoutCalculator.TruncateRow;
 begin
-  Result := SpaceSize.cy;
+  Owner.FTruncated := True;
+  if FEndEllipsis then
+  begin
+    if FRow.EndEllipsis = nil then
+      FRow.SetEndEllipsis(FMaxWidth, CreateEndEllipsisBlock);
+    FOrigin.X := FRow.EndEllipsis.FPosition.X;
+    FRowTruncated := True;
+  end;
 end;
 
-function TACLTextLayoutCalculator.GetSpaceSize: TSize;
+procedure TACLTextLayoutCalculator.UpdateMetrics;
+var
+  ATextMetric: TTextMetric;
 begin
-  if FSpaceSize.cx = 0 then
-    FSpaceSize := MeasureSpaceSize;
-  Result := FSpaceSize;
+  GetTextMetrics(Canvas.Handle, ATextMetric);
+  FBaseline := ATextMetric.tmHeight - ATextMetric.tmDescent;
+  FLineHeight := ATextMetric.tmHeight + ATextMetric.tmExternalLeading;
+  FSpaceWidth := Canvas.TextWidth(' ');
 end;
 
 { TACLTextLayoutHitTest }
 
-constructor TACLTextLayoutHitTest.Create(AOwner: TACLTextLayout);
-begin
-  inherited Create(AOwner);
-  FStyleStack := TACLTextLayoutBlockStyleStack.Create;
-end;
-
 destructor TACLTextLayoutHitTest.Destroy;
 begin
-  FreeAndNil(FStyleStack);
+  FreeAndNil(FHyperlinks);
   inherited;
 end;
 
 procedure TACLTextLayoutHitTest.Reset;
 begin
-  FRiched := False;
   FHitObject := nil;
-  FHyperlinkChecked := TACLBoolean.Default;
-  FHyperlink := nil;
-  FStyleStack.Clear;
+  FreeAndNil(FHyperlinks);
 end;
 
-procedure TACLTextLayoutHitTest.AddBlock(ABlock: TACLTextLayoutBlock);
+function TACLTextLayoutHitTest.OnBlock(ABlock: TACLTextLayoutBlock): Boolean;
 begin
-  if PtInRect(ABlock.FBounds, FHitPoint) then
+  if PtInRect(ABlock.Bounds, FHitPoint) then
   begin
     FHitObject := ABlock;
-    FRiched := True;
+    Exit(False);
   end;
+  Result := True;
 end;
 
-procedure TACLTextLayoutHitTest.AddLineBreak;
+function TACLTextLayoutHitTest.OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean;
 begin
-  // do nothing
-end;
-
-procedure TACLTextLayoutHitTest.AddSpace(ABlock: TACLTextLayoutBlockSpace);
-begin
-  AddBlock(ABlock);
-end;
-
-procedure TACLTextLayoutHitTest.AddStyle(ABlock: TACLTextLayoutBlockStyle);
-begin
-  if not FRiched then
-    FStyleStack.Put(ABlock);
-end;
-
-procedure TACLTextLayoutHitTest.AddText(ABlock: TACLTextLayoutBlockText);
-begin
-  AddBlock(ABlock);
-end;
-
-function TACLTextLayoutHitTest.GetHyperlink: TACLTextLayoutBlockStyleHyperlink;
-var
-  I: Integer;
-begin
-  if FHyperlinkChecked = TACLBoolean.Default then
+  if ABlock.Include then
   begin
-    FHyperlinkChecked := TACLBoolean.False;
-    for I := FStyleStack.Count - 1 downto 0 do
-      if FStyleStack.Items[I] is TACLTextLayoutBlockStyleHyperlink then
-      begin
-        FHyperlink := TACLTextLayoutBlockStyleHyperlink(FStyleStack.Items[I]);
-        FHyperlinkChecked := TACLBoolean.True;
-        Break;
-      end;
-  end;
-  Result := FHyperlink;
+    if FHyperlinks = nil then
+      FHyperlinks := TStack.Create;
+    FHyperlinks.Push(ABlock);
+  end
+  else
+    if (FHyperlinks <> nil) and (FHyperlinks.Count > 0) then
+      FHyperlinks.Pop;
+
+  Result := True;
+end;
+
+function TACLTextLayoutHitTest.OnLineBreak: Boolean;
+begin
+  Result := True;
+end;
+
+function TACLTextLayoutHitTest.OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean;
+begin
+  Result := OnBlock(ABlock);
+end;
+
+function TACLTextLayoutHitTest.OnText(ABlock: TACLTextLayoutBlockText): Boolean;
+begin
+  Result := OnBlock(ABlock);
+end;
+
+function TACLTextLayoutHitTest.GetHyperlink: TACLTextLayoutBlockHyperlink;
+begin
+  if (FHyperlinks <> nil) and (FHyperlinks.Count > 0) then
+    Result := FHyperlinks.Peek
+  else
+    Result := nil;
 end;
 
 { TACLTextLayoutRender }
 
 constructor TACLTextLayoutRender.Create(AOwner: TACLTextLayout; ACanvas: TCanvas);
 begin
-  inherited Create(AOwner);
-  Canvas := ACanvas;
+  inherited Create(ACanvas, AOwner);
+  FDefaultTextColor := Owner.GetDefaultTextColor;
+  FFontColors := TACLTextLayoutValueStack<TColor>.Create;
+  FFillColors := TACLTextLayoutValueStack<TColor>.Create;
+  UpdateFillColor;
+  UpdateFontColor;
 end;
 
-procedure TACLTextLayoutRender.AddSpace(ABlock: TACLTextLayoutBlockSpace);
+destructor TACLTextLayoutRender.Destroy;
 begin
+  FreeAndNil(FFillColors);
+  FreeAndNil(FFontColors);
+  inherited;
+end;
+
+function TACLTextLayoutRender.OnFillColor(ABlock: TACLTextLayoutBlockFillColor): Boolean;
+begin
+  if ABlock.Include then
+    FFillColors.Push(ABlock.Color, TACLTextLayoutBlockFillColor)
+  else
+    FFillColors.Pop(TACLTextLayoutBlockFillColor);
+
+  UpdateFillColor;
+  Result := True;
+end;
+
+function TACLTextLayoutRender.OnFontColor(ABlock: TACLTextLayoutBlockFontColor): Boolean;
+begin
+  if ABlock.Include then
+    FFontColors.Push(ABlock.Color, TACLTextLayoutBlockFontColor)
+  else
+    FFontColors.Pop(TACLTextLayoutBlockFontColor);
+
+  UpdateFontColor;
+  Result := True;
+end;
+
+function TACLTextLayoutRender.OnHyperlink(ABlock: TACLTextLayoutBlockHyperlink): Boolean;
+begin
+  OnFontStyle(ABlock);
+  if ABlock.Include then
+    FFontColors.Push(Owner.GetDefaultHyperLinkColor, TACLTextLayoutBlockHyperlink)
+  else
+    FFontColors.Pop(TACLTextLayoutBlockHyperlink);
+
+  UpdateFontColor;
+  Result := True;
+end;
+
+function TACLTextLayoutRender.OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean;
+var
+  ABounds: TRect;
+begin
+  ABounds := ABlock.Bounds;
   if HasBackground then
-    Canvas.FillRect(ABlock.Bounds);
-  if fsUnderline in Canvas.Font.Style then
-    ExtTextOut(Canvas.Handle, ABlock.Bounds.Left, ABlock.Bounds.Top, ETO_CLIPPED, @ABlock.FBounds, ' ', 1, nil);
+    Canvas.FillRect(ABounds);
+  if fsUnderline in Font.Style then
+    ExtTextOut(Canvas.Handle, ABounds.Left, ABounds.Top, ETO_CLIPPED, @ABounds, ' ', 1, nil);
+  Result := True;
 end;
 
-procedure TACLTextLayoutRender.AddText(AText: TACLTextLayoutBlockText);
+function TACLTextLayoutRender.OnText(AText: TACLTextLayoutBlockText): Boolean;
 begin
-  if AText.VisibleLength > 0 then
-  {$IFDEF ACL_TEXTLAYOUT_USE_FONTCACHE}
-    AText.FTextViewInfo.DrawCore(Canvas.Handle, AText.Bounds.Left, AText.Bounds.Top, AText.FVisibleLength);
-  {$ELSE}
-    ExtTextOut(Canvas.Handle, AText.Bounds.Left, AText.Bounds.Top, 0,
-      @AText.FBounds, AText.FText, AText.FVisibleLength, AText.FCharacterWidths);
-  {$ENDIF}
+  if AText.FCharacterCount > 0 then
+  begin
+    ExtTextOut(Canvas.Handle, AText.FPosition.X, AText.FPosition.Y, 
+      0, nil, AText.Text, AText.FCharacterCount, AText.FCharacterWidths);
+  end;
+  Result := True;
 end;
 
-{ TACLTextExporter }
+procedure TACLTextLayoutRender.UpdateFillColor;
+var
+  AFillColor: TColor;
+begin
+  if FFillColors.Count > 0 then
+    AFillColor := FFillColors.Peek
+  else
+    AFillColor := clNone;
 
-constructor TACLTextExporter.Create(ASource: TACLTextLayout; ATarget: TStringBuilder);
+  FHasBackground := (AFillColor <> clNone) and (AFillColor <> clDefault);
+  if FHasBackground then
+    Canvas.Brush.Color := AFillColor
+  else
+    Canvas.Brush.Style := bsClear;
+end;
+
+procedure TACLTextLayoutRender.UpdateFontColor;
+var
+  AFontColor: TColor;
+begin
+  AFontColor := clDefault;
+  if FFontColors.Count > 0 then
+    AFontColor := FFontColors.Peek;
+  if AFontColor = clDefault then
+    AFontColor := FDefaultTextColor;
+  Font.Color := AFontColor;
+end;
+
+{ TACLTextPlainTextExporter }
+
+constructor TACLTextPlainTextExporter.Create(ASource: TACLTextLayout; ATarget: TStringBuilder);
 begin
   inherited Create(ASource);
   FTarget := ATarget;
 end;
 
-procedure TACLTextExporter.AddLineBreak;
+function TACLTextPlainTextExporter.OnLineBreak: Boolean;
 begin
   FTarget.AppendLine;
+  Result := True;
 end;
 
-procedure TACLTextExporter.AddSpace(ABlock: TACLTextLayoutBlockSpace);
+function TACLTextPlainTextExporter.OnSpace(ABlock: TACLTextLayoutBlockSpace): Boolean;
 begin
   FTarget.Append(Space);
+  Result := True;
 end;
 
-procedure TACLTextExporter.AddText(ABlock: TACLTextLayoutBlockText);
+function TACLTextPlainTextExporter.OnText(ABlock: TACLTextLayoutBlockText): Boolean;
 begin
   FTarget.Append(ABlock.ToString);
+  Result := True;
 end;
 
 { TACLTextImporter }
 
 class constructor TACLTextImporter.Create;
 begin
-  FStyleTokens := TACLStringList.Create;
-  FStyleTokens.Add('B', TObject(TACLTextLayoutBlockStyleBold));
-  FStyleTokens.Add('I', TObject(TACLTextLayoutBlockStyleItalic));
-  FStyleTokens.Add('S', TObject(TACLTextLayoutBlockStyleStrikeOut));
-  FStyleTokens.Add('U', TObject(TACLTextLayoutBlockStyleUnderline));
-  FStyleTokens.Add('COLOR', TObject(TACLTextLayoutBlockStyleColor));
-  FStyleTokens.Add('BACKCOLOR', TObject(TACLTextLayoutBlockStyleFill));
-  FStyleTokens.Add('URL', TObject(TACLTextLayoutBlockStyleHyperlink));
-
   FEmailValidator := TRegEx.Create(EmailPattern);
-end;
-
-class destructor TACLTextImporter.Destroy;
-begin
-  FreeAndNil(FStyleTokens);
 end;
 
 constructor TACLTextImporter.Create(const ASettings: TACLTextFormatSettings);
@@ -2062,19 +2070,16 @@ end;
 
 procedure TACLTextImporter.Run(ATarget: TACLTextLayout; const AText: string);
 var
-  ABaseScan: PChar;
   ALength: Integer;
   AScan: PChar;
-  I: Integer;
 begin
   AScan := PChar(AText);
-  ABaseScan := AScan;
   ALength := Length(AText);
   while ALength > 0 do
   begin
-    for I := 0 to FTokenControllers.Count - 1 do
+    for var I := 0 to FTokenControllers.Count - 1 do
     begin
-      if FTokenControllers.List[I](ATarget, ABaseScan, AScan, ALength) then
+      if FTokenControllers.List[I](ATarget, AScan, ALength) then
         Break;
     end;
   end;
@@ -2101,37 +2106,36 @@ begin
   FTokenControllers.Add(IsTextToken);
 end;
 
-class function TACLTextImporter.IsDelimiterToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsDelimiterToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 begin
   Result := acPos(AScan^, Delimiters) > 0;
   if Result then
   begin
-    AddTextBlock(ATarget, ABaseScan, AScan, 1);
+    AddTextBlock(ATarget, AScan, 1);
     Dec(ALength);
     Inc(AScan);
   end;
 end;
 
-class function TACLTextImporter.IsEmail(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsEmail(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 var
   ABlock: TACLTextLayoutBlock;
   AFirstTextBlock: TACLTextLayoutBlockText;
   ATempLength: Integer;
   ATempScan: PWideChar;
   ATextBlock: TACLTextLayoutBlockText;
-  I: Integer;
 begin
   Result := False;
   if AScan^ = '@' then
   begin
     AFirstTextBlock := nil;
-    for I := ATarget.FBlocks.Count - 1 downto 0 do
+    for var I := ATarget.FBlocks.Count - 1 downto 0 do
     begin
       ABlock := ATarget.FBlocks.List[I];
       if ABlock.ClassType = TACLTextLayoutBlockText then
       begin
         ATextBlock := TACLTextLayoutBlockText(ABlock);
-        if (ATextBlock.TextLength = 1) and (acPos(ATextBlock.FText^, UrlEndDelimiters) > 0) then
+        if (ATextBlock.TextLength = 1) and (acPos(ATextBlock.Text^, UrlEndDelimiters) > 0) then
           Break;
         AFirstTextBlock := ATextBlock;
       end
@@ -2144,7 +2148,7 @@ begin
       ATempScan := AScan;
       ATempLength := ALength;
       ScanUntilDelimiter(ATempScan, ATempLength, UrlEndDelimiters);
-      if FEmailValidator.IsMatch(acMakeString(AFirstTextBlock.FText, acStringLength(AFirstTextBlock.FText, ATempScan))) then
+      if FEmailValidator.IsMatch(acMakeString(AFirstTextBlock.Text, acStringLength(AFirstTextBlock.Text, ATempScan))) then
       begin
         ReplaceWithHyperlink(ATarget, AFirstTextBlock, ATempScan, acMailToPrefix);
         AScan := ATempScan;
@@ -2155,100 +2159,98 @@ begin
 end;
 
 class function TACLTextImporter.IsCppLikeLineBreakToken(
-  ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+  ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 begin
   Result := (AScan^ = '\') and (ALength > 1) and ((AScan + 1)^ = 'n');
   if Result then
-    AddBlock(ATarget, TACLTextLayoutBlockLineBreak.Create, ABaseScan, AScan, ALength, 2);
+    ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 2);
 end;
 
-class function TACLTextImporter.IsLineBreakToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 begin
   Result := True;
   //#10
-  if AScan^ = #10 then
-    AddBlock(ATarget, TACLTextLayoutBlockLineBreak.Create, ABaseScan, AScan, ALength, 1)
+  if Ord(AScan^) = 10 then
+    ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 1)
   else
 
   //#13#10 or #13
-  if AScan^ = #13 then
+  if Ord(AScan^) = 13 then
   begin
-    if (AScan + 1)^ = #10 then
-      AddBlock(ATarget, TACLTextLayoutBlockLineBreak.Create, ABaseScan, AScan, ALength, 2)
+    if Ord((AScan + 1)^) = 10 then
+      ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 2)
     else
-      AddBlock(ATarget, TACLTextLayoutBlockLineBreak.Create, ABaseScan, AScan, ALength, 1);
+      ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 1);
   end
   else
     Result := False;
 end;
 
-class function TACLTextImporter.IsSpaceToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsSpaceToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 begin
   Result := acPos(AScan^, Spaces) > 0;
   if Result then
-    AddBlock(ATarget, TACLTextLayoutBlockSpace.Create, ABaseScan, AScan, ALength, 1);
+    ATarget.FBlocks.AddInit(TACLTextLayoutBlockSpace.Create, AScan, ALength, 1);
 end;
 
-class function TACLTextImporter.IsStyleToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
-
-  function TryGetBlockClass(P: PWideChar; L: Integer; out ABlockClass: TACLTextLayoutBlockStyleClass): Boolean;
-  var
-    I: Integer;
-    S: string;
-  begin
-    for I := 0 to FStyleTokens.Count - 1 do
-    begin
-      S := FStyleTokens.Strings[I];
-      if acCompareTokens(PChar(S), P, Length(S), L) then
-      begin
-        ABlockClass := TACLTextLayoutBlockStyleClass(FStyleTokens.Objects[I]);
-        Exit(True);
-      end;
-    end;
-    Result := False;
-  end;
-
+class function TACLTextImporter.IsStyleToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 var
   ABlock: TACLTextLayoutBlockStyle;
-  ABlockClass: TACLTextLayoutBlockStyleClass;
   AIsClosing: Boolean;
-  N, C, P: PWideChar;
+  AScanEnd: PWideChar;
+  AScanParam: PWideChar;
+  AScanTag: PWideChar;
+  ATagLength: Integer;
 begin
   Result := False;
   if AScan^ = '[' then
   begin
-    C := WStrScan(AScan, ALength, ']');
-    if C = nil then
+    AScanEnd := WStrScan(AScan, ALength, ']');
+    if AScanEnd = nil then
       Exit;
 
-    N := AScan + 1;
-    AIsClosing := N^ = '/';
+    AScanTag := AScan + 1;
+    AIsClosing := AScanTag^ = '/';
     if AIsClosing then
     begin
-      P := C;
-      Inc(N);
+      AScanParam := AScanEnd;
+      Inc(AScanTag);
     end
     else
     begin
-      P := WStrScan(N, acStringLength(AScan, C), '=');
-      if P = nil then
-        P := C;
+      AScanParam := WStrScan(AScanTag, acStringLength(AScan, AScanEnd), '=');
+      if AScanParam = nil then
+        AScanParam := AScanEnd;
     end;
 
-    Result := TryGetBlockClass(N, acStringLength(N, P), ABlockClass);
+    ATagLength := acStringLength(AScanTag, AScanParam);
+    if acCompareTokens('B', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFontStyle.Create(TFontStyle.fsBold, not AIsClosing)
+    else if acCompareTokens('U', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFontStyle.Create(TFontStyle.fsUnderline, not AIsClosing)
+    else if acCompareTokens('I', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFontStyle.Create(TFontStyle.fsItalic, not AIsClosing)
+    else if acCompareTokens('S', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFontStyle.Create(TFontStyle.fsStrikeOut, not AIsClosing)
+    else if acCompareTokens('COLOR', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFontColor.Create(acExtractString(AScanParam + 1, AScanEnd), not AIsClosing)
+    else if acCompareTokens('BACKCOLOR', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockFillColor.Create(acExtractString(AScanParam + 1, AScanEnd), not AIsClosing)
+    else if acCompareTokens('URL', AScanTag, ATagLength) then
+      ABlock := TACLTextLayoutBlockHyperlink.Create(acExtractString(AScanParam + 1, AScanEnd), not AIsClosing)
+    else
+      ABlock := nil;
+
+    Result := ABlock <> nil;
     if Result then
     begin
-      ABlock := ABlockClass.Create(not AIsClosing);
-      if P <> C then
-        ABlock.SetParameters(acExtractString(P + 1, C));
-
-      Inc(C);
-      AddBlock(ATarget, ABlock, ABaseScan, AScan, ALength, acStringLength(AScan, C));
+      Inc(AScanEnd);
+      ATarget.FBlocks.AddInit(ABlock, AScan, ALength, acStringLength(AScan, AScanEnd));
     end;
   end;
 end;
 
-class function TACLTextImporter.IsTextToken(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsTextToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 var
   ACursor: PWideChar;
 begin
@@ -2259,20 +2261,20 @@ begin
 
     if ALength = 0 then
     begin
-      AddTextBlock(ATarget, ABaseScan, ACursor, acStringLength(ACursor, AScan));
+      AddTextBlock(ATarget, ACursor, acStringLength(ACursor, AScan));
       Break;
     end;
 
     if acPos(AScan^, Delimiters) > 0 then
     begin
-      AddTextBlock(ATarget, ABaseScan, ACursor, acStringLength(ACursor, AScan));
+      AddTextBlock(ATarget, ACursor, acStringLength(ACursor, AScan));
       Break;
     end;
   until False;
   Result := True;
 end;
 
-class function TACLTextImporter.IsURL(ATarget: TACLTextLayout; var ABaseScan, AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsURL(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
 
   function GetLastBlockAsText(var ABlock: TACLTextLayoutBlockText): Boolean;
   var
@@ -2319,46 +2321,25 @@ begin
       Result := False;
 end;
 
-class procedure TACLTextImporter.AddBlock(ATarget: TACLTextLayout; ABlock: TACLTextLayoutBlock;
-  const ABaseScan: PWideChar; var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer);
-begin
-  ATarget.FBlocks.Add(ABlock);
-  ABlock.FPositionInText := acStringLength(ABaseScan, AScan) + 1;
-  ABlock.FLength := ABlockLength;
-  Dec(ALength, ABlockLength);
-  Inc(AScan, ABlockLength);
-end;
-
-class procedure TACLTextImporter.AddTextBlock(ATarget: TACLTextLayout; ABaseScan, AText: PWideChar; ALength: Integer);
-var
-  ABlock: TACLTextLayoutBlockText;
+class procedure TACLTextImporter.AddTextBlock(ATarget: TACLTextLayout; AText: PWideChar; ALength: Integer);
 begin
   if ALength > 0 then
-  begin
-    ABlock := TACLTextLayoutBlockText.Create;
-    ABlock.FText := AText;
-  {$IFDEF ACL_TEXTLAYOUT_RTL_SUPPORT}
-    ABlock.FReadingDirection := acGetReadingDirection(AText, ALength);
-  {$ENDIF}
-    AddBlock(ATarget, ABlock, ABaseScan, AText, ALength, ALength);
-  end;
+    ATarget.FBlocks.AddInit(TACLTextLayoutBlockText.Create(AText, ALength), AText, ALength, ALength);
 end;
 
 class procedure TACLTextImporter.ReplaceWithHyperlink(ATarget: TACLTextLayout;
   AFirstBlockToReplace: TACLTextLayoutBlockText; AScan: PWideChar; const AHyperlinkPrefix: string);
 var
-  AHyperlinkBlock: TACLTextLayoutBlockStyleHyperlink;
+  AHyperlinkBlock: TACLTextLayoutBlockHyperlink;
   AIndex: Integer;
 begin
   AIndex := ATarget.FBlocks.IndexOf(AFirstBlockToReplace, TDirection.FromEnd);
   ATarget.FBlocks.DeleteRange(AIndex + 1, ATarget.FBlocks.Count - 1 - AIndex);
-  AFirstBlockToReplace.FLength := acStringLength(AFirstBlockToReplace.FText, AScan);
+  AFirstBlockToReplace.FLength := acStringLength(AFirstBlockToReplace.Text, AScan);
 
-  AHyperlinkBlock := TACLTextLayoutBlockStyleHyperlink.Create(True);
-  AHyperlinkBlock.SetParameters(AHyperlinkPrefix + AFirstBlockToReplace.ToString);
+  AHyperlinkBlock := TACLTextLayoutBlockHyperlink.Create(AHyperlinkPrefix + AFirstBlockToReplace.ToString, True);
   ATarget.FBlocks.Insert(AIndex, AHyperlinkBlock);
-
-  ATarget.FBlocks.Add(TACLTextLayoutBlockStyleHyperlink.Create(False));
+  ATarget.FBlocks.Add(TACLTextLayoutBlockHyperlink.Create(EmptyStr, False));
 end;
 
 class procedure TACLTextImporter.ScanUntilDelimiter(var AScan: PWideChar; var ALength: Integer; const ADelimiters: UnicodeString);
@@ -2372,9 +2353,10 @@ end;
 
 { TACLTextLayoutRefreshHelper }
 
-procedure TACLTextLayoutRefreshHelper.AddText(ABlock: TACLTextLayoutBlockText);
+function TACLTextLayoutRefreshHelper.OnText(ABlock: TACLTextLayoutBlockText): Boolean;
 begin
   ABlock.Flush;
+  Result := True;
 end;
 
 end.

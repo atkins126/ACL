@@ -118,7 +118,8 @@ procedure acUnquot(var AToken: TACLParserToken); overload;
 procedure acUnquot(var S: UnicodeString); overload;
 
 function acCompareTokens(B1, B2: PWideChar; L1, L2: Integer): Boolean; overload;
-function acCompareTokens(const S1, S2: UnicodeString): Boolean; overload;
+function acCompareTokens(const S: UnicodeString; P: PWideChar; L: Integer): Boolean; overload; inline;
+function acCompareTokens(const S1, S2: UnicodeString): Boolean; overload; inline;
 implementation
 
 uses
@@ -252,6 +253,11 @@ begin
   end;
 end;
 
+function acCompareTokens(const S: UnicodeString; P: PWideChar; L: Integer): Boolean; overload;
+begin
+  Result := acCompareTokens(PWideChar(S), P, L, Length(S));
+end;
+
 function acCompareTokens(const S1, S2: UnicodeString): Boolean;
 begin
   Result := acCompareTokens(PWideChar(S1), PWideChar(S2), Length(S1), Length(S2));
@@ -265,8 +271,8 @@ begin
   if Result then
     while L1 > 0 do
     begin
-      C1 := Ord(B1^);
-      C2 := Ord(B2^);
+      C1 := Word(B1^);
+      C2 := Word(B2^);
       if C1 <> C2 then
       begin
         if (C1 >= Ord('a')) and (C1 <= Ord('z')) then

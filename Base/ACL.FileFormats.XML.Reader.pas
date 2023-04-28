@@ -4,7 +4,7 @@
 {*          Stream based XML Parser          *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -16,6 +16,8 @@ unit ACL.FileFormats.XML.Reader;
 
 // Ported from .NET platform:
 // https://github.com/microsoft/referencesource/tree/master/System.Xml/System/Xml/Core
+
+{.$DEFINE ACL_XML_DUPLICATES_CHECK} // Throws an exception if a node has duplicate attributes
 
 interface
 
@@ -30,13 +32,12 @@ uses
   System.Generics.Collections,
   // ACL
   ACL.Classes,
+  ACL.FastCode,
   ACL.FileFormats.XML.Types,
   ACL.Utils.Common,
   ACL.Utils.Strings;
 
 type
-  TACLXMLReader = class;
-
   TACLXMLReadState = (
     Initial,     //# The Read method has not been called yet.
     Interactive, //# Reading is in progress.
@@ -66,11 +67,7 @@ type
     XmlDeclaration
   );
 
-  TACLXMLWhitespaceHandling = (
-     All,         //# Return all Whitespace and SignificantWhitespace nodes. This is the default.
-     Significant, //# Return just SignificantWhitespace, i.e. whitespace nodes that are in scope of xml:space="preserve"
-     None         //# Do not return any Whitespace or SignificantWhitespace nodes.
-  );
+{$REGION 'Internal'}
 
   { TACLXMLNameTable }
 
@@ -78,22 +75,19 @@ type
   strict private const
     TableSize = 257;
   strict private type
-  {$REGION 'Sub-Types'}
+  {$REGION 'Sub-types'}
     PItem = ^TItem;
     TItem = record
       Hash: Cardinal;
       Value: string;
       Next: PItem;
-
-      function Compare(const AKey: TCharArray; AStart, ALength: Integer): Boolean;
     end;
     TTable = array[0..TableSize] of PItem;
   {$ENDREGION}
   strict private
     FTable: TTable;
 
-    function Hash(const S: string): Cardinal; overload; inline;
-    function Hash(P: PChar; L: Integer): Cardinal; overload; inline;
+    function Hash(P: PChar; L: Integer): Cardinal; inline;
     function NewItem(const S: string; AHash: Cardinal): PItem; overload; inline;
     function NewItem(const AKey: TCharArray; AStart, ALength: Integer; AHash: Cardinal): PItem; overload; inline;
   public
@@ -103,121 +97,149 @@ type
     function Get(const AValue: string): string; overload;
   end;
 
-  { TACLXMLReaderSettings }
+  { TACLXMLLineInfo }
 
-  TACLXMLReaderSettings = class
+  TACLXMLLineInfo = record
   strict private
-    FCheckCharacters: Boolean;
-    FConformanceLevel: TACLXMLConformanceLevel;
-    FIgnoreComments: Boolean;
-    FIgnorePIs: Boolean;
-    FIgnoreWhitespace: Boolean;
-    FLineNumberOffset: Integer;
-    FLinePositionOffset: Integer;
-    FMaxCharactersInDocument: Int64;
-    FNameTable: TACLXMLNameTable;
-  protected
-    procedure Initialize; overload;
+    FLineNo: Integer;
+    FLinePos: Integer;
   public
-    constructor Create; overload;
-    function CreateReader(AInput: TStream): TACLXMLReader;
-
-    property CheckCharacters: Boolean read FCheckCharacters write FCheckCharacters;
-    property ConformanceLevel: TACLXMLConformanceLevel read FConformanceLevel write FConformanceLevel;
-    property IgnoreComments: Boolean read FIgnoreComments write FIgnoreComments;
-    property IgnoreProcessingInstructions: Boolean read FIgnorePIs write FIgnorePIs;
-    property IgnoreWhitespace: Boolean read FIgnoreWhitespace write FIgnoreWhitespace;
-    property LineNumberOffset: Integer read FLineNumberOffset write FLineNumberOffset;
-    property LinePositionOffset: Integer read FLinePositionOffset write FLinePositionOffset;
-    property MaxCharactersInDocument: Int64 read FMaxCharactersInDocument write FMaxCharactersInDocument;
-    property NameTable: TACLXMLNameTable read FNameTable write FNameTable;
+    procedure Init(ALineNo: Integer; ALinePos: Integer); inline;
+    property LineNo: Integer read FLineNo;
+    property LinePos: Integer read FLinePos;
   end;
+
+  { TACLXMLNodeData }
+
+  TACLXMLNodeData = class
+  strict private type
+    TValueLocation = (CharsBuffer, ValueString);
+  strict private
+    FChars: TCharArray;
+    FDepth: Integer;
+    FIsEmptyOrDefault: Boolean;
+    FLineInfo: TACLXMLLineInfo;
+    FLineInfo2: TACLXMLLineInfo;
+    FLocalName: string;
+    FNamespace: string;
+    FNameWPrefix: string;
+    FPrefix: string;
+    FQuoteChar: Char;
+    FType: TACLXMLNodeType;
+    FValue: string;
+    FValueLength: Integer;
+    FValueLocation: TValueLocation; //# probably replace with special ValueStartPos value
+    FValueStartPos: Integer;
+    FXmlContextPushed: Boolean;
+
+    function GetIsDefaultAttribute: Boolean; inline;
+    function GetIsEmptyElement: Boolean; inline;
+    function GetStringValue: string; inline;
+    procedure SetIsDefaultAttribute(AValue: Boolean); inline;
+    procedure SetIsEmptyElement(AValue: Boolean); inline;
+  private // visible for unit only
+    constructor Create;
+    procedure OnBufferInvalidated; inline;
+
+    procedure CopyTo(AValueOffset: Integer; ASb: TStringBuilder);
+    function GetNameWPrefix(ANameTable: TACLXMLNameTable): string; inline;
+    procedure SetNamedNode(AType: TACLXMLNodeType; const ALocalName, APrefix, ANameWPrefix: string); inline;
+    procedure SetValue(const AChars: TCharArray; AStartPos, ALength: Integer); overload;
+    procedure SetValue(const AValue: string); overload;
+    procedure SetValueNode(AType: TACLXMLNodeType; const AChars: TCharArray; AStartPos, ALength: Integer); overload;
+    procedure SetValueNode(AType: TACLXMLNodeType; const AValue: string); overload;
+
+    property Depth: Integer read FDepth write FDepth;
+    property LineInfo: TACLXMLLineInfo read FLineInfo;
+    property LineInfo2: TACLXMLLineInfo read FLineInfo2;
+    property LocalName: string read FLocalName;
+    property Namespace: string read FNamespace write FNamespace;
+    property Prefix: string read FPrefix;
+    property QuoteChar: Char read FQuoteChar write FQuoteChar;
+    property &Type: TACLXMLNodeType read FType write FType;
+    property XmlContextPushed: Boolean read FXmlContextPushed write FXmlContextPushed;
+
+    property IsDefaultAttribute: Boolean read GetIsDefaultAttribute write SetIsDefaultAttribute;
+    property IsEmptyElement: Boolean read GetIsEmptyElement write SetIsEmptyElement;
+    property StringValue: string read GetStringValue;
+  end;
+
+{$ENDREGION}
+
+{$REGION 'XML-Reader'}
 
   { TACLXMLReader }
 
   TACLXMLReader = class
-  strict private
-    function SkipSubtree: Boolean;
   private const
-    DefaultBufferSize = 4096;
-    BiggerBufferSize = 8192;
-    MaxStreamLengthForDefaultBufferSize = 64 * 1024;
-    HasValueBitmap = $02659C; //# 10 0110 0101 1001 1100
-    //# 0 None,
-    //# 0 Element,
-    //# 1 Attribute,
-    //# 1 Text,
-    //# 1 CDATA,
-    //# 0 EntityReference,
-    //# 0 Entity,
-    //# 1 ProcessingInstruction,
-    //# 1 Comment,
-    //# 0 Document,
-    //# 1 DocumentType,
-    //# 0 DocumentFragment,
-    //# 0 Notation,
-    //# 1 Whitespace,
-    //# 1 SignificantWhitespace,
-    //# 0 EndElement,
-    //# 0 EndEntity,
-    //# 1 XmlDeclaration
-  private
+    DefaultBufferSize = 8192;
+  strict private
+    function GetDepth: Integer; inline;
+    function GetLocalName: string; inline;
+    function GetName: string; inline;
+    function GetNamespaceURI: string; inline;
+    function GetNodeType: TACLXMLNodeType; inline;
+    function GetPrefix: string; inline;
+    function GetValue: string; inline;
+  private // visible for unit only
+    FCurrentNode: TACLXMLNodeData;
+    FNameTable: TACLXMLNameTable;
     FReadState: TACLXMLReadState;
-
-    class function HasValueInternal(ANodeType: TACLXMLNodeType): Boolean; static;
   protected
-    class function CalcBufferSize(AInput: TStream): Integer; static;
-
-    function GetActualValue: string;
-    function GetDepth: Integer; virtual; abstract;
-    function GetHasValue: Boolean; virtual;
-    function GetLocalName: string; virtual; abstract;
-    function GetName: string; virtual;
-    function GetNamespaceURI: string; virtual; abstract;
-    function GetNameTable: TACLXMLNameTable; virtual; abstract;
-    function GetNodeType: TACLXMLNodeType; virtual; abstract;
-    function GetPrefix: string; virtual; abstract;
-    function GetSettings: TACLXMLReaderSettings; virtual;
-    function GetValue: string; virtual; abstract;
-    function GetXmlSpace: TACLXMLSpace; virtual;
-
-    property NameTable: TACLXMLNameTable read GetNameTable;
+    function GetText: string; virtual; abstract;
   public
-    function Read: Boolean; virtual; abstract;
-    procedure EnumAttributes(const AProc: TProc<string, string, string>); virtual; abstract;
-    function GetAttribute(const APrefix, ALocalName, ANamespaceURI: string): string; overload;
+    function GetAttribute(const APrefix, ALocalName, ANamespaceURI: string): string; overload; inline;
     function GetAttribute(const AAttribute, ANamespaceURI: string): string; overload; virtual; abstract;
-    function GetAttribute(const AAttribute: AnsiString): string; overload;
-    function GetAttribute(const AAttribute: string): string; overload; virtual;
-    function GetAttributeAsBoolean(const AAttribute: AnsiString; const ADefaultValue: Boolean = False): Boolean; overload;
-    function GetAttributeAsBoolean(const AAttribute: string; const ADefaultValue: Boolean = False): Boolean; overload;
-    function GetAttributeAsInt64(const AAttribute: string; const ADefaultValue: Int64 = 0): Int64; overload;
-    function GetAttributeAsInteger(const AAttribute: string; ADefaultValue: Integer = 0): Integer; overload;
-    function GetAttributeAsSingle(const AAttribute: string; ADefaultValue: Single = 0): Single; overload;
-    function IsEmptyElement: Boolean; virtual; abstract;
+    function GetAttribute(const AAttribute: AnsiString): string; overload; inline;
+    function GetAttribute(const AAttribute: string): string; overload; inline;
+    function GetAttributeAsBoolean(const AAttribute: AnsiString; const ADefaultValue: Boolean = False): Boolean; overload; inline;
+    function GetAttributeAsBoolean(const AAttribute: string; const ADefaultValue: Boolean = False): Boolean; overload; inline;
+    function GetAttributeAsInt64(const AAttribute: string; const ADefaultValue: Int64 = 0): Int64; overload; inline;
+    function GetAttributeAsInteger(const AAttribute: string; ADefaultValue: Integer = 0): Integer; overload; inline;
+    function GetAttributeAsSingle(const AAttribute: string; ADefaultValue: Single = 0): Single; overload; inline;
+    function IsEmptyElement: Boolean; inline;
     function LookupNamespace(const ANameSpace: string): string; overload; virtual; abstract;
     function MoveToElement: Boolean; virtual; abstract;
     function MoveToNextAttribute: Boolean; virtual; abstract;
-    function ReadToFollowing(const ALocalName: string): Boolean; overload; virtual;
-    function ReadToFollowing(const ALocalName, ANameSpaceURI: string): Boolean; overload; virtual;
+    function Read: Boolean; virtual; abstract;
+    function SafeRead: Boolean; inline; // suppresses all exceptions
     procedure Skip; virtual;
     function TryGetAttribute(const AAttribute: string; out AValue: string): Boolean; overload; virtual; abstract;
     function TryGetAttribute(const APrefix, ALocalName, ANamespaceURI: string; out AValue: string): Boolean; overload; virtual; abstract;
 
-    property ActualValue: string read GetActualValue;
     property Depth: Integer read GetDepth;
-    property HasValue: Boolean read GetHasValue;
     property LocalName: string read GetLocalName;
     property Name: string read GetName;
     property NamespaceURI: string read GetNamespaceURI;
     property NodeType: TACLXMLNodeType read GetNodeType;
     property Prefix: string read GetPrefix;
     property ReadState: TACLXMLReadState read FReadState;
+    property Text: string read GetText;
     property Value: string read GetValue;
-    property XmlSpace: TACLXMLSpace read GetXmlSpace;
-
-    property Settings: TACLXMLReaderSettings read GetSettings;
   end;
+
+  { TACLXMLReaderSettings }
+
+  TACLXMLReaderSettings = record
+  public
+    CheckCharacters: Boolean;
+    ConformanceLevel: TACLXMLConformanceLevel;
+    DefaultEncoding: TEncoding;
+    IgnoreComments: Boolean;
+    IgnoreProcessingInstructions: Boolean;
+    IgnoreWhitespace: Boolean;
+    LineNumberOffset: Integer;
+    LinePositionOffset: Integer;
+    MaxCharactersInDocument: Int64;
+    SupportNamespaces: Boolean;
+
+    function CreateReader(AInput: TStream): TACLXMLReader;
+    class function Default: TACLXMLReaderSettings; static;
+  end;
+
+{$ENDREGION}
+
+{$REGION 'XML-Loaders'}
 
   { TACLXMLNodeLoader }
 
@@ -289,24 +311,25 @@ type
   { TACLXMLDocumentLoader }
 
   TACLXMLDocumentLoader = class
-  strict private
-    FLoaders: TACLXMLNodeLoaders;
-    FSettings: TACLXMLReaderSettings;
-    FSkipRootNode: Boolean;
   public
+    Loaders: TACLXMLNodeLoaders;
+    SkipRootNode: Boolean;
+    Settings: TACLXMLReaderSettings;
+
     constructor Create;
     destructor Destroy; override;
     procedure Run(AContext: TObject; AStream: TStream);
-
-    property Loaders: TACLXMLNodeLoaders read FLoaders;
-    property SkipRootNode: Boolean read FSkipRootNode write FSkipRootNode;
   end;
+
+{$ENDREGION}
 
 implementation
 
 uses
-  Math, StrUtils;
+  System.Math,
+  System.StrUtils;
 
+{$REGION 'Error Messages'}
 const
   SXmlBadAttributeChar = '''%s'', hexadecimal value %s, is an invalid attribute character.';
   SXmlBadDecimalEntity = 'Invalid syntax for a decimal numeric entity reference.';
@@ -317,8 +340,10 @@ const
   SXmlBadStartNameChar = 'Name cannot begin with the ''%s'' character, hexadecimal value %s.';
   SXmlCDATAEndInText = ''']]&gt;'' is not allowed in character data.';
   SXmlCharEntityOverflow = 'Invalid value of a character entity reference.';
+  SXmlDupAttributeName = '%s is a duplicate attribute name';
   SXmlEncodingSwitchAfterResetState = '''%s'' is an invalid value for the ''encoding'' attribute. ' +
     'The encoding cannot be switched after a call to ResetState';
+  SXmlEntityReferencesNotImplemented = 'Entity references are not implemented';
   SXmlExpectExternalOrClose = 'Expecting external ID, ''['' or ''&gt;''.';
   SXmlExpectSubOrClose = 'Expecting an internal subset or the end of the DOCTYPE declaration.';
   SXmlExpectingWhiteSpace = '''%s'' is an unexpected token. Expecting white space.';
@@ -353,9 +378,14 @@ const
   SXmlXmlnsPrefix = 'Prefix ''xmlns'' is reserved for use by XML.';
   SXmlXmlPrefix = 'Prefix ''xml'' is reserved for use by XML and can be mapped only to namespace name ' +
     '''http://www.w3.org/XML/1998/namespace''.';
-  SDTDNotImplemented = 'DTD not implemented';
+{$ENDREGION}
 
 type
+  TACLXMLWhitespaceHandling = (
+     All,         //# Return all Whitespace and SignificantWhitespace nodes. This is the default.
+     Significant, //# Return just SignificantWhitespace, i.e. whitespace nodes that are in scope of xml:space="preserve"
+     None         //# Do not return any Whitespace or SignificantWhitespace nodes.
+  );
 
   { TEncodingHelper }
 
@@ -365,7 +395,6 @@ type
       const ABytes: TBytes; AByteIndex, AByteCount: Integer;
       const AChars: TCharArray; ACharIndex, ACharCount: Integer;
       out ABytesUsed, ACharsUsed: Integer); overload;
-    function WebName: string;
   end;
 
   { TACLXMLNamespaceManager }
@@ -374,6 +403,7 @@ type
   protected const
     MinDeclsCountForHashTable = 16;
   protected type
+  {$REGION 'private sub-types'}
     TNamespaceDeclaration = record
       Prefix: string;
       Uri: string;
@@ -381,6 +411,7 @@ type
       PreviousNsIndex: Integer;
       procedure &Set(const APrefix, AUri: string; AScopeId, APreviousNsIndex: Integer);
     end;
+  {$ENDREGION}
   strict private
     FHashTable: TDictionary<string, Integer>;
     FLastDecl: Integer;
@@ -390,128 +421,46 @@ type
     FUseHashTable: Boolean;
     FXml: string;
     FXmlNs: string;
-  protected
-    function GetNameTable: TACLXMLNameTable; virtual;
-    function GetDefaultNamespace: string; virtual;
   public
     constructor Create(ANameTable: TACLXMLNameTable);
     destructor Destroy; override;
-    procedure AddNamespace(APrefix, AUri: string); virtual;
+    procedure AddNamespace(APrefix, AUri: string);
     function GetNamespaceDeclaration(AIdx: Integer; out APrefix: string; out AUri: string): Boolean;
-    function HasNamespace(const APrefix: string): Boolean; virtual;
-    function LookupNamespace(const APrefix: string): string; virtual;
+    function HasNamespace(const APrefix: string): Boolean;
+    function LookupNamespace(const APrefix: string): string;
     function LookupNamespaceDecl(const APrefix: string): Integer;
-    function LookupPrefix(const AUri: string): string; virtual;
-    function PopScope: Boolean; virtual;
-    procedure PushScope; virtual;
-    procedure RemoveNamespace(const APrefix: string; const AUri: string); virtual;
-
-    property DefaultNamespace: string read GetDefaultNamespace;
-    property NameTable: TACLXMLNameTable read GetNameTable;
+    function LookupPrefix(const AUri: string): string;
+    function PopScope: Boolean;
+    procedure PushScope; inline;
+    procedure RemoveNamespace(const APrefix: string; const AUri: string);
   end;
 
-  { TACLXMLLineInfo }
+  { TACLXMLNodeTextLoader }
 
-  TACLXMLLineInfo = record
+  TACLXMLNodeTextLoader = class(TACLXMLNodeLoader)
   strict private
-    FLineNo: Integer;
-    FLinePos: Integer;
+    FProc: TACLXMLTextLoader;
   public
-    constructor Create(ALineNo: Integer; ALinePos: Integer);
-    procedure &Set(ALineNo: Integer; ALinePos: Integer);
-    property LineNo: Integer read FLineNo;
-    property LinePos: Integer read FLinePos;
+    constructor Create(AProc: TACLXMLTextLoader); reintroduce;
+    procedure OnText(AContext: TObject; AReader: TACLXMLReader); override;
   end;
 
-  { TACLXMLNodeData }
-
-  TACLXMLNodeData = class(TACLUnknownObject, IComparable)
-  strict private type
-    TValueLocation = (CharsBuffer, ValueString);
-  strict private
-    class var FNone: TACLXMLNodeData;
-  strict private
-    FChars: TCharArray;
-    FDepth: Integer;
-    FIsEmptyOrDefault: Boolean;
-    FLineInfo: TACLXMLLineInfo;
-    FLineInfo2: TACLXMLLineInfo;
-    FLocalName: string;
-    FNamespace: string;
-    FNameWPrefix: string;
-    FPrefix: string;
-    FQuoteChar: Char;
-    FType: TACLXMLNodeType;
-    FValue: string;
-    FValueLength: Integer;
-    FValueLocation: TValueLocation; //# probably replace with special ValueStartPos value
-    FValueStartPos: Integer;
-    FXmlContextPushed: Boolean;
-
-    class function GetNone: TACLXMLNodeData; static;
-    function GetLineNo: Integer;
-    function GetLinePos: Integer;
-    function GetIsEmptyElement: Boolean;
-    procedure SetIsEmptyElement(const AValue: Boolean);
-    function GetIsDefaultAttribute: Boolean;
-    procedure SetIsDefaultAttribute(const AValue: Boolean);
-    function GetValueBuffered: Boolean;
-    function GetStringValue: string;
-    procedure ClearName;
-    function CreateNameWPrefix(AXmlNameTable: TACLXMLNameTable): string;
-  protected
-    procedure OnBufferInvalidated;
-
-    procedure Clear(AType: TACLXMLNodeType);
-    procedure CopyTo(AValueOffset: Integer; ASb: TStringBuilder); overload;
-    function GetNameWPrefix(ANameTable: TACLXMLNameTable): string;
-    procedure SetLineInfo(ALineNo, ALinePos: Integer);
-    procedure SetLineInfo2(ALineNo, ALinePos: Integer);
-    procedure SetNamedNode(AType: TACLXMLNodeType; const ALocalName, APrefix, ANameWPrefix: string); overload;
-    procedure SetNamedNode(AType: TACLXMLNodeType; const ALocalName: string); overload;
-    procedure SetValue(const AChars: TCharArray; AStartPos, ALength: Integer); overload;
-    procedure SetValue(const AValue: string); overload;
-    procedure SetValueNode(AType: TACLXMLNodeType; const AChars: TCharArray; AStartPos, ALength: Integer); overload;
-    procedure SetValueNode(AType: TACLXMLNodeType; const AValue: string); overload;
-    // IComparable
-    function CompareTo(AObject: TObject): Integer;
-
-    property &Type: TACLXMLNodeType read FType write FType;
-    property Depth: Integer read FDepth write FDepth;
-    property LineInfo: TACLXMLLineInfo read FLineInfo write FLineInfo;
-    property LineInfo2: TACLXMLLineInfo read FLineInfo2;
-    property LocalName: string read FLocalName;
-    property Namespace: string read FNamespace write FNamespace;
-    property Prefix: string read FPrefix;
-    property QuoteChar: Char read FQuoteChar write FQuoteChar;
-    property XmlContextPushed: Boolean read FXmlContextPushed write FXmlContextPushed;
-
-    class property None: TACLXMLNodeData read GetNone;
-  public
-    constructor Create;
-
-    property IsDefaultAttribute: Boolean read GetIsDefaultAttribute write SetIsDefaultAttribute;
-    property IsEmptyElement: Boolean read GetIsEmptyElement write SetIsEmptyElement;
-    property LineNo: Integer read GetLineNo;
-    property LinePos: Integer read GetLinePos;
-    property StringValue: string read GetStringValue;
-    property ValueBuffered: Boolean read GetValueBuffered;
-  end;
+{$REGION 'XML-Reader'}
 
   { TACLXMLTextReader }
 
   TACLXMLTextReader = class(TACLXMLReader)
   private const
-    MaxBytesToMove = 128;
     ApproxXmlDeclLength = 80;
-    NodesInitialSize = 8;
-    MaxByteSequenceLen = 6;
     MaxAttrDuplWalkCount = 250;
-    MinWhitespaceLookahedCount = 4096;
-    XmlDeclarationBeginning = '<?xml';
+    MaxByteSequenceLen = 6;
+    MaxBytesToMove = 128;
     MaxUTF8EncodedCharByteCount = 6;
+    MinWhitespaceLookahedCount = 4096;
+    NodesInitialSize = 8;
+    XmlDeclarationBeginning = '<?xml';
   private type
-{$REGION 'Private helper types'}
+  {$REGION 'private sub-types'}
     TParsingFunction = (
       ElementContent,
       NoData,
@@ -565,13 +514,6 @@ type
       OnlyCharacter
     );
 
-    TLaterInitParam = class
-    public
-      InputStream: TStream;
-      InputBytes: TBytes;
-      InputByteCount: Integer;
-    end;
-
     TXmlContext = class
     public
       XmlSpace: TACLXMLSpace;
@@ -582,8 +524,6 @@ type
     end;
 
     TParsingState = record
-    strict private
-      function GetLinePos: Integer;
     public
       Chars: TCharArray;
       CharPos: Integer;
@@ -600,16 +540,15 @@ type
       IsEof: Boolean;
       IsStreamEof: Boolean;
       EolNormalized: Boolean;
-      procedure Clear;
 
-      property LinePos: Integer read GetLinePos;
+      procedure Clear;
+      function LinePos: Integer; inline;
     end;
 
-{$ENDREGION}
+  {$ENDREGION}
   private
     FXML: string;
     FXmlNs: string;
-    FLaterInitParam: TLaterInitParam;
 
     //# parsing function = what to do in the next Read() (3-items-long stack, usually used just 2 level)
     FParsingFunction: TParsingFunction;
@@ -620,19 +559,15 @@ type
     FAttributeHashTable: Integer;
     FAttributeNeedNamespaceLookup: Boolean;
     FCurrentAttributeIndex: Integer;
-    FCurrentNode: TACLXMLNodeData;
     FFullAttributeCleanup: Boolean;
     FIndex: Integer;
-    FInternalNameTable: TACLXMLNameTable;
-    FNameTable: TACLXMLNameTable;
-    FNameTableFromSettings: Boolean;
     FNextParsingFunction: TParsingFunction;
     FNodes: TArray<TACLXMLNodeData>;
 
     //# settings
     FCheckCharacters: Boolean;
     FIgnoreComments: Boolean;
-    FIgnorePIs: Boolean;
+    FIgnoreProcessingInstructions: Boolean;
     FLineNumberOffset: Integer;
     FLinePositionOffset: Integer;
     FNormalize: Boolean;
@@ -657,45 +592,42 @@ type
 
     function DetectEncoding: TEncoding;
 
-    function GetAttributeWithoutPrefix(const AName: string): TACLXMLNodeData;
     function GetAttributeWithNamespace(const AName, ANamespaceURI: string): TACLXMLNodeData;
     function GetAttributeWithPrefix(const ALocalName, APrefix: string): TACLXMLNodeData; overload;
     function GetAttributeWithPrefix(const AName: string): TACLXMLNodeData; overload;
-    function GetInAttributeValueIterator: Boolean;
     function GetChars(AMaxCharsCount: Integer): Integer;
+    function GetWhitespaceType: TACLXMLNodeType; inline;
 
-    procedure OnEof;
-
-    procedure InitStreamInput(AStream: TStream; const ABytes: TBytes;
-      AByteCount: Integer; AEncoding: TEncoding);
-    procedure FinishInitStream;
+    procedure InitStreamInput(AStream: TStream; const ABytes: TBytes; AByteCount: Integer; AEncoding: TEncoding);
+    procedure InvalidCharRecovery(var ABytesCount: Integer; out ACharsCount: Integer);
 
     function AddAttribute(AEndNamePos, AColonPos: Integer): TACLXMLNodeData; overload;
     function AddAttribute(const ALocalName, APrefix: string; const ANameWPrefix: string): TACLXMLNodeData; overload;
     function AddAttributeNoChecks(const AName: string; AAttrDepth: Integer): TACLXMLNodeData;
-    function AddNode(ANodeIndex, ANodeDepth: Integer): TACLXMLNodeData;
-    function AllocNode(ANodeIndex, ANodeDepth: Integer): TACLXMLNodeData;
-    function GetTextNodeType(AOrChars: Integer): TACLXMLNodeType;
-    function GetWhitespaceType: TACLXMLNodeType;
-    function LookupNamespace(ANode: TACLXMLNodeData): string; overload;
     procedure AddNamespace(const APrefix, AUri: string; AAttribute: TACLXMLNodeData);
+    function AddNode(ANodeIndex, ANodeDepth: Integer): TACLXMLNodeData;
     procedure AttributeDuplCheck;
     procedure AttributeNamespaceLookup;
     procedure ElementNamespaceLookup;
-    procedure InvalidCharRecovery(var ABytesCount: Integer; out ACharsCount: Integer);
+
+    procedure OnEof;
     procedure OnDefaultNamespaceDecl(AAttribute: TACLXMLNodeData);
     procedure OnNamespaceDecl(AAttribute: TACLXMLNodeData);
+    procedure OnNewLine(APosition: Integer); inline;
     procedure OnXmlReservedAttribute(AAttribute: TACLXMLNodeData);
-    procedure ParseAttributeValueSlow(ACurPosition: Integer; AQuoteChar: Char; AAttribute: TACLXMLNodeData);
-    procedure PopXmlContext;
-    procedure PushXmlContext;
 
+    procedure PopElementContext; inline;
+    procedure PopXmlContext; inline;
+    procedure PushXmlContext; inline;
+
+    procedure ParseAttributeValueSlow(ACurPosition: Integer; AQuoteChar: Char; AAttribute: TACLXMLNodeData);
     function ParseCDataOrComment(AType: TACLXMLNodeType; out AOutStartPosition, AOutEndPosition: Integer): Boolean; overload;
     function ParseCharRefInline(AStartPosition: Integer; out ACharCount: Integer; out AEntityType: TEntityType): Integer;
     function ParseComment: Boolean;
+    function ParseDocTypeDeclaraion: Boolean;
     function ParseDocumentContent: Boolean;
     function ParseElementContent: Boolean;
-    function ParseName: Integer;
+    function ParseName: Integer; inline;
     function ParseNamedCharRef(AExpand: Boolean; AInternalSubsetBuilder: TStringBuilder): Integer;
     function ParseNamedCharRefInline(AStartPosition: Integer; AExpand: Boolean; AInternalSubsetBuilder: TStringBuilder): Integer;
     function ParseNumericCharRef(AExpand: Boolean; AInternalSubsetBuilder: TStringBuilder; out AEntityType: TEntityType): Integer;
@@ -718,11 +650,13 @@ type
     procedure ParseElement;
     procedure ParseEndElement;
     procedure ParseXmlDeclarationFragment;
+    procedure SkipDtd;
     procedure SkipPartialTextValue;
+    procedure SkipPublicOrSystemIdLiteral;
+    procedure SkipUntil(AStopChar: Char; ARecognizeLiterals: Boolean);
 
     function HandleEntityReference(AIsInAttributeValue: Boolean;
       AExpandType: TEntityExpandType; out ACharRefEndPos: Integer): TEntityType;
-    procedure PopElementContext;
     procedure ResetAttributes;
     procedure FullAttributeCleanup; inline;
     procedure FinishPartialValue;
@@ -731,6 +665,7 @@ type
     procedure RegisterConsumedCharacters(ACharacters: Int64);
     procedure SetupEncoding(AEncoding: TEncoding);
     procedure SwitchEncoding(ANewEncoding: TEncoding);
+    procedure SwitchEncodingAfterResetState;
     procedure SwitchEncodingToUTF8;
 
     procedure ReThrow(E: Exception; ALineNo, ALinePos: Integer);
@@ -741,7 +676,6 @@ type
     procedure Throw(const ARes: string; const AArgs: array of const); overload;
     procedure Throw(const ARes: string; ALineNo, ALinePos: Integer); overload;
     procedure Throw(const ARes, AArg: string; ALineNo, ALinePos: Integer); overload;
-    procedure Throw(APosition: Integer; const ARes: string); overload;
     procedure Throw(APosition: Integer; const ARes, AArg: string); overload;
     procedure Throw(APosition: Integer; const ARes: string; const AArgs: array of const); overload;
     procedure Throw(APosition: Integer; const ARes: string; const AArgs: TArray<string>); overload;
@@ -749,63 +683,35 @@ type
     procedure ThrowInvalidChar(const AData: TCharArray; ALength, AInvCharPos: Integer);
     procedure ThrowTagMismatch(AStartTag: TACLXMLNodeData);
     procedure ThrowUnexpectedToken(APosition: Integer; const AExpectedToken1: string; const AExpectedToken2: string = ''); overload;
-    procedure ThrowUnexpectedToken(const AExpectedToken1, AExpectedToken2: string); overload;
-    procedure ThrowUnexpectedToken(AExpectedToken: string); overload;
+    procedure ThrowUnexpectedToken(const AExpectedToken1: string; const AExpectedToken2: string = ''); overload;
     procedure ThrowUnclosedElements;
-    procedure ThrowWithoutLineInfo(const ARes: string); overload;
-    procedure ThrowWithoutLineInfo(const ARes, AArg: string); overload;
+    procedure ThrowWithoutLineInfo(const ARes, AArg: string);
 
-    procedure OnNewLine(APosition: Integer);
     function EatWhitespaces(ASb: TStringBuilder): Integer;
-    procedure ShiftBuffer(ASourcePosition, ADestPosition, ACount: Integer);
+    procedure ShiftBuffer(ASourcePosition, ADestPosition, ACount: Integer); inline;
     procedure UnDecodeChars;
   protected
-    constructor Create(ASettings: TACLXMLReaderSettings); overload;
-    class procedure BlockCopyChars(ASource: TCharArray; ASourceOffset: Integer; ADestination: TCharArray;
-      ADestinationOffset, ACount: Integer); static; inline;
-    class function ConvertToConstArray(const AArgs: TArray<string>): TArray<TVarRec>;
-    class function StrEqual(const AChars: TCharArray; AStrPos1, AStrLen1: Integer; const AStr2: string): Boolean; static;
-    class function StripSpaces(const AValue: string): string; overload; static;
-    class procedure StripSpaces(var AValue: TCharArray; AIndex: Integer; var ALen: Integer); overload; static;
-
-    procedure ClearNodes;
-    procedure FinishInit;
-    function GetNameTable: TACLXMLNameTable; override;
-    function GetNodeType: TACLXMLNodeType; override;
-    function GetLocalName: string; override;
-    function GetNamespaceURI: string; override;
-    function GetValue: string; override;
-    function GetDepth: Integer; override;
-    function GetXmlSpace: TACLXMLSpace; override;
-    function GetPrefix: string; override;
-
-    property InAttributeValueIterator: Boolean read GetInAttributeValueIterator;
-    property XML: string read FXML;
-    property XmlNs: string read FXmlNs;
+    function GetText: string; override;
   public
     constructor Create; overload;
-    constructor Create(AStream: TStream; const ABytes: TBytes; AByteCount: Integer; ASettings: TACLXMLReaderSettings); overload;
+    constructor Create(AStream: TStream; const ABytes: TBytes;
+      AByteCount: Integer; const ASettings: TACLXMLReaderSettings); overload;
+    constructor Create(const ASettings: TACLXMLReaderSettings); overload;
     destructor Destroy; override;
-    procedure EnumAttributes(const AProc: TProc<string, string, string>); override;
     function GetAttribute(const AAttribute, ANamespaceURI: string): string; overload; override;
-    function IsEmptyElement: Boolean; override;
     function TryGetAttribute(const AAttribute: string; out AValue: string): Boolean; override;
     function TryGetAttribute(const APrefix, ALocalName, ANamespaceURI: string; out AValue: string): Boolean; override;
+    function LookupNamespace(const ANode: TACLXMLNodeData): string; overload;
     function LookupNamespace(const APrefix: string): string; overload; override;
     function MoveToElement: Boolean; override;
     function MoveToNextAttribute: Boolean; override;
     function Read: Boolean; override;
+    //
+    property XML: string read FXML;
+    property XmlNs: string read FXmlNs;
   end;
 
-  { TACLXMLNodeTextLoader }
-
-  TACLXMLNodeTextLoader = class(TACLXMLNodeLoader)
-  strict private
-    FProc: TACLXMLTextLoader;
-  public
-    constructor Create(AProc: TACLXMLTextLoader); reintroduce;
-    procedure OnText(AContext: TObject; AReader: TACLXMLReader); override;
-  end;
+{$ENDREGION}
 
 function NotImplemented: Pointer;
 begin
@@ -882,35 +788,9 @@ begin
   Result := 0; //# ERROR ?
 end;
 
-function RemoveRedundantSpaces(const AText: string): string;
-var
-  P: PChar;
+function StrEqual(const AChars: TCharArray; AStrPos1, AStrLen1: Integer; const AStr2: string): Boolean; inline;
 begin
-  Result := Trim(AText);
-  if (acPos(#$0009, Result) > 0) or (acPos(#$000A, Result) > 0) then
-  begin
-    UniqueString(Result);
-    P := PChar(Result);
-    while P^ <> #0 do
-    begin
-      if (P^ = #$0009) or (P^ = #$000A) then
-        P^ :=  #$0020;
-      Inc(P);
-    end;
-  end;
-end;
-
-{ TACLXMLNodeTextLoader }
-
-constructor TACLXMLNodeTextLoader.Create(AProc: TACLXMLTextLoader);
-begin
-  inherited Create;
-  FProc := AProc;
-end;
-
-procedure TACLXMLNodeTextLoader.OnText(AContext: TObject; AReader: TACLXMLReader);
-begin
-  FProc(AContext, AReader.ActualValue);
+  Result := (AStrLen1 = Length(AStr2)) and CompareMem(@AChars[AStrPos1], PChar(AStr2), AStrLen1 * SizeOf(Char));
 end;
 
 { TEncodingHelper }
@@ -923,9 +803,8 @@ begin
   AByteCount := Min(AByteCount, GetMaxByteCount(ACharCount));
   if Self = UTF8 then //# special case
   begin
-    while (AByteCount > 0) and
-      (GetRemainingUTF8EncodedCharacterByteCount(@ABytes[AByteIndex], AByteCount) <> 0) do
-        Dec(AByteCount);
+    while (AByteCount > 0) and (GetRemainingUTF8EncodedCharacterByteCount(@ABytes[AByteIndex], AByteCount) <> 0) do
+      Dec(AByteCount);
   end
   else
 
@@ -939,27 +818,287 @@ begin
 
   ACharArray := GetChars(ABytes, AByteIndex, AByteCount);
   ACharsUsed := Min(Length(ACharArray), ACharCount);
-  Move(ACharArray[0], AChars[ACharIndex], ACharsUsed * SizeOf(Char));
+  FastMove(ACharArray[0], AChars[ACharIndex], ACharsUsed * SizeOf(Char));
   ABytesUsed := GetByteCount(ACharArray, 0, ACharsUsed);
 end;
 
-function TEncodingHelper.WebName: string;
-var
-  AStartPos: Integer;
-  AEncodingName: string;
+{ TACLXMLReader }
+
+function TACLXMLReader.GetAttribute(const AAttribute: AnsiString): string;
 begin
-  AEncodingName := EncodingName;
-  AStartPos := Pos('(', AEncodingName) + 1;
-  Result := Copy(AEncodingName, AStartPos, Pos(')', AEncodingName) - AStartPos);
-  Result := LowerCase(Result);
+  Result := GetAttribute(string(AAttribute));
 end;
+
+function TACLXMLReader.GetAttribute(const AAttribute: string): string;
+begin
+  if not TryGetAttribute(AAttribute, Result) then
+    Result := acEmptyStr;
+end;
+
+function TACLXMLReader.GetAttributeAsBoolean(const AAttribute: AnsiString; const ADefaultValue: Boolean = False): Boolean;
+begin
+  Result := GetAttributeAsBoolean(string(AAttribute), ADefaultValue);
+end;
+
+function TACLXMLReader.GetAttribute(const APrefix, ALocalName, ANamespaceURI: string): string;
+begin
+  if not TryGetAttribute(APrefix, ALocalName, ANamespaceURI, Result) then
+    Result := acEmptyStr;
+end;
+
+function TACLXMLReader.GetAttributeAsBoolean(const AAttribute: string; const ADefaultValue: Boolean = False): Boolean;
+var
+  AValue: string;
+begin
+  if TryGetAttribute(AAttribute, AValue) then
+    Result := TACLXMLConvert.DecodeBoolean(AValue)
+  else
+    Result := ADefaultValue;
+end;
+
+function TACLXMLReader.GetAttributeAsInt64(const AAttribute: string; const ADefaultValue: Int64 = 0): Int64;
+begin
+  Result := StrToInt64Def(GetAttribute(AAttribute), ADefaultValue);
+end;
+
+function TACLXMLReader.GetAttributeAsInteger(const AAttribute: string; ADefaultValue: Integer = 0): Integer;
+begin
+  Result := StrToIntDef(GetAttribute(AAttribute), ADefaultValue);
+end;
+
+function TACLXMLReader.GetAttributeAsSingle(const AAttribute: string; ADefaultValue: Single = 0): Single;
+begin
+  Result := StrToFloatDef(GetAttribute(AAttribute), ADefaultValue, TFormatSettings.Invariant);
+end;
+
+function TACLXMLReader.GetDepth: Integer;
+begin
+  Result := FCurrentNode.Depth;
+end;
+
+function TACLXMLReader.IsEmptyElement: Boolean;
+begin
+  Result := FCurrentNode.IsEmptyElement;
+end;
+
+function TACLXMLReader.GetLocalName: string;
+begin
+  Result := FCurrentNode.LocalName;
+end;
+
+function TACLXMLReader.GetName: string;
+begin
+  Result := FCurrentNode.GetNameWPrefix(FNameTable);
+end;
+
+function TACLXMLReader.GetNamespaceURI: string;
+begin
+  Result := FCurrentNode.Namespace;
+end;
+
+function TACLXMLReader.GetNodeType: TACLXMLNodeType;
+begin
+  Result := FCurrentNode.&Type;
+end;
+
+function TACLXMLReader.GetPrefix: string;
+begin
+  Result := FCurrentNode.Prefix;
+end;
+
+function TACLXMLReader.GetValue: string;
+begin
+  Result := FCurrentNode.StringValue;
+end;
+
+function TACLXMLReader.SafeRead: Boolean;
+begin
+  try
+    Result := Read;
+  except
+    Result := False;
+  end;
+end;
+
+procedure TACLXMLReader.Skip;
+var
+  ADepth: Integer;
+begin
+  if ReadState <> TACLXMLReadState.Interactive then
+    Exit;
+  MoveToElement;
+  if (NodeType = TACLXMLNodeType.Element) and not IsEmptyElement then
+  begin
+    ADepth := Depth;
+
+    while Read and (ADepth < Depth) do
+    begin
+      //# Nothing, just read on
+    end;
+    //# consume end tag
+    if NodeType = TACLXMLNodeType.EndElement then
+      Read;
+  end
+  else
+    Read;
+end;
+
+{ TACLXMLLineInfo }
+
+procedure TACLXMLLineInfo.Init(ALineNo: Integer; ALinePos: Integer);
+begin
+  FLineNo := ALineNo;
+  FLinePos := ALinePos;
+end;
+
+{ TACLXMLNodeData }
+
+constructor TACLXMLNodeData.Create;
+begin
+  FValueLocation := TValueLocation.CharsBuffer;
+  SetValueNode(TACLXMLNodeType.None, '');
+  FXmlContextPushed := False;
+end;
+
+function TACLXMLNodeData.GetIsEmptyElement: Boolean;
+begin
+  Result := (FType = TACLXMLNodeType.Element) and FIsEmptyOrDefault;
+end;
+
+procedure TACLXMLNodeData.SetIsEmptyElement(AValue: Boolean);
+begin
+  Assert(FType = TACLXMLNodeType.Element);
+  FIsEmptyOrDefault := AValue;
+end;
+
+function TACLXMLNodeData.GetIsDefaultAttribute: Boolean;
+begin
+  Result := (FType = TACLXMLNodeType.Attribute) and FIsEmptyOrDefault;
+end;
+
+procedure TACLXMLNodeData.SetIsDefaultAttribute(AValue: Boolean);
+begin
+  Assert(FType = TACLXMLNodeType.Attribute);
+  FIsEmptyOrDefault := AValue;
+end;
+
+function TACLXMLNodeData.GetStringValue: string;
+begin
+  OnBufferInvalidated;
+  Result := FValue;
+end;
+
+procedure TACLXMLNodeData.SetValueNode(AType: TACLXMLNodeType; const AValue: string);
+begin
+  FType := AType;
+  FLocalName := '';
+  FPrefix := '';
+  FNamespace := '';
+  FNameWPrefix := '';
+  FValue := AValue;
+  FValueLocation := TValueLocation.ValueString;
+  FValueStartPos := -1;
+end;
+
+procedure TACLXMLNodeData.SetValueNode(AType: TACLXMLNodeType; const AChars: TCharArray; AStartPos, ALength: Integer);
+begin
+  FType := AType;
+  FLocalName := '';
+  FPrefix := '';
+  FNamespace := '';
+  FNameWPrefix := '';
+  FValue := '';
+
+  FChars := AChars;
+  FValueLocation := TValueLocation.CharsBuffer;
+  FValueStartPos := AStartPos;
+  FValueLength := ALength;
+end;
+
+procedure TACLXMLNodeData.SetNamedNode(AType: TACLXMLNodeType; const ALocalName, APrefix, ANameWPrefix: string);
+begin
+  Assert(ALocalName <> '');
+
+  FType := AType;
+  FLocalName := ALocalName;
+  FPrefix := APrefix;
+  FNameWPrefix := ANameWPrefix;
+  FNamespace := '';
+  FValue := '';
+  FValueLocation := TValueLocation.ValueString;
+  FValueStartPos := -1;
+end;
+
+procedure TACLXMLNodeData.SetValue(const AValue: string);
+begin
+  FValueStartPos := -1;
+  FValue := AValue;
+  FValueLocation := TValueLocation.ValueString;
+end;
+
+procedure TACLXMLNodeData.SetValue(const AChars: TCharArray; AStartPos: Integer; ALength: Integer);
+begin
+  FValue := '';
+  FValueLocation := TValueLocation.CharsBuffer;
+  FChars := AChars;
+  FValueStartPos := AStartPos;
+  FValueLength := ALength;
+end;
+
+procedure TACLXMLNodeData.OnBufferInvalidated;
+begin
+  if FValueLocation = TValueLocation.CharsBuffer then
+  begin
+    Assert(FChars <> nil);
+    SetString(FValue, PChar(@FChars[FValueStartPos]), FValueLength);
+    FValueLocation := TValueLocation.ValueString;
+  end;
+  FValueStartPos := -1;
+end;
+
+function TACLXMLNodeData.GetNameWPrefix(ANameTable: TACLXMLNameTable): string;
+begin
+  if FNameWPrefix = '' then
+  begin
+    if FPrefix <> '' then
+      FNameWPrefix := ANameTable.Add(FPrefix + ':' + FLocalName)
+    else
+      FNameWPrefix := FLocalName;
+  end;
+  Result := FNameWPrefix;
+end;
+
+procedure TACLXMLNodeData.CopyTo(AValueOffset: Integer; ASb: TStringBuilder);
+begin
+  if FValue = '' then
+  begin
+    Assert(FValueStartPos <> -1);
+    Assert(FChars <> nil);
+    ASb.Append(FChars, FValueStartPos + AValueOffset, FValueLength - AValueOffset);
+  end
+  else
+    if AValueOffset > 0 then
+      ASb.Append(FValue, AValueOffset, Length(FValue) - AValueOffset)
+    else
+      ASb.Append(FValue);
+end;
+
+{$REGION 'XML-Reader'}
 
 { TACLXMLReaderSettings }
 
-constructor TACLXMLReaderSettings.Create;
+class function TACLXMLReaderSettings.Default: TACLXMLReaderSettings;
 begin
-  inherited Create;
-  Initialize;
+  Result.CheckCharacters := True;
+  Result.ConformanceLevel := TACLXMLConformanceLevel.Document;
+  Result.DefaultEncoding := nil;
+  Result.IgnoreComments := False;
+  Result.IgnoreProcessingInstructions := False;
+  Result.IgnoreWhitespace := False;
+  Result.LineNumberOffset := 0;
+  Result.LinePositionOffset := 0;
+  Result.MaxCharactersInDocument := 0;
+  Result.SupportNamespaces := True;
 end;
 
 function TACLXMLReaderSettings.CreateReader(AInput: TStream): TACLXMLReader;
@@ -967,30 +1106,6 @@ begin
   if AInput = nil then
     raise EACLXMLArgumentNullException.Create('input');
   Result := TACLXMLTextReader.Create(AInput, nil, 0, Self);
-end;
-
-procedure TACLXMLReaderSettings.Initialize;
-begin
-  FNameTable := nil;
-
-  FLineNumberOffset := 0;
-  FLinePositionOffset := 0;
-  FCheckCharacters := True;
-  FConformanceLevel := TACLXMLConformanceLevel.Document;
-  FIgnoreWhitespace := False;
-  FIgnorePIs := False;
-  FIgnoreComments := False;
-  FMaxCharactersInDocument := 0;
-end;
-
-{ TACLXMLNamespaceManager.TNamespaceDeclaration }
-
-procedure TACLXMLNamespaceManager.TNamespaceDeclaration.&Set(const APrefix, AUri: string; AScopeId, APreviousNsIndex: Integer);
-begin
-  Prefix := APrefix;
-  Uri := AUri;
-  ScopeId := AScopeId;
-  PreviousNsIndex := APreviousNsIndex;
 end;
 
 { TACLXMLNamespaceManager }
@@ -1017,16 +1132,6 @@ destructor TACLXMLNamespaceManager.Destroy;
 begin
   FHashTable.Free;
   inherited Destroy;
-end;
-
-function TACLXMLNamespaceManager.GetNameTable: TACLXMLNameTable;
-begin
-  Result := FNameTable;
-end;
-
-function TACLXMLNamespaceManager.GetDefaultNamespace: string;
-begin
-  Result := LookupNamespace('');
 end;
 
 procedure TACLXMLNamespaceManager.PushScope;
@@ -1220,388 +1325,14 @@ begin
   Result := True;
 end;
 
-{ TACLXMLReader }
+{ TACLXMLNamespaceManager.TNamespaceDeclaration }
 
-class function TACLXMLReader.CalcBufferSize(AInput: TStream): Integer;
-var
-  ABufferSize: Integer;
-  ALen: Int64;
+procedure TACLXMLNamespaceManager.TNamespaceDeclaration.&Set(const APrefix, AUri: string; AScopeId, APreviousNsIndex: Integer);
 begin
-  ABufferSize := DefaultBufferSize;
-  ALen := AInput.Size;
-  if ALen < ABufferSize then
-    ABufferSize := Integer(ALen)
-  else
-    if ALen > MaxStreamLengthForDefaultBufferSize then
-      ABufferSize := BiggerBufferSize;
-  Result := ABufferSize;
-end;
-
-function TACLXMLReader.GetActualValue: string;
-begin
-  Result := Value;
-  if XmlSpace <> TACLXMLSpace.Preserve then
-    Result := RemoveRedundantSpaces(Result);
-end;
-
-function TACLXMLReader.GetHasValue: Boolean;
-begin
-  Result := HasValueInternal(NodeType);
-end;
-
-function TACLXMLReader.GetName: string;
-begin
-  if Prefix <> '' then
-    Result := NameTable.Add(Prefix + ':' + LocalName)
-  else
-    Result := LocalName;
-end;
-
-function TACLXMLReader.GetSettings: TACLXMLReaderSettings;
-begin
-  Result := nil;
-end;
-
-function TACLXMLReader.GetXmlSpace: TACLXMLSpace;
-begin
-  Result := TACLXMLSpace.None;
-end;
-
-function TACLXMLReader.GetAttribute(const AAttribute: AnsiString): string;
-begin
-  Result := GetAttribute(string(AAttribute));
-end;
-
-function TACLXMLReader.GetAttribute(const AAttribute: string): string;
-begin
-  if not TryGetAttribute(AAttribute, Result) then
-    Result := EmptyStr;
-end;
-
-function TACLXMLReader.GetAttributeAsBoolean(const AAttribute: AnsiString; const ADefaultValue: Boolean = False): Boolean;
-begin
-  Result := GetAttributeAsBoolean(string(AAttribute), ADefaultValue);
-end;
-
-function TACLXMLReader.GetAttribute(const APrefix, ALocalName, ANamespaceURI: string): string;
-begin
-  if not TryGetAttribute(APrefix, ALocalName, ANamespaceURI, Result) then
-    Result := EmptyStr;
-end;
-
-function TACLXMLReader.GetAttributeAsBoolean(const AAttribute: string; const ADefaultValue: Boolean = False): Boolean;
-var
-  AValue: string;
-begin
-  if TryGetAttribute(AAttribute, AValue) then
-    Result := TACLXMLConvert.DecodeBoolean(AValue)
-  else
-    Result := ADefaultValue;
-end;
-
-function TACLXMLReader.GetAttributeAsInt64(const AAttribute: string; const ADefaultValue: Int64 = 0): Int64;
-begin
-  Result := StrToInt64Def(GetAttribute(AAttribute), ADefaultValue);
-end;
-
-function TACLXMLReader.GetAttributeAsInteger(const AAttribute: string; ADefaultValue: Integer = 0): Integer;
-begin
-  Result := StrToIntDef(GetAttribute(AAttribute), ADefaultValue);
-end;
-
-function TACLXMLReader.GetAttributeAsSingle(const AAttribute: string; ADefaultValue: Single = 0): Single;
-begin
-  Result := StrToFloatDef(GetAttribute(AAttribute), ADefaultValue, TFormatSettings.Invariant);
-end;
-
-//# Reads to the following element with the given Name.
-function TACLXMLReader.ReadToFollowing(const ALocalName: string): Boolean;
-var
-  AName: string;
-begin
-  if ALocalName = '' then
-    raise EInvalidArgument.Create(ALocalName);
-  //# atomize name
-  AName := NameTable.Add(ALocalName);
-  while Read do
-    if (NodeType = TACLXMLNodeType.Element) and (Pointer(AName) = Pointer(Name)) then
-      Exit(True);
-  Result := False;
-end;
-
-function TACLXMLReader.ReadToFollowing(const ALocalName, ANameSpaceURI: string): Boolean;
-var
-  ALocalNameValue, ANamespaceURIValue: string;
-begin
-  if ALocalName = '' then
-    raise EACLXMLArgumentNullException.Create('LocalName');
-  if ANamespaceURI = '' then
-    raise EACLXMLArgumentNullException.Create('namespaceURI');
-  //# atomize local name and namespace
-  ALocalNameValue := NameTable.Add(ALocalName);
-  ANamespaceURIValue := NameTable.Add(ANamespaceURI);
-  //# find following element with that name
-  while Read do
-    if (NodeType = TACLXMLNodeType.Element) and (Pointer(ALocalNameValue) = Pointer(LocalName)) and
-      (Pointer(ANamespaceURIValue) = Pointer(NamespaceURI)) then
-        Exit(True);
-  Result := False;
-end;
-
-procedure TACLXMLReader.Skip;
-begin
-  if ReadState <> TACLXMLReadState.Interactive then
-    Exit;
-  SkipSubtree;
-end;
-
-//#SkipSubTree is called whenever validation of the skipped subtree is required on a reader with XsdValidation
-function TACLXMLReader.SkipSubtree: Boolean;
-var
-  ADepth: Integer;
-begin
-  MoveToElement;
-  if (NodeType = TACLXMLNodeType.Element) and not IsEmptyElement then
-  begin
-    ADepth := Depth;
-
-    while Read and (ADepth < Depth) do
-    begin
-      //# Nothing, just read on
-    end;
-    //# consume end tag
-    if NodeType = TACLXMLNodeType.EndElement then
-      Exit(Read);
-  end
-  else
-    Exit(Read);
-
-  Result := False; //# fix warning
-end;
-
-class function TACLXMLReader.HasValueInternal(ANodeType: TACLXMLNodeType): Boolean;
-begin
-  Result := 0 <> (HasValueBitmap and (1 shl Ord(ANodeType)));
-end;
-
-{ TACLXMLLineInfo }
-
-constructor TACLXMLLineInfo.Create(ALineNo: Integer; ALinePos: Integer);
-begin
-  FLineNo := ALineNo;
-  FLinePos := ALinePos;
-end;
-
-procedure TACLXMLLineInfo.&Set(ALineNo: Integer; ALinePos: Integer);
-begin
-  FLineNo := ALineNo;
-  FLinePos := ALinePos;
-end;
-
-{ TACLXMLNodeData }
-
-constructor TACLXMLNodeData.Create;
-begin
-  FValueLocation := TValueLocation.CharsBuffer;
-  Clear(TACLXMLNodeType.None);
-  FXmlContextPushed := False;
-end;
-
-class function TACLXMLNodeData.GetNone: TACLXMLNodeData;
-begin
-  if FNone = nil then
-    FNone := TACLXMLNodeData.Create;
-  Result := FNone;
-end;
-
-function TACLXMLNodeData.GetLineNo: Integer;
-begin
-  Result := FLineInfo.LineNo;
-end;
-
-function TACLXMLNodeData.GetLinePos: Integer;
-begin
-  Result := FLineInfo.LinePos;
-end;
-
-function TACLXMLNodeData.GetIsEmptyElement: Boolean;
-begin
-  Result := (FType = TACLXMLNodeType.Element) and FIsEmptyOrDefault;
-end;
-
-procedure TACLXMLNodeData.SetIsEmptyElement(const AValue: Boolean);
-begin
-  Assert(FType = TACLXMLNodeType.Element);
-  FIsEmptyOrDefault := AValue;
-end;
-
-function TACLXMLNodeData.GetIsDefaultAttribute: Boolean;
-begin
-  Result := (FType = TACLXMLNodeType.Attribute) and FIsEmptyOrDefault;
-end;
-
-procedure TACLXMLNodeData.SetIsDefaultAttribute(const AValue: Boolean);
-begin
-  Assert(FType = TACLXMLNodeType.Attribute);
-  FIsEmptyOrDefault := AValue;
-end;
-
-function TACLXMLNodeData.GetStringValue: string;
-begin
-  Assert((FValueStartPos >= 0) or (FValueLocation = TValueLocation.ValueString), 'Value not ready.');
-  if ValueBuffered then
-    SetString(FValue, PChar(@FChars[FValueStartPos]), FValueLength);
-  Result := FValue;
-end;
-
-function TACLXMLNodeData.GetValueBuffered: Boolean;
-begin
-  Result := FValueLocation = TValueLocation.CharsBuffer;
-end;
-
-procedure TACLXMLNodeData.Clear(AType: TACLXMLNodeType);
-begin
-  FType := AType;
-  ClearName;
-  FValue := '';
-  FValueLocation := TValueLocation.ValueString;
-  FValueStartPos := -1;
-  FNameWPrefix := '';
-end;
-
-procedure TACLXMLNodeData.ClearName;
-begin
-  FLocalName := '';
-  FPrefix := '';
-  FNamespace := '';
-  FNameWPrefix := '';
-end;
-
-procedure TACLXMLNodeData.SetLineInfo(ALineNo, ALinePos: Integer);
-begin
-  FLineInfo.&Set(ALineNo, ALinePos);
-end;
-
-procedure TACLXMLNodeData.SetLineInfo2(ALineNo, ALinePos: Integer);
-begin
-  FLineInfo2.&Set(ALineNo, ALinePos);
-end;
-
-procedure TACLXMLNodeData.SetValueNode(AType: TACLXMLNodeType; const AValue: string);
-begin
-//#  Assert(FValueLocation <> TValueLocation.CharsBuffer);
-  FType := AType;
-  ClearName;
-  FValue := AValue;
-  FValueLocation := TValueLocation.ValueString;
-  FValueStartPos := -1;
-end;
-
-procedure TACLXMLNodeData.SetValueNode(AType: TACLXMLNodeType; const AChars: TCharArray; AStartPos, ALength: Integer);
-begin
-  FType := AType;
-  ClearName;
-
-  FValue := '';
-  FValueLocation := TValueLocation.CharsBuffer;
-  FChars := AChars;
-  FValueStartPos := AStartPos;
-  FValueLength := ALength;
-end;
-
-procedure TACLXMLNodeData.SetNamedNode(AType: TACLXMLNodeType; const ALocalName: string);
-begin
-  SetNamedNode(AType, ALocalName, '', ALocalName);
-end;
-
-procedure TACLXMLNodeData.SetNamedNode(AType: TACLXMLNodeType; const ALocalName, APrefix, ANameWPrefix: string);
-begin
-  Assert(Length(ALocalName) > 0);
-
-  FType := AType;
-  FLocalName := ALocalName;
-  FPrefix := APrefix;
-  FNameWPrefix := ANameWPrefix;
-  FNamespace := '';
-  FValue := '';
-  FValueLocation := TValueLocation.ValueString;
-  FValueStartPos := -1;
-end;
-
-procedure TACLXMLNodeData.SetValue(const AValue: string);
-begin
-  FValueStartPos := -1;
-  FValue := AValue;
-  FValueLocation := TValueLocation.ValueString;
-end;
-
-procedure TACLXMLNodeData.SetValue(const AChars: TCharArray; AStartPos: Integer; ALength: Integer);
-begin
-  FValue := '';
-  FValueLocation := TValueLocation.CharsBuffer;
-  FChars := AChars;
-  FValueStartPos := AStartPos;
-  FValueLength := ALength;
-end;
-
-procedure TACLXMLNodeData.OnBufferInvalidated;
-begin
-  if FValueLocation = TValueLocation.CharsBuffer then
-  begin
-//#    Assert(FValueStartPos <> -1);
-    Assert(FChars <> nil);
-    SetString(FValue, PChar(@FChars[FValueStartPos]), FValueLength);
-    FValueLocation := TValueLocation.ValueString;
-  end;
-  FValueStartPos := -1;
-end;
-
-function TACLXMLNodeData.GetNameWPrefix(ANameTable: TACLXMLNameTable): string;
-begin
-  if FNameWPrefix <> '' then
-    Result := FNameWPrefix
-  else
-    Result := CreateNameWPrefix(ANameTable);
-end;
-
-function TACLXMLNodeData.CreateNameWPrefix(AXmlNameTable: TACLXMLNameTable): string;
-begin
-  Assert(FNameWPrefix = '');
-  if FPrefix = '' then
-    FNameWPrefix := FLocalName
-  else
-    FNameWPrefix := AXmlNameTable.Add(Concat(FPrefix, ':', FLocalName));
-  Result := FNameWPrefix;
-end;
-
-function TACLXMLNodeData.CompareTo(AObject: TObject): Integer;
-begin
-  if AObject is TACLXMLNodeData then
-  begin
-    Result := CompareStr(FLocalName, TACLXMLNodeData(AObject).FLocalName);
-    if Result = 0 then
-      Result := CompareStr(FNamespace, TACLXMLNodeData(AObject).FNamespace);
-  end
-  else
-  begin
-    Assert(False, 'We should never get to this point.');
-    Result := 1;
-  end;
-end;
-
-procedure TACLXMLNodeData.CopyTo(AValueOffset: Integer; ASb: TStringBuilder);
-begin
-  if FValue = '' then
-  begin
-    Assert(FValueStartPos <> -1);
-    Assert(FChars <> nil);
-    ASb.Append(FChars, FValueStartPos + AValueOffset, FValueLength - AValueOffset);
-  end
-  else
-    if AValueOffset <= 0 then
-      ASb.Append(FValue)
-    else
-      ASb.Append(FValue, AValueOffset, Length(FValue) - AValueOffset);
+  Prefix := APrefix;
+  Uri := AUri;
+  ScopeId := AScopeId;
+  PreviousNsIndex := APreviousNsIndex;
 end;
 
 { TACLXMLTextReader }
@@ -1614,135 +1345,74 @@ begin
   FFragmentType := TACLXMLNodeType.Document;
 end;
 
-class procedure TACLXMLTextReader.BlockCopyChars(ASource: TCharArray; ASourceOffset: Integer;
-  ADestination: TCharArray; ADestinationOffset, ACount: Integer);
-begin
-  Move(ASource[ASourceOffset], ADestination[ADestinationOffset], ACount * SizeOf(Char));
-end;
-
-class function TACLXMLTextReader.StrEqual(const AChars: TCharArray; AStrPos1, AStrLen1: Integer;
-  const AStr2: string): Boolean;
-var
-  I: Integer;
-begin
-  if AStrLen1 <> Length(AStr2) then
-    Exit(False);
-  I := 0;
-  while (I < AStrLen1) and (AChars[AStrPos1 + I] = AStr2[I + 1]) do
-    Inc(I);
-//#  Result := StrComp(PChar(@AChars[AStrPos1]), PChar(AStr2)) = 0;
-  Result := I = AStrLen1;
-end;
-
-//# StripSpaces removes spaces at the beginning and at the end of the value and
-//# replaces sequences of spaces with a single space
-//# rewritten and optimized for vcl
-class function TACLXMLTextReader.StripSpaces(const AValue: string): string;
-var
-  ALen: Integer;
-  ADest, ASrc, ASrcEnd, ADestStart: PChar;
-begin
-  ALen := Length(AValue);
-  if ALen = 0 then
-    Exit('');
-  ASrc := PChar(AValue);
-  ASrcEnd := ASrc + ALen;
-  while ASrc^ = #$0020 do
-  begin
-    Inc(ASrc);
-    if ASrc = ASrcEnd then
-      Exit(' ');
-  end;
-  SetLength(Result, ALen);
-  ADestStart := PChar(Result);
-  ADest := ADestStart;
-  while ASrcEnd > ASrc do
-  begin
-    if ASrc^ = #$0020 then
-    begin
-      while (ASrcEnd > ASrc) and (ASrc^ = #$0020) do
-        Inc(ASrc);
-
-      if ASrcEnd = ASrc then
-      begin
-        SetLength(Result, ADest - ADestStart);
-        Exit;
-      end;
-      ADest^ := #$0020;
-      Inc(ADest);
-    end;
-    ADest^ := ASrc^;
-    Inc(ADest);
-    Inc(ASrc);
-  end;
-  SetLength(Result, ADest - ADestStart);
-end;
-
-//# StripSpaces removes spaces at the beginning and at the end of the value and replaces sequences of spaces with a single space
-class procedure TACLXMLTextReader.StripSpaces(var AValue: TCharArray; AIndex: Integer; var ALen: Integer);
-var
-  AStartPos, AEndPos, AOffset, I, J: Integer;
-  ACh: Char;
-begin
-  if ALen <= 0 then
-    Exit;
-  AStartPos := AIndex;
-  AEndPos := AIndex + ALen;
-  while AValue[AStartPos] = #$0020 do
-  begin
-    Inc(AStartPos);
-    if AStartPos = AEndPos then
-    begin
-      ALen := 1;
-      Exit;
-    end;
-  end;
-  AOffset := AStartPos - AIndex;
-  I := AStartPos;
-  while I < AEndPos do
-  begin
-    ACh := AValue[I];
-    if ACh = #$0020 then
-    begin
-      J := I + 1;
-      while (J < AEndPos) and (AValue[J] = #$0020) do
-        Inc(J);
-      if J = AEndPos then
-      begin
-        Inc(AOffset, J - I);
-        Break;
-      end;
-      if J > I + 1 then
-      begin
-        Inc(AOffset, J - I - 1);
-        I := J - 1;
-      end;
-    end;
-    AValue[I - AOffset] := ACh;
-    Inc(I);
-  end;
-  Dec(ALen, AOffset);
-end;
-
-procedure TACLXMLTextReader.ClearNodes;
-var
-  I: Integer;
-begin
-  for I := 0 to Length(FNodes) - 1 do
-    FNodes[I].Free;
-end;
-
 constructor TACLXMLTextReader.Create(AStream: TStream;
-  const ABytes: TBytes; AByteCount: Integer; ASettings: TACLXMLReaderSettings);
+  const ABytes: TBytes; AByteCount: Integer;
+  const ASettings: TACLXMLReaderSettings);
 begin
   Create(ASettings);
+  InitStreamInput(AStream, ABytes, AByteCount, ASettings.DefaultEncoding);
+end;
 
-  FLaterInitParam := TLaterInitParam.Create;
-  FLaterInitParam.InputStream := AStream;
-  FLaterInitParam.InputBytes := ABytes;
-  FLaterInitParam.InputByteCount := AByteCount;
+constructor TACLXMLTextReader.Create(const ASettings: TACLXMLReaderSettings);
+begin
+  Create;
+  FXmlContext := TXmlContext.Create;
+  FStringBuilder := TStringBuilder.Create;
 
-  FinishInitStream;
+  FNameTable := TACLXMLNameTable.Create;
+  FNamespaceManager := TACLXMLNamespaceManager.Create(FNameTable);
+  FNameTable.Add('');
+  FXml := FNameTable.Add('xml');
+  FXmlNs := FNameTable.Add('xmlns');
+
+  Assert(FIndex = 0);
+
+  SetLength(FNodes, NodesInitialSize);
+  FNodes[0] := TACLXMLNodeData.Create;
+  FCurrentNode := FNodes[0];
+
+  if ASettings.IgnoreWhitespace then
+    FWhitespaceHandling := TACLXMLWhitespaceHandling.Significant
+  else
+    FWhitespaceHandling := TACLXMLWhitespaceHandling.All;
+
+  FNormalize := True;
+  FIgnoreProcessingInstructions := ASettings.IgnoreProcessingInstructions;
+  FIgnoreComments := ASettings.IgnoreComments;
+  FCheckCharacters := ASettings.CheckCharacters;
+  FLineNumberOffset := ASettings.LineNumberOffset;
+  FLinePositionOffset := ASettings.LinePositionOffset;
+  FParsingState.LineNo := FLineNumberOffset + 1;
+  FParsingState.LineStartPos := -FLinePositionOffset - 1;
+  FCurrentNode.LineInfo.Init(FParsingState.LineNo - 1, FParsingState.LinePos - 1);
+  FMaxCharactersInDocument := ASettings.MaxCharactersInDocument;
+  FSupportNamespaces := ASettings.SupportNamespaces;
+
+  FCharactersInDocument := 0;
+  FCharactersFromEntities := 0;
+
+  FParsingFunction := TParsingFunction.SwitchToInteractiveXmlDecl;
+  FNextParsingFunction := TParsingFunction.DocumentContent;
+
+  case ASettings.ConformanceLevel of
+    TACLXMLConformanceLevel.Auto:
+      begin
+        FFragmentType := TACLXMLNodeType.None;
+        FFragment := True;
+      end;
+    TACLXMLConformanceLevel.Fragment:
+      begin
+        FFragmentType := TACLXMLNodeType.Element;
+        FFragment := True;
+      end;
+    TACLXMLConformanceLevel.Document:
+      FFragmentType := TACLXMLNodeType.Document;
+    else
+    begin
+      Assert(False);
+      FFragmentType := TACLXMLNodeType.Document; //# goto case TACLXMLConformanceLevel.Document;
+    end;
+  end;
 end;
 
 destructor TACLXMLTextReader.Destroy;
@@ -1755,10 +1425,11 @@ begin
     FXmlContext.Free;
     FXmlContext := AXmlContext;
   end;
-  FreeAndNil(FInternalNameTable);
-  FreeAndNil(FNamespaceManager);
+  for var I := 0 to Length(FNodes) - 1 do
+    FNodes[I].Free;
   FreeAndNil(FStringBuilder);
-  ClearNodes;
+  FreeAndNil(FNamespaceManager);
+  FreeAndNil(FNameTable);
   inherited Destroy;
 end;
 
@@ -1821,91 +1492,6 @@ begin
   Result := nil;
 end;
 
-constructor TACLXMLTextReader.Create(ASettings: TACLXMLReaderSettings);
-var
-  ANameTable: TACLXMLNameTable;
-begin
-  Create;
-//#  FOuterReader := Self;
-
-  FXmlContext := TXmlContext.Create;
-  FStringBuilder := TStringBuilder.Create;
-
-  ANameTable := ASettings.NameTable;
-  if ANameTable = nil then
-  begin
-    FInternalNameTable := TACLXMLNameTable.Create;
-    ANameTable := FInternalNameTable;
-    Assert(FNameTableFromSettings = False);
-  end
-  else
-    FNameTableFromSettings := True;
-  FNameTable := ANameTable;
-  FNamespaceManager := TACLXMLNamespaceManager.Create(ANameTable);
-
-  ANameTable.Add('');
-  FXml := ANameTable.Add('xml');
-  FXmlNs := ANameTable.Add('xmlns');
-
-  Assert(FIndex = 0);
-
-  SetLength(FNodes, NodesInitialSize);
-  FNodes[0] := TACLXMLNodeData.Create;
-  FCurrentNode := FNodes[0];
-
-  if (ASettings.IgnoreWhitespace) then
-    FWhitespaceHandling := TACLXMLWhitespaceHandling.Significant
-  else
-    FWhitespaceHandling := TACLXMLWhitespaceHandling.All;
-  FNormalize := True;
-  FIgnorePIs := ASettings.IgnoreProcessingInstructions;
-  FIgnoreComments := ASettings.IgnoreComments;
-  FCheckCharacters := ASettings.CheckCharacters;
-  FLineNumberOffset := ASettings.LineNumberOffset;
-  FLinePositionOffset := ASettings.LinePositionOffset;
-  FParsingState.LineNo := FLineNumberOffset + 1;
-  FParsingState.LineStartPos := -FLinePositionOffset - 1;
-  FCurrentNode.SetLineInfo(FParsingState.LineNo - 1, FParsingState.LinePos - 1);
-  FMaxCharactersInDocument := ASettings.MaxCharactersInDocument;
-
-  FCharactersInDocument := 0;
-  FCharactersFromEntities := 0;
-
-  FParsingFunction := TParsingFunction.SwitchToInteractiveXmlDecl;
-  FNextParsingFunction := TParsingFunction.DocumentContent;
-
-  case ASettings.ConformanceLevel of
-    TACLXMLConformanceLevel.Auto:
-      begin
-        FFragmentType := TACLXMLNodeType.None;
-        FFragment := True;
-      end;
-    TACLXMLConformanceLevel.Fragment:
-      begin
-        FFragmentType := TACLXMLNodeType.Element;
-        FFragment := True;
-      end;
-    TACLXMLConformanceLevel.Document:
-      FFragmentType := TACLXMLNodeType.Document;
-    else
-    begin
-      Assert(False);
-      FFragmentType := TACLXMLNodeType.Document; //# goto case TACLXMLConformanceLevel.Document;
-    end;
-  end;
-end;
-
-procedure TACLXMLTextReader.FinishInit;
-begin
-  FinishInitStream;
-end;
-
-procedure TACLXMLTextReader.FinishInitStream;
-begin
-  InitStreamInput(FLaterInitParam.InputStream, FLaterInitParam.InputBytes, FLaterInitParam.InputByteCount, nil);
-  FreeAndNil(FLaterInitParam);
-end;
-
 //# When in ParsingState.PartialTextValue, this method parses and caches the rest of the value and stores it in curNode.
 procedure TACLXMLTextReader.FinishPartialValue;
 var
@@ -1930,7 +1516,7 @@ procedure TACLXMLTextReader.FullAttributeCleanup;
 var
   I: Integer;
 begin
-  for I := FIndex + 1 to FIndex + FAttributeCount + 1 - 1 do
+  for I := FIndex + 1 to FIndex + FAttributeCount do
     FNodes[I].IsDefaultAttribute := False;
   FFullAttributeCleanup := False;
 end;
@@ -1944,10 +1530,12 @@ var
 begin
   ANamespace := FNameTable.Get(ANamespaceURI);
   ALocalName := FNameTable.Get(AAttribute);
-  for I := FIndex + 1 to FIndex + FAttributeCount + 1 - 1 do
+  for I := FIndex + 1 to FIndex + FAttributeCount do
   begin
     ANode := FNodes[I];
-    if (ANode.LocalName = ALocalName) and (ANode.Namespace = ANamespace) then
+    if (Pointer(ANode.LocalName) = Pointer(ALocalName)) and
+       (Pointer(ANode.Namespace) = Pointer(ANamespace))
+    then
       Exit(ANode.StringValue);
   end;
   Result := '';
@@ -1957,10 +1545,10 @@ function TACLXMLTextReader.TryGetAttribute(const AAttribute: string; out AValue:
 var
   AAttrData: TACLXMLNodeData;
 begin
-  if AAttribute.Contains(':') then
+  if acPos(':', AAttribute) > 0 then
     AAttrData := GetAttributeWithPrefix(AAttribute)
   else
-    AAttrData := GetAttributeWithoutPrefix(AAttribute);
+    AAttrData := GetAttributeWithPrefix(AAttribute, '');
 
   Result := AAttrData <> nil;
   if Result then
@@ -1974,10 +1562,7 @@ begin
   if ANamespaceURI <> '' then
     AAttrData := GetAttributeWithNamespace(ALocalName, ANamespaceURI)
   else
-    if APrefix <> '' then
-      AAttrData := GetAttributeWithPrefix(ALocalName, APrefix)
-    else
-      AAttrData := GetAttributeWithoutPrefix(ALocalName);
+    AAttrData := GetAttributeWithPrefix(ALocalName, APrefix);
 
   Result := AAttrData <> nil;
   if Result then
@@ -2011,64 +1596,37 @@ begin
   Result := ACharsCount;
 end;
 
-function TACLXMLTextReader.GetDepth: Integer;
-begin
-  Result := FCurrentNode.Depth;
-end;
-
-function TACLXMLTextReader.GetInAttributeValueIterator: Boolean;
-begin
-  Result := (FAttributeCount > 0) and (FParsingFunction >= TParsingFunction.InReadAttributeValue);
-end;
-
-function TACLXMLTextReader.GetAttributeWithoutPrefix(const AName: string): TACLXMLNodeData;
-begin
-  Result := GetAttributeWithPrefix(AName, '');
-end;
-
-procedure TACLXMLTextReader.EnumAttributes(const AProc: TProc<string, string, string>);
+function TACLXMLTextReader.GetAttributeWithNamespace(const AName, ANamespaceURI: string): TACLXMLNodeData;
 var
-  AData: TACLXMLNodeData;
-  I: Integer;
+  ALocalName: string;
+  ANamespace: string;
+  ANode: TACLXMLNodeData;
 begin
-  for I := FIndex + 1 to FIndex + FAttributeCount do
+  ANamespace := FNameTable.Get(ANamespaceURI);
+  ALocalName := FNameTable.Get(AName);
+  for var I := FIndex + 1 to FIndex + FAttributeCount do
   begin
-    AData := FNodes[I];
-    AProc(AData.Prefix, AData.LocalName, AData.StringValue);
+    ANode := FNodes[I];
+    if (Pointer(ANode.LocalName) = Pointer(ALocalName)) and
+       (Pointer(ANode.Namespace) = Pointer(ANamespace))
+    then
+      Exit(ANode);
   end;
+  Result := nil;
 end;
 
 function TACLXMLTextReader.GetAttributeWithPrefix(const AName: string): TACLXMLNodeData;
 var
   ANameValue: string;
   ANode: TACLXMLNodeData;
-  I: Integer;
 begin
   ANameValue := FNameTable.Add(AName);
   if ANameValue = '' then
     Exit(nil);
-  for I := FIndex + 1 to FIndex + FAttributeCount do
+  for var I := FIndex + 1 to FIndex + FAttributeCount do
   begin
     ANode := FNodes[I];
     if (ANode.GetNameWPrefix(FNameTable) = ANameValue) then
-      Exit(ANode);
-  end;
-  Result := nil;
-end;
-
-function TACLXMLTextReader.GetAttributeWithNamespace(const AName, ANamespaceURI: string): TACLXMLNodeData;
-var
-  ALocalName: string;
-  ANamespace: string;
-  ANode: TACLXMLNodeData;
-  I: Integer;
-begin
-  ANamespace := FNameTable.Get(ANamespaceURI);
-  ALocalName := FNameTable.Get(AName);
-  for I := FIndex + 1 to FIndex + FAttributeCount do
-  begin
-    ANode := FNodes[I];
-    if (ANode.LocalName = ALocalName) and (ANode.Namespace = ANamespace) then
       Exit(ANode);
   end;
   Result := nil;
@@ -2079,44 +1637,20 @@ var
   ANameValue: string;
   ANode: TACLXMLNodeData;
   APrefixValue: string;
-  I: Integer;
 begin
   ANameValue := FNameTable.Add(ALocalName);
   if ANameValue = '' then
     Exit(nil);
   APrefixValue := FNameTable.Add(APrefix);
-  for I := FIndex + 1 to FIndex + FAttributeCount do
+  for var I := FIndex + 1 to FIndex + FAttributeCount do
   begin
     ANode := FNodes[I];
-    if (ANode.LocalName = ANameValue) and (ANode.Prefix = APrefixValue) then
+    if (Pointer(ANode.LocalName) = Pointer(ANameValue)) and
+       (Pointer(ANode.Prefix) = Pointer(APrefixValue))
+    then
       Exit(ANode);
   end;
   Result := nil;
-end;
-
-function TACLXMLTextReader.GetLocalName: string;
-begin
-  Result := FCurrentNode.LocalName;
-end;
-
-function TACLXMLTextReader.GetNamespaceURI: string;
-begin
-  Result := FCurrentNode.Namespace;
-end;
-
-function TACLXMLTextReader.GetNameTable: TACLXMLNameTable;
-begin
-  Result := FNameTable;
-end;
-
-function TACLXMLTextReader.GetNodeType: TACLXMLNodeType;
-begin
-  Result := FCurrentNode.&Type;
-end;
-
-function TACLXMLTextReader.GetPrefix: string;
-begin
-  Result := FCurrentNode.Prefix;
 end;
 
 procedure TACLXMLTextReader.InitStreamInput(AStream: TStream;
@@ -2139,8 +1673,7 @@ begin
   end
   else
   begin
-    ABufferSize := TACLXMLReader.CalcBufferSize(AStream);
-
+    ABufferSize := DefaultBufferSize;
     if (FParsingState.Bytes = nil) or (Length(FParsingState.Bytes) < ABufferSize) then
       SetLength(FParsingState.Bytes, ABufferSize);
   end;
@@ -2149,7 +1682,7 @@ begin
     SetLength(FParsingState.Chars, ABufferSize + 1);
 
   FParsingState.BytePos := 0;
-  while (FParsingState.BytesUsed < 4) and (Length(FParsingState.Bytes) - FParsingState.BytesUsed > 0) do
+  while (FParsingState.BytesUsed < 4) and (Length(FParsingState.Bytes) > FParsingState.BytesUsed) do
   begin
     ARead := AStream.Read(FParsingState.Bytes[FParsingState.BytesUsed], Length(FParsingState.Bytes) - FParsingState.BytesUsed);
     if ARead = 0 then
@@ -2194,8 +1727,8 @@ begin
     while ABytesDecoded < ABytesCount do
     begin
     //#ps.decoder.Convert( ps.bytes, ps.bytePos + bytesDecoded, 1, ps.chars, ps.charsUsed + charsDecoded, 1, false, out bDec, out chDec, out completed );
-      FParsingState.Decoder.Convert(FParsingState.Bytes, FParsingState.BytePos + ABytesDecoded, 1, FParsingState.Chars, FParsingState.CharsUsed + ACharsDecoded, 1,
-        ABDec, AChDec);
+      FParsingState.Decoder.Convert(FParsingState.Bytes, FParsingState.BytePos + ABytesDecoded, 1,
+        FParsingState.Chars, FParsingState.CharsUsed + ACharsDecoded, 1, ABDec, AChDec);
       Inc(ACharsDecoded, AChDec);
       Inc(ABytesDecoded, ABDec);
     end;
@@ -2204,22 +1737,17 @@ begin
   end;
 
   if ACharsDecoded = 0 then
-    Throw(FParsingState.CharsUsed, SXmlInvalidCharInThisEncoding);
+    Throw(FParsingState.CharsUsed, SXmlInvalidCharInThisEncoding, '');
   ACharsCount := ACharsDecoded;
   ABytesCount := ABytesDecoded;
 end;
 
-function TACLXMLTextReader.IsEmptyElement: Boolean;
-begin
-  Result := FCurrentNode.IsEmptyElement;
-end;
-
 function TACLXMLTextReader.LookupNamespace(const APrefix: string): string;
 begin
-  if not FSupportNamespaces then
-    Result := ''
+  if FSupportNamespaces then
+    Result := FNamespaceManager.LookupNamespace(APrefix)
   else
-    Result := FNamespaceManager.LookupNamespace(APrefix);
+    Result := '';
 end;
 
 function TACLXMLTextReader.MoveToElement: Boolean;
@@ -2248,8 +1776,8 @@ procedure TACLXMLTextReader.OnEof;
 begin
   Assert(FParsingState.IsEof);
   FCurrentNode := FNodes[0];
-  FCurrentNode.Clear(TACLXMLNodeType.None);
-  FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+  FCurrentNode.SetValueNode(TACLXMLNodeType.None, acEmptyStr);
+  FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
 
   FParsingFunction := TParsingFunction.Eof;
   FReadState := TACLXMLReadState.EndOfFile;
@@ -2267,7 +1795,7 @@ var
 begin
   if FParsingMode = TParsingMode.Full then
   begin
-    FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+    FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
     Assert(FStringBuilder.Length = 0);
     if ParseCDataOrComment(AType, AStartPos, AEndPos) then
       FCurrentNode.SetValueNode(AType, FParsingState.Chars, AStartPos, AEndPos - AStartPos)
@@ -2344,7 +1872,7 @@ begin
             goto ReturnPartial
           else
             if AType = TACLXMLNodeType.Comment then
-              Throw(APosition, SXmlInvalidCommentChars);
+              Throw(APosition, SXmlInvalidCommentChars, '');
       end
       else
         if APosition + 1 = FParsingState.CharsUsed then
@@ -2422,7 +1950,13 @@ begin
               Continue;
             end;
           end;
-          ThrowInvalidChar(AChars, FParsingState.CharsUsed, APosition);
+          if FCheckCharacters then
+            ThrowInvalidChar(AChars, FParsingState.CharsUsed, APosition)
+          else
+          begin
+            Inc(APosition);
+            Continue;
+          end;
         end;
       end;
     end;
@@ -2435,8 +1969,8 @@ ReturnPartial:
     end
     else
       AOutEndPosition := APosition;
-    AOutStartPosition := FParsingState.CharPos;
 
+    AOutStartPosition := FParsingState.CharPos;
     FParsingState.CharPos := APosition;
     Exit(False); //# false == parsing of comment or CData section is not finished yet, must be called again
   end;
@@ -2461,13 +1995,38 @@ begin
   end;
 end;
 
+function TACLXMLTextReader.ParseDoctypeDeclaraion: Boolean;
+begin
+  while FParsingState.CharsUsed - FParsingState.CharPos < 8 do
+  begin
+    if ReadData = 0 then
+      Throw(SXmlUnexpectedEOF, 'DOCTYPE');
+  end;
+
+  if not StrEqual(FParsingState.Chars, FParsingState.CharPos, 7, 'DOCTYPE') then
+    ThrowUnexpectedToken(IfThen(FRootElementParsed, '<!--', 'DOCTYPE'));
+
+  if not TACLXMLCharType.IsWhiteSpace(FParsingState.Chars[FParsingState.CharPos + 7]) then
+    ThrowExpectingWhitespace(FParsingState.CharPos + 7);
+
+  if FRootElementParsed then
+    Throw(FParsingState.CharPos - 2, SXmlBadDTDLocation, '');
+
+  Inc(FParsingState.CharPos, 8);
+  EatWhitespaces(nil);
+  //if (dtdProcessing == DtdProcessing.Parse) {
+  //} else
+  SkipDtd;
+  Result := False;
+end;
+
 function TACLXMLTextReader.ParseDocumentContent: Boolean;
 label
   LblReadData;
 var
+  AChars: TCharArray;
   AMangoQuirks, ANeedMoreChars: Boolean;
   APosition: Integer;
-  AChars: TCharArray;
 begin
   AMangoQuirks := False;
   while True do
@@ -2528,20 +2087,26 @@ begin
                     ThrowUnexpectedToken(APosition, 'CDATA[');
                 end
                 else
-                  Throw(FParsingState.CharPos, 'InvalidRootData');
+                  Throw(FParsingState.CharPos, 'InvalidRootData', '');
               end
               else
-                Throw(SDTDNotImplemented);
+              begin
+                FParsingState.CharPos := APosition;
+                if ParseDocTypeDeclaraion then
+                  Exit(True);
+                Continue;
+              end;
           end;
+
         '/':
-          Throw(APosition + 1, SXmlUnexpectedEndTag);
+          Throw(APosition + 1, SXmlUnexpectedEndTag, '');
         else
           begin
           //# document element start tag
             if FRootElementParsed then
             begin
               if FFragmentType = TACLXMLNodeType.Document then
-                Throw(APosition, SXmlMultipleRoots);
+                Throw(APosition, SXmlMultipleRoots, '');
               if FFragmentType = TACLXMLNodeType.None then
                 FFragmentType := TACLXMLNodeType.Element;
             end;
@@ -2553,9 +2118,29 @@ begin
       end;
     end
     else
+
       if AChars[APosition] = '&' then
-        Throw(SDTDNotImplemented)
+      begin
+//        if FFragmentType = TACLXMLNodeType.Document then
+          Throw(SXmlInvalidRootData)
+//        else
+//        begin
+//          if FFragmentType = TACLXMLNodeType.None then
+//            FFragmentType := TACLXMLNodeType.Element;
+//          case HandleEntityReference(False, TEntityExpandType.OnlyGeneral, ACharRefPos) of
+//            TEntityType.Unexpanded:
+//              Throw(SXmlEntityReferencesNotImplemented);
+//            TEntityType.CharacterDec, TEntityType.CharacterHex, TEntityType.CharacterNamed:
+//              if ParseText then
+//                Exit(True);
+//          else
+//            Inc(FParsingState.CharPos); // +1 т.к. EntityReferencesNotImplemented
+//          end;
+//          Continue;
+//        end;
+      end
       else
+
         if (APosition = FParsingState.CharsUsed) or (AMangoQuirks and (AChars[APosition] = #0)) then
           goto LblReadData
         else
@@ -2582,10 +2167,6 @@ begin
 
 LblReadData:
     //# read new characters into the buffer
-//# fix hint
-//#    if ReadData <> 0 then
-//#      APos := FPs.CharPos
-//#    else
     if ReadData = 0 then
     begin
       if ANeedMoreChars then
@@ -2594,19 +2175,17 @@ LblReadData:
       Assert(FIndex = 0);
 
       if not FRootElementParsed and (FFragmentType = TACLXMLNodeType.Document) then
-        ThrowWithoutLineInfo(SXmlMissingRoot);
+        ThrowWithoutLineInfo(SXmlMissingRoot, '');
 
       if FFragmentType = TACLXMLNodeType.None then
         if FRootElementParsed then
           FFragmentType := TACLXMLNodeType.Document
         else
           FFragmentType := TACLXMLNodeType.Element;
+
       OnEof;
       Exit(False);
     end;
-
-//# at the beginning of cycle:   APos := FPs.CharPos;
-    AChars := FParsingState.Chars;
   end;
 end;
 
@@ -2617,22 +2196,9 @@ begin
 
   Result := FNodes[ANodeIndex];
   if Result = nil then
-    Result := AllocNode(ANodeIndex, ANodeDepth)
-  else
-    Result.Depth := ANodeDepth;
-end;
-
-function TACLXMLTextReader.AllocNode(ANodeIndex, ANodeDepth: Integer): TACLXMLNodeData;
-begin
-  Assert(ANodeIndex < Length(FNodes));
-  if ANodeIndex >= Length(FNodes) - 1 then
-    SetLength(FNodes, Length(FNodes) * 2);
-
-  Assert(ANodeIndex < Length(FNodes));
-
-  Result := FNodes[ANodeIndex];
-  if Result = nil then
   begin
+    if ANodeIndex + 1 >= Length(FNodes) then
+      SetLength(FNodes, Length(FNodes) * 2);
     Result := TACLXMLNodeData.Create;
     FNodes[ANodeIndex] := Result;
   end;
@@ -2640,32 +2206,46 @@ begin
 end;
 
 procedure TACLXMLTextReader.AttributeDuplCheck;
+var
+  AAttr1: TACLXMLNodeData;
+  AAttr2: TACLXMLNodeData;
 begin
-  // По хорошему, надо найти дубликаты и сообщить о них.
-  // Но стоит ли ломать загрузку документа только из-за этого?
+  for var I := FIndex + 1 to FIndex + FAttributeCount do
+  begin
+    AAttr1 := FNodes[I];
+    for var J := I + 1 to FIndex + FAttributeCount do
+    begin
+      AAttr2 := FNodes[J];
+      if (Pointer(AAttr1.LocalName) = Pointer(AAttr2.LocalName)) and
+         (Pointer(AAttr1.Namespace) = Pointer(AAttr2.Namespace))
+      then
+        Throw(SXmlDupAttributeName, AAttr2.GetNameWPrefix(FNameTable), AAttr2.LineInfo.LineNo, AAttr2.LineInfo.LinePos);
+    end;
+  end;
 end;
 
 procedure TACLXMLTextReader.AttributeNamespaceLookup;
 var
-  I: Integer;
   AAt: TACLXMLNodeData;
 begin
-  for I := FIndex + 1 to FIndex + FAttributeCount do
+  for var I := FIndex + 1 to FIndex + FAttributeCount do
   begin
     AAt := FNodes[I];
-    if (AAt.&Type = TACLXMLNodeType.Attribute) and (Length(AAt.Prefix) > 0) then
+    if (AAt.&Type = TACLXMLNodeType.Attribute) and (AAt.Prefix <> '') then
       AAt.Namespace := LookupNamespace(AAt);
   end;
 end;
 
 function TACLXMLTextReader.AddAttribute(const ALocalName, APrefix: string; const ANameWPrefix: string): TACLXMLNodeData;
+{$IFDEF ACL_XML_DUPLICATES_CHECK}
 var
-  ANewAttr, AAttr: TACLXMLNodeData;
-  AAttrHash, I: Integer;
+  AAttr: TACLXMLNodeData;
+  AAttrHash: Integer;
+{$ENDIF}
 begin
-  ANewAttr := AddNode(FIndex + FAttributeCount + 1, FIndex + 1);
-  //# set attribute name
-  ANewAttr.SetNamedNode(TACLXMLNodeType.Attribute, ALocalName, APrefix, ANameWPrefix);
+  Result := AddNode(FIndex + FAttributeCount + 1, FIndex + 1);
+  Result.SetNamedNode(TACLXMLNodeType.Attribute, ALocalName, APrefix, ANameWPrefix);
+{$IFDEF ACL_XML_DUPLICATES_CHECK}
   //# pre-check attribute for duplicate: hash by first local name char
   AAttrHash := 1 shl (Ord(PChar(ALocalName)^) and $001F);
   if (FAttributeHashTable and AAttrHash) = 0 then
@@ -2676,11 +2256,11 @@ begin
     if FAttributeDuplicateWalkCount < MaxAttrDuplWalkCount then
     begin
       Inc(FAttributeDuplicateWalkCount);
-      for I := FIndex + 1 to FIndex + FAttributeCount + 1 - 1 do
+      for var I := FIndex + 1 to FIndex + FAttributeCount do
       begin
         AAttr := FNodes[I];
         Assert(AAttr.&Type = TACLXMLNodeType.Attribute);
-        if AAttr.LocalName = ANewAttr.LocalName then
+        if Pointer(AAttr.LocalName) = Pointer(Result.LocalName) then
         begin
           FAttributeDuplicateWalkCount := MaxAttrDuplWalkCount;
           Break;
@@ -2688,56 +2268,55 @@ begin
       end;
     end;
   end;
-
+{$ENDIF}
   Inc(FAttributeCount);
-  Result := ANewAttr;
 end;
 
 function TACLXMLTextReader.AddAttribute(AEndNamePos, AColonPos: Integer): TACLXMLNodeData;
 var
-  ALocalName, APrefix: string;
-  AStartPos, APrefixLen: Integer;
+  AAttrName: string;
+  APrefixLen: Integer;
+  AStartPos: Integer;
 begin
   //# setup attribute name
   if (AColonPos = -1) or not FSupportNamespaces then
   begin
-    ALocalName := FNameTable.Add(FParsingState.Chars, FParsingState.CharPos, AEndNamePos - FParsingState.CharPos);
-    Result := AddAttribute(ALocalName, '', ALocalName);
+    AAttrName := FNameTable.Add(FParsingState.Chars, FParsingState.CharPos, AEndNamePos - FParsingState.CharPos);
+    Result := AddAttribute(AAttrName, '', AAttrName);
   end
   else
   begin
     FAttributeNeedNamespaceLookup := True;
     AStartPos := FParsingState.CharPos;
     APrefixLen := AColonPos - AStartPos;
-    if (APrefixLen = Length(FLastPrefix)) and StrEqual(FParsingState.Chars, AStartPos, APrefixLen, FLastPrefix) then
+    if StrEqual(FParsingState.Chars, AStartPos, APrefixLen, FLastPrefix) then
       Result := AddAttribute(FNameTable.Add(FParsingState.Chars, AColonPos + 1, AEndNamePos - AColonPos - 1), FLastPrefix, '')
     else
     begin
-      APrefix := FNameTable.Add(FParsingState.Chars, AStartPos, APrefixLen);
-      FLastPrefix := APrefix;
-      Result := AddAttribute(FNameTable.Add(FParsingState.Chars, AColonPos + 1, AEndNamePos - AColonPos - 1), APrefix, '');
+      FLastPrefix := FNameTable.Add(FParsingState.Chars, AStartPos, APrefixLen);
+      Result := AddAttribute(FNameTable.Add(FParsingState.Chars, AColonPos + 1, AEndNamePos - AColonPos - 1), FLastPrefix, '');
     end;
   end;
 end;
 
 function TACLXMLTextReader.AddAttributeNoChecks(const AName: string; AAttrDepth: Integer): TACLXMLNodeData;
 var
-  ANewAttr: TACLXMLNodeData;
+  AAttrName: string;
 begin
-  ANewAttr := AddNode(FIndex + FAttributeCount + 1, AAttrDepth);
-  ANewAttr.SetNamedNode(TACLXMLNodeType.Attribute, FNameTable.Add(AName));
+  AAttrName := FNameTable.Add(AName);
+  Result := AddNode(FIndex + FAttributeCount + 1, AAttrDepth);
+  Result.SetNamedNode(TACLXMLNodeType.Attribute, AAttrName, acEmptyStr, AAttrName);
   Inc(FAttributeCount);
-  Result := ANewAttr;
 end;
 
-function TACLXMLTextReader.LookupNamespace(ANode: TACLXMLNodeData): string;
+function TACLXMLTextReader.LookupNamespace(const ANode: TACLXMLNodeData): string;
 begin
   Result := FNamespaceManager.LookupNamespace(ANode.Prefix);
   if Result = '' then
   // Немного кривой XML, согласен, но разве повод прерывать загрузку?
   // Throw оставляю для дебага, чтобы отловить ошибки записи.
   {$IFDEF DEBUG}
-    Throw(SXmlUnknownNs, ANode.Prefix, ANode.LineNo, ANode.LinePos);
+    Throw(SXmlUnknownNs, ANode.Prefix, ANode.LineInfo.LineNo, ANode.LineInfo.LinePos);
   {$ELSE}
     Result := ANode.Prefix;
   {$ENDIF}
@@ -2764,7 +2343,7 @@ begin
   APosition := ACurPosition;
   AChars := FParsingState.Chars;
 
-  AValueChunkLineInfo := TACLXMLLineInfo.Create(FParsingState.LineNo, FParsingState.LinePos);
+  AValueChunkLineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
 
   Assert(FStringBuilder.Length = 0);
 
@@ -2782,103 +2361,103 @@ begin
     end;
 
     if AChars[APosition] = AQuoteChar then
-      Break
-    else
-    begin
-      case AChars[APosition] of
-        #$000A: //# eol
+      Break;
+
+    case AChars[APosition] of
+      #$000A: //# eol
+        begin
+          Inc(APosition);
+          OnNewLine(APosition);
+          if FNormalize then
           begin
-            Inc(APosition);
-            OnNewLine(APosition);
+            FStringBuilder.Append(#$0020);
+            Inc(FParsingState.CharPos);
+          end;
+          Continue;
+        end;
+      #$000D:
+        begin
+          if AChars[APosition + 1] = #$000A then
+          begin
+            Inc(APosition, 2);
             if FNormalize then
             begin
-              FStringBuilder.Append(#$0020);
-              Inc(FParsingState.CharPos);
+              //# CDATA normalization of 0xD 0xA
+              if FParsingState.EolNormalized then
+                FStringBuilder.Append('  ')
+              else
+                FStringBuilder.Append(#$0020);
+              FParsingState.CharPos := APosition;
             end;
-            Continue;
-          end;
-        #$000D:
-          begin
-            if AChars[APosition + 1] = #$000A then
+          end
+          else
+            if (APosition + 1 < FParsingState.CharsUsed) or FParsingState.IsEof then
             begin
-              Inc(APosition, 2);
+              Inc(APosition);
               if FNormalize then
               begin
-                //# CDATA normalization of 0xD 0xA
-                if FParsingState.EolNormalized then
-                  FStringBuilder.Append('  ')
-                else
-                  FStringBuilder.Append(#$0020);
+                FStringBuilder.Append(#$0020);
                 FParsingState.CharPos := APosition;
               end;
             end
             else
-              if (APosition + 1 < FParsingState.CharsUsed) or FParsingState.IsEof then
-              begin
-                Inc(APosition);
-                if FNormalize then
-                begin
-                  FStringBuilder.Append(#$0020);
-                  FParsingState.CharPos := APosition;
-                end;
-              end
-              else
-                goto LblReadData;
-            OnNewLine(APosition);
-            Continue;
-          end;
-        #$0009:
+              goto LblReadData;
+          OnNewLine(APosition);
+          Continue;
+        end;
+      #$0009:
+        begin
+          Inc(APosition);
+          if FNormalize then
           begin
-            Inc(APosition);
-            if FNormalize then
-            begin
-              FStringBuilder.Append(#$0020);
-              Inc(FParsingState.CharPos);
-            end;
-            Continue;
+            FStringBuilder.Append(#$0020);
+            Inc(FParsingState.CharPos);
           end;
-        '"', #$00027, '>':
-          begin
-            Inc(APosition);
-            Continue;
-          end;
-        '<': //# attribute values cannot contain '<'
-          Throw(APosition, SXmlBadAttributeChar, EACLXMLException.BuildCharExceptionArgs('<', #0));
-        '&': //# entity reference
-          begin
-            if APosition - FParsingState.CharPos > 0 then
-              FStringBuilder.Append(AChars, FParsingState.CharPos, APosition - FParsingState.CharPos);
-            FParsingState.CharPos := APosition;
+          Continue;
+        end;
+      '"', #$00027, '>':
+        begin
+          Inc(APosition);
+          Continue;
+        end;
+      '<': //# attribute values cannot contain '<'
+        Throw(APosition, SXmlBadAttributeChar, EACLXMLException.BuildCharExceptionArgs('<', #0));
+      '&': //# entity reference
+        begin
+          if APosition - FParsingState.CharPos > 0 then
+            FStringBuilder.Append(AChars, FParsingState.CharPos, APosition - FParsingState.CharPos);
+          FParsingState.CharPos := APosition;
 
-            AEntityLineInfo := TACLXMLLineInfo.Create(FParsingState.LineNo, FParsingState.LinePos + 1);
-
-            if not (HandleEntityReference(True, TEntityExpandType.All, APosition) in
-              [TEntityType.CharacterDec, TEntityType.CharacterHex, TEntityType.CharacterNamed]) then
-              APosition := FParsingState.CharPos;
-            AChars := FParsingState.Chars;
-            Continue;
+          AEntityLineInfo.Init(FParsingState.LineNo, FParsingState.LinePos + 1);
+          case HandleEntityReference(True, TEntityExpandType.All, APosition) of
+            TEntityType.CharacterDec, TEntityType.CharacterHex, TEntityType.CharacterNamed:
+              { do nothing};
+          else
+            APosition := FParsingState.CharPos + 1; // +1 т.к. EntityReferencesNotImplemented
           end;
+          AChars := FParsingState.Chars;
+          Continue;
+        end;
+      else
+      begin
+        if APosition = FParsingState.CharsUsed then
+          goto LblReadData
         else
         begin
-          if APosition = FParsingState.CharsUsed then
-            goto LblReadData
-          else
+          ACh := AChars[APosition];
+          if TACLXMLCharType.IsHighSurrogate(ACh) then
           begin
-            ACh := AChars[APosition];
-            if TACLXMLCharType.IsHighSurrogate(ACh) then
+            if APosition + 1 = FParsingState.CharsUsed then
+              goto LblReadData;
+            Inc(APosition);
+            if TACLXMLCharType.IsLowSurrogate(AChars[APosition]) then
             begin
-              if APosition + 1 = FParsingState.CharsUsed then
-                goto LblReadData;
               Inc(APosition);
-              if TACLXMLCharType.IsLowSurrogate(AChars[APosition]) then
-              begin
-                Inc(APosition);
-                Continue;
-              end;
+              Continue;
             end;
-            ThrowInvalidChar(AChars, FParsingState.CharsUsed, APosition);
-            Break;
           end;
+          ThrowInvalidChar(AChars, FParsingState.CharsUsed, APosition);
+          Break;
         end;
       end;
     end;
@@ -2896,9 +2475,7 @@ begin
         Assert(FParsingState.IsEof);
       end
       else
-      begin
-        Throw(SDTDNotImplemented);
-      end;
+        Throw(SXmlEntityReferencesNotImplemented);
     end;
 
     APosition := FParsingState.CharPos;
@@ -2982,12 +2559,13 @@ procedure TACLXMLTextReader.OnNamespaceDecl(AAttribute: TACLXMLNodeData);
 var
   ANamespace: string;
 begin
-  if not FSupportNamespaces then
-    Exit;
-  ANamespace := FNameTable.Add(AAttribute.StringValue);
-  if ANamespace = '' then
-    Throw(SXmlBadNamespaceDecl, AAttribute.LineInfo2.LineNo, AAttribute.LineInfo2.LinePos - 1);
-  AddNamespace(AAttribute.LocalName, ANamespace, AAttribute);
+  if FSupportNamespaces then
+  begin
+    ANamespace := FNameTable.Add(AAttribute.StringValue);
+    if ANamespace = '' then
+      Throw(SXmlBadNamespaceDecl, AAttribute.LineInfo2.LineNo, AAttribute.LineInfo2.LinePos - 1);
+    AddNamespace(AAttribute.LocalName, ANamespace, AAttribute);
+  end;
 end;
 
 procedure TACLXMLTextReader.OnXmlReservedAttribute(AAttribute: TACLXMLNodeData);
@@ -2998,14 +2576,14 @@ begin
   begin
     if not FCurrentNode.XmlContextPushed then
       PushXmlContext;
-    AValue := Trim(AAttribute.StringValue);
+
+    AValue := acTrim(AAttribute.StringValue);
     if AValue = 'preserve' then
       FXmlContext.XmlSpace := TACLXMLSpace.Preserve
+    else if AValue = 'default' then
+      FXmlContext.XmlSpace := TACLXMLSpace.Default
     else
-      if AValue = 'default' then
-        FXmlContext.XmlSpace := TACLXMLSpace.Default
-      else
-        Throw(SXmlInvalidXmlSpace, AAttribute.StringValue, AAttribute.LineInfo.LineNo, AAttribute.LineInfo.LinePos);
+      Throw(SXmlInvalidXmlSpace, AAttribute.StringValue, AAttribute.LineInfo.LineNo, AAttribute.LineInfo.LinePos);
   end
   else
     if AAttribute.LocalName = 'lang' then
@@ -3107,7 +2685,7 @@ begin
           if APosition = FParsingState.CharsUsed then
             goto LblReadData
           else
-            if (ATmpCh1 <> ':') or (FSupportNamespaces) then
+            if (ATmpCh1 <> ':') or FSupportNamespaces then
               Throw(APosition, SXmlBadStartNameChar, EACLXMLException.BuildCharExceptionArgs(AChars, FParsingState.CharsUsed, APosition));
     end;
 
@@ -3169,7 +2747,7 @@ lbContinueParseName:
       end;
 
     AAttr := AddAttribute(APosition, AColonPos);
-    AAttr.SetLineInfo(FParsingState.LineNo, AAttrNameLinePos);
+    AAttr.LineInfo.Init(FParsingState.LineNo, AAttrNameLinePos);
     //# parse equals and quote char;
     if AChars[APosition] <> '=' then
     begin
@@ -3194,7 +2772,7 @@ lbContinueParseName:
     FParsingState.CharPos := APosition;
 
     AAttr.QuoteChar := AQuoteChar;
-    AAttr.SetLineInfo2(FParsingState.LineNo, FParsingState.LinePos);
+    AAttr.LineInfo2.Init(FParsingState.LineNo, FParsingState.LinePos);
 
     //# parse attribute value
     //# C# unsafe section
@@ -3266,16 +2844,20 @@ procedure TACLXMLTextReader.ParseElement;
 label
   ContinueStartName, ContinueName, ParseQNameSlow, SetElement;
 var
-  APosition, AColonPos, AStartPos, APrefixLen: Integer;
-  AChars: TCharArray;
   ACh: Char;
+  AChars: TCharArray;
+  AColonPos: Integer;
   AIsWs: Boolean;
+  ANodeName: string;
+  APosition: Integer;
+  APrefixLen: Integer;
+  AStartPos: Integer;
 begin
   APosition := FParsingState.CharPos;
   AChars := FParsingState.Chars;
   AColonPos := -1;
 
-  FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+  FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
 
 //# PERF: we intentionally don't call ParseQName here to parse the element name unless a special
 //# case occurs (like end of buffer, invalid name char)
@@ -3326,16 +2908,23 @@ SetElement:
 
   //# init the NodeData class
   if (AColonPos = -1) or not FSupportNamespaces then
-    FCurrentNode.SetNamedNode(TACLXMLNodeType.Element, FNameTable.Add(AChars, FParsingState.CharPos, APosition - FParsingState.CharPos))
+  begin
+    ANodeName := FNameTable.Add(AChars, FParsingState.CharPos, APosition - FParsingState.CharPos);
+    FCurrentNode.SetNamedNode(TACLXMLNodeType.Element, ANodeName, acEmptyStr, ANodeName);
+  end
   else
   begin
     AStartPos := FParsingState.CharPos;
     APrefixLen := AColonPos - AStartPos;
-    if (APrefixLen = Length(FLastPrefix)) and StrEqual(AChars, AStartPos, APrefixLen, FLastPrefix) then
-      FCurrentNode.SetNamedNode(TACLXMLNodeType.Element, FNameTable.Add(AChars, AColonPos + 1, APosition - AColonPos - 1), FLastPrefix, '')
+    if StrEqual(AChars, AStartPos, APrefixLen, FLastPrefix) then
+    begin
+      FCurrentNode.SetNamedNode(TACLXMLNodeType.Element,
+        FNameTable.Add(AChars, AColonPos + 1, APosition - AColonPos - 1), FLastPrefix, '')
+    end
     else
     begin
-      FCurrentNode.SetNamedNode(TACLXMLNodeType.Element, FNameTable.Add(AChars, AColonPos + 1, APosition - AColonPos - 1),
+      FCurrentNode.SetNamedNode(TACLXMLNodeType.Element,
+        FNameTable.Add(AChars, AColonPos + 1, APosition - AColonPos - 1),
         FNameTable.Add(AChars, FParsingState.CharPos, APrefixLen), '');
       FLastPrefix := FCurrentNode.Prefix;
     end;
@@ -3524,11 +3113,13 @@ begin
   ALocLen := Length(AStartTagNode.LocalName);
 
   while FParsingState.CharsUsed - FParsingState.CharPos < APrefLen + ALocLen + 1 do
+  begin
     if ReadData = 0 then
       Break;
+  end;
 
   AChars := FParsingState.Chars;
-  if Length(AStartTagNode.Prefix) = 0 then
+  if AStartTagNode.Prefix = '' then
   begin
     if not StrEqual(AChars, FParsingState.CharPos, ALocLen, AStartTagNode.LocalName) then
       ThrowTagMismatch(AStartTagNode);
@@ -3543,7 +3134,7 @@ begin
     ANameLen := ALocLen + APrefLen + 1;
   end;
 
-  AEndTagLineInfo := TACLXMLLineInfo.Create(FParsingState.LineNo, FParsingState.LinePos);
+  AEndTagLineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
 
   repeat
     APosition := FParsingState.CharPos + ANameLen;
@@ -3551,11 +3142,9 @@ begin
 
     if APosition = FParsingState.CharsUsed then
       goto LblReadData;
-    //# unsafe section
+
     //# Optimization due to the lack of inlining when a method uses byte*
     if (((TACLXMLCharType.CharProperties[AChars[APosition]] and TACLXMLCharType.NCNameSC) <> 0) or (AChars[APosition] = ':')) then
-    //##if XML10_FIFTH_EDITION
-    //#                         || xmlCharType.IsNCNameHighSurrogateChar( Chars[pos] )
       ThrowTagMismatch(AStartTagNode);
 
     if AChars[APosition] <> '>' then
@@ -3603,7 +3192,7 @@ LblReadData:
   FCurrentNode := FNodes[FIndex];
 
   Assert(FCurrentNode = AStartTagNode);
-  AStartTagNode.LineInfo := AEndTagLineInfo;
+  AStartTagNode.LineInfo.Init(AEndTagLineInfo.LineNo, AEndTagLineInfo.LinePos);
   AStartTagNode.&Type := TACLXMLNodeType.EndElement;
   FParsingState.CharPos := APosition + 1;
 
@@ -3725,7 +3314,7 @@ end;
 
 procedure TACLXMLTextReader.ShiftBuffer(ASourcePosition, ADestPosition, ACount: Integer);
 begin
-  Move(FParsingState.Chars[ASourcePosition], FParsingState.Chars[ADestPosition], ACount * SizeOf(Char));
+  FastMove(FParsingState.Chars[ASourcePosition], FParsingState.Chars[ADestPosition], ACount * SizeOf(Char));
 end;
 
 function TACLXMLTextReader.ParsePIValue(out AOutStartPosition, AOutEndPosition: Integer): Boolean;
@@ -3872,7 +3461,7 @@ var
   ASb: TStringBuilder;
 begin
   if FParsingMode = TParsingMode.Full then
-    FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+    FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
 
   Assert(FStringBuilder.Length = 0);
   //# parse target name
@@ -3886,8 +3475,8 @@ begin
 
   if APiInDtdStringBuilder = nil then
   begin
-    if not FIgnorePIs and (FParsingMode = TParsingMode.Full) then
-      FCurrentNode.SetNamedNode(TACLXMLNodeType.ProcessingInstruction, ATarget);
+    if not FIgnoreProcessingInstructions and (FParsingMode = TParsingMode.Full) then
+      FCurrentNode.SetNamedNode(TACLXMLNodeType.ProcessingInstruction, ATarget, acEmptyStr, ATarget);
   end
   else
     APiInDtdStringBuilder.Append(ATarget);
@@ -3901,15 +3490,15 @@ begin
     if FParsingState.CharsUsed - FParsingState.CharPos < 2 then
       ReadData;
     if (ACh <> '?') or (FParsingState.Chars[FParsingState.CharPos + 1] <> '>') then
-      Throw(SXmlBadNameChar, ConvertToConstArray(EACLXMLException.BuildCharExceptionArgs(FParsingState.Chars, FParsingState.CharsUsed,
-        FParsingState.CharPos)));
+      Throw(FParsingState.CharPos, SXmlBadNameChar, EACLXMLException.BuildCharExceptionArgs(
+        FParsingState.Chars, FParsingState.CharsUsed, FParsingState.CharPos));
   end;
 
   if ParsePIValue(AStartPos, AEndPos) then
   begin
     if APiInDtdStringBuilder = nil then
     begin
-      if FIgnorePIs then
+      if FIgnoreProcessingInstructions then
         Exit(False);
       if FParsingMode = TParsingMode.Full then
         FCurrentNode.SetValue(FParsingState.Chars, AStartPos, AEndPos - AStartPos);
@@ -3921,7 +3510,7 @@ begin
   begin
     if APiInDtdStringBuilder = nil then
     begin
-      if (FIgnorePIs) or (FParsingMode <> TParsingMode.Full) then
+      if FIgnoreProcessingInstructions or (FParsingMode <> TParsingMode.Full) then
       begin
         while not ParsePIValue(AStartPos, AEndPos) do;
         Exit(False);
@@ -4039,14 +3628,14 @@ begin
   if ANodeType = TACLXMLNodeType.None then
   begin
     EatWhitespaces(nil);
-    if (FParsingState.Chars[FParsingState.CharPos] = '<') or (FParsingState.CharsUsed - FParsingState.CharPos = 0) then
+    if (FParsingState.Chars[FParsingState.CharPos] = '<') or (FParsingState.CharsUsed = FParsingState.CharPos) then
       Exit(False);
   end
   else
   begin
-    FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+    FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
     EatWhitespaces(FStringBuilder);
-    if (FParsingState.Chars[FParsingState.CharPos] = '<') or (FParsingState.CharsUsed - FParsingState.CharPos = 0) then
+    if (FParsingState.Chars[FParsingState.CharPos] = '<') or (FParsingState.CharsUsed = FParsingState.CharPos) then
     begin
       if FStringBuilder.Length > 0 then
       begin
@@ -4071,35 +3660,23 @@ begin
   begin
     if FXmlContext.XmlSpace = TACLXMLSpace.Preserve then
       Exit(TACLXMLNodeType.SignificantWhitespace);
-
     if FWhitespaceHandling = TACLXMLWhitespaceHandling.All then
       Exit(TACLXMLNodeType.Whitespace);
   end;
   Result := TACLXMLNodeType.None;
 end;
 
-function TACLXMLTextReader.GetXmlSpace: TACLXMLSpace;
+function TACLXMLTextReader.GetText: string;
 begin
-  Result := FXmlContext.XmlSpace;
-end;
-
-function TACLXMLTextReader.GetTextNodeType(AOrChars: Integer): TACLXMLNodeType;
-begin
-  if AOrChars > $20 then
-    Result := TACLXMLNodeType.Text
-  else
-    Result := GetWhitespaceType;
-end;
-
-function TACLXMLTextReader.GetValue: string;
-begin
-  if FParsingFunction >= TParsingFunction.PartialTextValue then
-    if FParsingFunction = TParsingFunction.PartialTextValue then
-    begin
-      FinishPartialValue;
-      FParsingFunction := FNextParsingFunction;
-    end;
+  if FParsingFunction = TParsingFunction.PartialTextValue then
+  begin
+    FinishPartialValue;
+    FParsingFunction := FNextParsingFunction;
+  end;
   Result := FCurrentNode.StringValue;
+  if FXmlContext.XmlSpace <> TACLXMLSpace.Preserve then
+    //Result := acTrim(acReplaceChars(Value, #9#13#10, ' '))
+    Result := acTrim(Result);
 end;
 
 //# Parses text or white space node.
@@ -4120,7 +3697,7 @@ begin
     Exit(False);
   end;
 
-  FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+  FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
   Assert(FStringBuilder.Length = 0);
 
   //# the whole value is in buffer
@@ -4129,7 +3706,11 @@ begin
     if AEndPos - AStartPos = 0 then
       Exit(False);
 
-    ANodeType := GetTextNodeType(AOrChars);
+    if AOrChars > $20 then
+      ANodeType := TACLXMLNodeType.Text
+    else
+      ANodeType := GetWhitespaceType;
+
     if ANodeType = TACLXMLNodeType.None then
       Exit(False);
 
@@ -4157,9 +3738,15 @@ begin
       if AEndPos - AStartPos > 0 then
         FStringBuilder.Append(FParsingState.Chars, AStartPos, AEndPos - AStartPos);
     until not (not AFullValue and (AOrChars <= $20) and (FStringBuilder.Length < MinWhitespaceLookahedCount));
+
     //# determine the value node type
-    if (FStringBuilder.Length < MinWhitespaceLookahedCount) then
-      ANodeType := GetTextNodeType(AOrChars)
+    if FStringBuilder.Length < MinWhitespaceLookahedCount then
+    begin
+      if AOrChars > $20 then
+        ANodeType := TACLXMLNodeType.Text
+      else
+        ANodeType := GetWhitespaceType;
+    end
     else
       ANodeType := TACLXMLNodeType.Text;
 
@@ -4196,10 +3783,11 @@ function TACLXMLTextReader.ParseNumericCharRefInline(AStartPosition: Integer; AE
 label
   Return;
 var
-  AVal, APosition, ADigitPos: Integer;
-  AChars: TCharArray;
   ABadDigitExceptionString: string;
   ACh, ALow, AHigh: Char;
+  AChars: TCharArray;
+  AChByte: Byte;
+  AVal, APosition, ADigitPos: Integer;
 begin
   Assert((FParsingState.Chars[AStartPosition] = '&') and (FParsingState.Chars[AStartPosition + 1] = '#'));
 
@@ -4216,21 +3804,9 @@ begin
       Inc(APosition);
       ADigitPos := APosition;
       ABadDigitExceptionString := SXmlBadHexEntity;
-      while True do
+      while TACLHexcode.Decode(AChars[APosition], AChByte) do
       begin
-        ACh := AChars[APosition];
-        {$Q+}
-        if (ACh >= '0') and (ACh <= '9') then
-          AVal := AVal * 16 + Ord(ACh) - Ord('0')
-        else
-          if (ACh >= 'a') and (ACh <= 'f') then
-            AVal := AVal * 16 + 10 + Ord(ACh) - Ord('a')
-          else
-            if (ACh >= 'A') and (ACh <= 'F') then
-              AVal := AVal * 16 + 10 + Ord(ACh) - Ord('A')
-            else
-              Break;
-        {$Q-}
+        AVal := AVal * 16 + AChByte;
         Inc(APosition);
       end;
       AEntityType := TEntityType.CharacterHex;
@@ -4269,7 +3845,7 @@ begin
       //# need more data in the buffer
       Exit(-2)
     else
-      Throw(APosition, ABadDigitExceptionString);
+      Throw(APosition, ABadDigitExceptionString, '');
 
   if AVal <= Ord(High(Char)) then
   begin
@@ -4531,8 +4107,11 @@ begin
     ACharRefEndPos := ParseNamedCharRef(AExpandType <> TEntityExpandType.OnlyGeneral, nil);
     if ACharRefEndPos >= 0 then
       Exit(TEntityType.CharacterNamed);
-    if AIsInAttributeValue then
-      Throw(SDTDNotImplemented);
+
+    //# we does not supports for EntityReferences now
+    //# so, just skip the character
+    // Throw(SXmlEntityReferencesNotImplemented);
+
     Result := TEntityType.Skipped;
   end;
 end;
@@ -4642,9 +4221,10 @@ begin
           begin
             if APosition > FParsingState.CharPos then
               goto ReturnPartialValue;
+
             case HandleEntityReference(False, TEntityExpandType.All, APosition) of
               //# Needed only for XmlTextReader (reporting of entities)
-              TEntityType.CharacterDec, //# VCL removed V1Compat mode
+              TEntityType.CharacterDec,
               TEntityType.CharacterHex,
               TEntityType.CharacterNamed:
                 if not TACLXMLCharType.IsWhiteSpace(FParsingState.Chars[APosition - 1]) then
@@ -4658,7 +4238,7 @@ begin
                   goto NoValue;
                 end;
             else
-              APosition := FParsingState.CharPos + 1; // +1, because of Continue;
+              APosition := FParsingState.CharPos + 1; // +1 т.к. EntityReferencesNotImplemented
             end;
             AChars := FParsingState.Chars;
           end;
@@ -4671,7 +4251,7 @@ begin
             goto LblReadData;
 
           if (AChars[APosition + 1] = ']') and (AChars[APosition + 2] = '>') then
-            Throw(APosition, SXmlCDATAEndInText);
+            Throw(APosition, SXmlCDATAEndInText, '');
           AOrChars := AOrChars or Ord(']');
           Inc(APosition);
           Continue;
@@ -4798,8 +4378,8 @@ begin
 
   if not AIsTextDecl then
   begin
-    FCurrentNode.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos + 2);
-    FCurrentNode.SetNamedNode(TACLXMLNodeType.XmlDeclaration, Xml);
+    FCurrentNode.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos + 2);
+    FCurrentNode.SetNamedNode(TACLXMLNodeType.XmlDeclaration, Xml, acEmptyStr, Xml);
   end;
   Inc(FParsingState.CharPos, 5);
 
@@ -4843,15 +4423,7 @@ begin
         begin
           if AIsTextDecl then
             Throw(SXmlInvalidTextDecl);
-
-          if FAfterResetState then
-          begin
-            AEncodingName := FParsingState.Encoding.WebName;
-            if (((AEncodingName <> 'utf-8') and (AEncodingName <> 'utf-16')) and (AEncodingName <> 'utf-16be')) and not (FParsingState.Encoding is TMBCSEncoding) then
-              Throw(SXmlEncodingSwitchAfterResetState, IfThen(FParsingState.Encoding.GetByteCount('A') = 1, 'UTF-8', 'UTF-16'));
-          end;
-          if FParsingState.Decoder = TEncoding.ASCII then
-            SwitchEncodingToUTF8;
+          SwitchEncodingAfterResetState;
         end
         else
           SwitchEncoding(AEncoding);
@@ -4908,7 +4480,7 @@ begin
         ThrowTextDecl;
     end;
     if not AIsTextDecl then
-      AAttr.SetLineInfo(FParsingState.LineNo, FParsingState.LinePos);
+      AAttr.LineInfo.Init(FParsingState.LineNo, FParsingState.LinePos);
     ASb.Append(FParsingState.Chars, FParsingState.CharPos, ANameEndPos - FParsingState.CharPos);
     FParsingState.CharPos := ANameEndPos;
 
@@ -4934,7 +4506,7 @@ begin
     if not AIsTextDecl then
     begin
       AAttr.QuoteChar := AQuoteChar;
-      AAttr.SetLineInfo2(FParsingState.LineNo, FParsingState.LinePos);
+      AAttr.LineInfo2.Init(FParsingState.LineNo, FParsingState.LinePos);
     end;
     APosition := FParsingState.CharPos;
 
@@ -5013,17 +4585,7 @@ LblReadData:
 NoXmlDecl:
   if not AIsTextDecl then
     FParsingFunction := FNextParsingFunction;
-
-  if FAfterResetState then
-  begin
-    AEncodingName := FParsingState.Encoding.WebName;
-    if (AEncodingName <> 'utf-8') and (AEncodingName <> 'utf-16') and (AEncodingName <> 'utf-16be') and
-       not (FParsingState.Encoding is TMBCSEncoding) then
-      Throw(SXmlEncodingSwitchAfterResetState, IfThen(FParsingState.Encoding.GetByteCount('A') = 1, 'UTF-8', 'UTF-16'));
-  end;
-
-  if FParsingState.Decoder = TEncoding.ASCII then
-    SwitchEncodingToUTF8;
+  SwitchEncodingAfterResetState;
   FParsingState.AppendMode := False;
   Result := False;
 end;
@@ -5037,6 +4599,95 @@ begin
       //# 6 == strlen( "<?xml " );
       ReThrow(E, E.LineNumber, E.LinePosition - 6);
   end;
+end;
+
+procedure TACLXMLTextReader.SkipDtd;
+var
+  AColonPos: Integer;
+begin
+  // parse dtd name
+  FParsingState.CharPos := ParseQName(AColonPos);
+  // check whitespace
+  EatWhitespaces(nil);
+
+  // PUBLIC Id
+  if FParsingState.Chars[FParsingState.CharPos] = 'P' then
+  begin
+    // make sure we have enough characters
+    while FParsingState.charsUsed - FParsingState.charPos < 6 do
+    begin
+      if ReadData = 0 then
+        Throw(SXmlUnexpectedEOF1)
+    end;
+    // check 'PUBLIC'
+    if not StrEqual(FParsingState.Chars, FParsingState.CharPos, 6, 'PUBLIC') then
+      ThrowUnexpectedToken('PUBLIC');
+    Inc(FParsingState.CharPos, 6);
+
+    // check whitespace
+    if EatWhitespaces(nil) = 0 then
+      ThrowExpectingWhitespace(FParsingState.CharPos);
+
+    // parse PUBLIC value
+    SkipPublicOrSystemIdLiteral;
+
+    // check whitespace
+    if EatWhitespaces(nil) = 0 then
+      ThrowExpectingWhitespace(FParsingState.CharPos);
+
+    // parse SYSTEM value
+    SkipPublicOrSystemIdLiteral;
+
+    EatWhitespaces(nil);
+  end
+  else
+    // SYSTEM Value
+    if FParsingState.Chars[FParsingState.CharPos] = 'S' then
+    begin
+      // make sure we have enough characters
+      while FParsingState.charsUsed - FParsingState.charPos < 6 do
+      begin
+        if ReadData = 0 then
+          Throw(SXmlUnexpectedEOF1);
+      end;
+
+      // check 'SYSTEM'
+      if not StrEqual(FParsingState.Chars, FParsingState.CharPos, 6, 'SYSTEM') then
+        ThrowUnexpectedToken('SYSTEM');
+      Inc(FParsingState.CharPos, 6);
+
+      // check whitespace
+      if EatWhitespaces(nil) = 0 then
+        ThrowExpectingWhitespace(FParsingState.CharPos);
+
+      // parse SYSTEM value
+      SkipPublicOrSystemIdLiteral;
+
+      EatWhitespaces(nil);
+    end
+    else
+      if (FParsingState.Chars[FParsingState.CharPos] <> '[') and
+         (FParsingState.Chars[FParsingState.CharPos] <> '>')
+      then
+        Throw(SXmlExpectExternalOrClose);
+
+  // internal DTD
+  if FParsingState.Chars[FParsingState.CharPos] = '[' then
+  begin
+    Inc(FParsingState.CharPos);
+    SkipUntil(']', True);
+    EatWhitespaces(nil);
+    if FParsingState.Chars[FParsingState.CharPos] <> '>' then
+      ThrowUnexpectedToken('>');
+  end
+  else
+    // just close the entry
+    if FParsingState.Chars[FParsingState.CharPos] = '>' then
+      FCurrentNode.SetValue(acEmptyStr)
+    else
+      Throw(SXmlExpectSubOrClose);
+
+  Inc(FParsingState.CharPos);
 end;
 
 procedure TACLXMLTextReader.SkipPartialTextValue;
@@ -5054,6 +4705,220 @@ begin
   while not ParseText(AStartPos, AEndPos, AOrChars) do ;
 end;
 
+procedure TACLXMLTextReader.SkipPublicOrSystemIdLiteral;
+var
+  AQuoteChar: Char;
+begin
+  // check quote char
+  AQuoteChar := FParsingState.Chars[FParsingState.CharPos];
+  if (AQuoteChar <> '"') and (AQuoteChar <> #39) then
+    ThrowUnexpectedToken('", '#39);
+  Inc(FParsingState.CharPos);
+  SkipUntil(AQuoteChar, False);
+end;
+
+procedure TACLXMLTextReader.SkipUntil(AStopChar: Char; ARecognizeLiterals: Boolean);
+label
+  LblReadData;
+var
+  AChar: Char;
+  AChars: TCharArray;
+  AInComment: Boolean;
+  AInPI: Boolean;
+  AInLiteral: Boolean;
+  ALiteralQuote: Char;
+  APosition: Integer;
+begin
+  AInPI := False;
+  AInLiteral := False;
+  AInComment := False;
+  ALiteralQuote := '"';
+
+  AChars := FParsingState.Chars;
+  APosition := FParsingState.CharPos;
+
+  repeat
+
+    // fast forward on non-special characters
+    repeat
+      AChar := AChars[APosition];
+      if not TACLXMLCharType.IsAttributeValueChar(AChar) then
+        Break;
+      if AChar = AStopChar then
+        Break;
+      if AChar = '-' then
+        Break;
+      if AChar = '?' then
+        Break;
+      Inc(APosition);
+    until False;
+
+    // Closing stopChar outside of literal and ignore/include sections -> save value & return
+    if (Ord(AChar) = Ord(AStopChar)) and not AInLiteral then
+    begin
+      FParsingState.CharPos := APosition + 1;
+      Exit;
+    end;
+
+    // handle the special character
+    FParsingState.CharPos := APosition;
+    case AChar of
+      #$A:
+        begin
+          Inc(APosition);
+          OnNewLine(APosition);
+          Continue;
+        end;
+
+      #$D:
+        begin
+          if AChars[APosition + 1] = #$A then
+            Inc(APosition, 2)
+          else
+            if (APosition + 1 < FParsingState.CharsUsed) or FParsingState.IsEof then
+              Inc(APosition)
+            else
+              goto LblReadData;
+
+          OnNewLine(APosition);
+          Continue;
+        end;
+
+      // comment, instruction
+      '<':
+        begin
+          // processing instruction
+          if AChars[APosition + 1] = '?' then
+          begin
+            if ARecognizeLiterals and not AInLiteral and not AInComment then
+            begin
+              AInPI := True;
+              Inc(APosition, 2);
+              Continue;
+            end;
+          end
+          else
+            // comment
+            if AChars[APosition + 1] = '!' then
+            begin
+              if (APosition + 3 >= FParsingState.CharsUsed) and not FParsingState.IsEof then
+                goto LblReadData;
+              if (AChars[APosition + 2] = '-') and (AChars[APosition + 3] = '-') then
+              begin
+                if ARecognizeLiterals and not AInLiteral and AInPI then
+                begin
+                  AInComment := True;
+                  Inc(APosition, 4);
+                  Continue;
+                end;
+              end;
+            end
+            else // need more data
+              if (APosition + 1 >= FParsingState.CharsUsed) and not FParsingState.IsEof then
+                goto LblReadData;
+
+          Inc(APosition);
+          Continue;
+        end;
+
+      '-':
+        begin
+          // end of comment
+          if AInComment then
+          begin
+            if (APosition + 2 >= FParsingState.CharsUsed) and not FParsingState.IsEof then
+              goto LblReadData;
+            if (AChars[APosition + 1] = '-') and (AChars[APosition + 2] = '>') then
+            begin
+              AInComment := False;
+              Inc(APosition, 2);
+              Continue;
+            end;
+          end;
+          Inc(APosition);
+          Continue;
+        end;
+
+      '?':
+        begin
+          // end of processing instruction
+          if AInPI then
+          begin
+            if (APosition + 1 >= FParsingState.CharsUsed) and not FParsingState.IsEof then
+              goto LblReadData;
+            if (AChars[APosition + 1] = '>') then
+            begin
+              AInPI := False;
+              Inc(APosition);
+              Continue;
+            end;
+          end;
+          Inc(APosition);
+          Continue;
+        end;
+
+      #9, '>', ']', '&':
+        begin
+          Inc(APosition);
+          Continue;
+        end;
+
+      '"', '''':
+        begin
+          if AInLiteral then
+          begin
+            if Ord(ALiteralQuote) = Ord(AChar) then
+              AInLiteral := False;
+          end
+          else
+            if ARecognizeLiterals and not (AInComment or AInPI) then
+            begin
+              AInLiteral := True;
+              ALiteralQuote := AChar;
+            end;
+
+          Inc(APosition);
+          Continue;
+        end;
+
+    else // default handler
+      if APosition = FParsingState.CharsUsed then
+        goto LblReadData
+      else // surrogate chars
+      begin
+        if TACLXMLCharType.IsHighSurrogate(AChars[APosition]) then
+        begin
+          if APosition + 1 = FParsingState.CharsUsed then
+            goto LblReadData;
+          Inc(APosition);
+          if TACLXMLCharType.IsLowSurrogate(AChars[APosition]) then
+          begin
+            Inc(APosition);
+            Continue;
+          end;
+        end;
+        ThrowInvalidChar(AChars, FParsingState.CharsUsed, APosition);
+        Break;
+      end;
+    end;
+
+LblReadData:
+    // read new characters into the buffer
+    if ReadData = 0 then
+    begin
+      if FParsingState.CharsUsed > FParsingState.CharPos then
+      begin
+        if Ord(FParsingState.Chars[FParsingState.CharPos]) <> $D then
+          Throw(SXmlUnexpectedEOF1);
+      end
+      else
+        Throw(SXmlUnexpectedEOF1);
+    end;
+    APosition := FParsingState.CharPos;
+    AChars := FParsingState.Chars;
+  until False;
+end;
+
 procedure TACLXMLTextReader.ReThrow(E: Exception; ALineNo, ALinePos: Integer);
 begin
   Throw(EACLXMLException.Create(E.Message, nil, ALineNo, ALinePos, ''));
@@ -5061,9 +4926,6 @@ end;
 
 function TACLXMLTextReader.Read: Boolean;
 begin
-  if FLaterInitParam <> nil then
-    FinishInit;
-
   while True do
   begin
     case FParsingFunction of
@@ -5139,7 +5001,7 @@ begin
         Exit(False);
       TParsingFunction.NoData:
         begin
-          ThrowWithoutLineInfo(SXmlMissingRoot);
+          ThrowWithoutLineInfo(SXmlMissingRoot, '');
           Exit(False);
         end;
       TParsingFunction.PartialTextValue:
@@ -5201,7 +5063,7 @@ begin
       begin
         FParsingState.LineStartPos := FParsingState.LineStartPos - FParsingState.CharPos;
         if ACopyCharsCount > 0 then
-          BlockCopyChars(FParsingState.Chars, FParsingState.CharPos, FParsingState.Chars, 0, ACopyCharsCount);
+          FastMove(FParsingState.Chars[FParsingState.CharPos], FParsingState.Chars[0], ACopyCharsCount * SizeOf(Char));
         FParsingState.CharPos := 0;
         FParsingState.CharsUsed := ACopyCharsCount;
       end
@@ -5219,7 +5081,7 @@ begin
           FParsingState.BytesUsed := 0
         else
         begin
-          Move(FParsingState.Bytes[FParsingState.BytePos], FParsingState.Bytes[0], ABytesLeft);
+          FastMove(FParsingState.Bytes[FParsingState.BytePos], FParsingState.Bytes[0], ABytesLeft);
           FParsingState.BytesUsed := ABytesLeft;
         end;
         FParsingState.BytePos := 0;
@@ -5325,7 +5187,7 @@ begin
   else
   begin
     FParsingState.Encoding := AEncoding;
-    if ContainsStr(FParsingState.Encoding.WebName, 'utf-16') then
+    if ContainsStr(TACLEncodings.WebName(AEncoding), 'utf-16') then
       FParsingState.Decoder := TEncoding.Unicode
     else
       FParsingState.Decoder := AEncoding;
@@ -5334,7 +5196,8 @@ end;
 
 procedure TACLXMLTextReader.SwitchEncoding(ANewEncoding: TEncoding);
 begin
-  if (ANewEncoding.WebName <> FParsingState.Encoding.WebName) or (FParsingState.Decoder = TEncoding.ASCII) and not FAfterResetState then
+  if (FParsingState.Decoder = TEncoding.ASCII) and not FAfterResetState or
+    (TACLEncodings.WebName(ANewEncoding) <> TACLEncodings.WebName(FParsingState.Encoding)) then
   begin
     Assert(FParsingState.Stream <> nil);
     UnDecodeChars;
@@ -5344,25 +5207,29 @@ begin
   end;
 end;
 
+procedure TACLXMLTextReader.SwitchEncodingAfterResetState;
+var
+  AEncodingName: string;
+begin
+  if FAfterResetState then
+  begin
+    AEncodingName := TACLEncodings.WebName(FParsingState.Encoding);
+    if (AEncodingName <> 'utf-8') and (AEncodingName <> 'utf-16') and (AEncodingName <> 'utf-16be') and
+      not (FParsingState.Encoding is TMBCSEncoding)
+    then
+      Throw(SXmlEncodingSwitchAfterResetState, IfThen(FParsingState.Encoding.GetByteCount('A') = 1, 'UTF-8', 'UTF-16'));
+  end;
+  if FParsingState.Decoder = TEncoding.ASCII then
+    SwitchEncodingToUTF8;
+end;
+
 procedure TACLXMLTextReader.SwitchEncodingToUTF8;
 begin
   SwitchEncoding(TEncoding.UTF8);
 end;
 
-procedure TACLXMLTextReader.ThrowUnexpectedToken(APosition: Integer; const AExpectedToken1, AExpectedToken2: string);
-begin
-  FParsingState.CharPos := APosition;
-  ThrowUnexpectedToken(AExpectedToken1, AExpectedToken2);
-end;
-
 procedure TACLXMLTextReader.Throw(const ARes: string);
 begin
-  Throw(ARes, '');
-end;
-
-procedure TACLXMLTextReader.Throw(APosition: Integer; const ARes: string);
-begin
-  FParsingState.CharPos := APosition;
   Throw(ARes, '');
 end;
 
@@ -5382,7 +5249,7 @@ var
   AElement: TACLXMLNodeData;
 begin
   if (FIndex = 0) and (FCurrentNode.&Type <> TACLXMLNodeType.Element) then
-    Throw(FParsingState.CharsUsed, SXmlUnexpectedEOF1)
+    Throw(FParsingState.CharsUsed, SXmlUnexpectedEOF1, '')
   else
   begin
     if (FParsingFunction = TParsingFunction.InIncrementalRead) then
@@ -5406,6 +5273,12 @@ begin
   end;
 end;
 
+procedure TACLXMLTextReader.ThrowUnexpectedToken(APosition: Integer; const AExpectedToken1, AExpectedToken2: string);
+begin
+  FParsingState.CharPos := APosition;
+  ThrowUnexpectedToken(AExpectedToken1, AExpectedToken2);
+end;
+
 procedure TACLXMLTextReader.ThrowUnexpectedToken(const AExpectedToken1, AExpectedToken2: string);
 var
   AUnexpectedToken: string;
@@ -5419,31 +5292,9 @@ begin
     Throw(SXmlUnexpectedTokenEx, [AUnexpectedToken, AExpectedToken1]);
 end;
 
-procedure TACLXMLTextReader.ThrowUnexpectedToken(AExpectedToken: string);
-begin
-  ThrowUnexpectedToken(AExpectedToken, '');
-end;
-
 procedure TACLXMLTextReader.ThrowWithoutLineInfo(const ARes, AArg: string);
 begin
   Throw(EACLXMLException.Create(ARes, AArg, ''));
-end;
-
-class function TACLXMLTextReader.ConvertToConstArray(const AArgs: TArray<string>): TArray<TVarRec>;
-var
-  I: Integer;
-begin
-  SetLength(Result, Length(AArgs));
-  for I := Low(AArgs) to High(AArgs) do
-  begin
-    string(Result[I].VUnicodeString) := UnicodeString(AArgs[I]);
-    Result[I].VType := vtUnicodeString;
-  end;
-end;
-
-procedure TACLXMLTextReader.ThrowWithoutLineInfo(const ARes: string);
-begin
-  Throw(EACLXMLException.Create(ARes, '', ''));
 end;
 
 procedure TACLXMLTextReader.UnDecodeChars;
@@ -5495,7 +5346,7 @@ begin
   SetErrorState;
   AXmlEx := E as EACLXMLException;
   if AXmlEx <> nil then
-    FCurrentNode.SetLineInfo(AXmlEx.LineNumber, AXmlEx.LinePosition);
+    FCurrentNode.LineInfo.Init(AXmlEx.LineNumber, AXmlEx.LinePosition);
   raise E;
 end;
 
@@ -5505,7 +5356,7 @@ var
 begin
   AUnexpectedToken := ParseUnexpectedToken(APosition);
   if AUnexpectedToken = '' then
-    Throw(APosition, SXmlUnexpectedEOF1)
+    Throw(APosition, SXmlUnexpectedEOF1, '')
   else
     Throw(APosition, SXmlExpectingWhiteSpace, AUnexpectedToken);
 end;
@@ -5554,8 +5405,16 @@ begin
 end;
 
 procedure TACLXMLTextReader.Throw(APosition: Integer; const ARes: string; const AArgs: TArray<string>);
+var
+  AArguments: TArray<TVarRec>;
 begin
-  Throw(APosition, ARes, ConvertToConstArray(AArgs));
+  SetLength(AArguments, Length(AArgs));
+  for var I := Low(AArgs) to High(AArgs) do
+  begin
+    UnicodeString(AArguments[I].VUnicodeString) := UnicodeString(AArgs[I]);
+    AArguments[I].VType := vtUnicodeString;
+  end;
+  Throw(APosition, ARes, AArguments);
 end;
 
 { TACLXMLNameTable }
@@ -5584,7 +5443,7 @@ var
   AIndex, AHash: Cardinal;
   AEntry, ATemp: PItem;
 begin
-  AHash := Hash(AKey);
+  AHash := Hash(PChar(AKey), Length(AKey));
   AIndex := AHash mod TableSize;
   AEntry := FTable[AIndex];
   if AEntry = nil then
@@ -5625,7 +5484,7 @@ begin
   end
   else
     repeat
-      if (AHash = AEntry.Hash) and AEntry.Compare(AKey, AStart, ALength) then
+      if (AHash = AEntry.Hash) and StrEqual(AKey, AStart, ALength, AEntry.Value) then
         Exit(AEntry.Value);
 
       ATemp := AEntry.Next;
@@ -5644,10 +5503,10 @@ var
   AHash: Cardinal;
   AEntry, ATemp: PItem;
 begin
-  AHash := Hash(AValue);
+  AHash := Hash(PChar(AValue), Length(AValue));
   AEntry := FTable[AHash mod TableSize];
   if AEntry = nil then
-    Exit(EmptyStr);
+    Exit(acEmptyStr);
 
   repeat
     if (AHash = AEntry.Hash) and (AValue = AEntry.Value) then
@@ -5655,17 +5514,12 @@ begin
 
     ATemp := AEntry.Next;
     if ATemp = nil then
-      Exit(EmptyStr);
+      Exit(acEmptyStr);
 
     AEntry := ATemp;
   until False;
 
-  Result := EmptyStr;
-end;
-
-function TACLXMLNameTable.Hash(const S: string): Cardinal;
-begin
-  Result := Hash(PChar(S), Length(S));
+  Result := acEmptyStr;
 end;
 
 function TACLXMLNameTable.Hash(P: PChar; L: Integer): Cardinal;
@@ -5692,13 +5546,6 @@ begin
   Result.Next := nil;
 end;
 
-{ TACLXMLNameTable.TItem }
-
-function TACLXMLNameTable.TItem.Compare(const AKey: TCharArray; AStart, ALength: Integer): Boolean;
-begin
-  Result := (Length(Value) = ALength) and CompareMem(PChar(Value), @AKey[AStart], ALength * SizeOf(Char));
-end;
-
 { TACLXMLTextReader.TParsingState }
 
 procedure TACLXMLTextReader.TParsingState.Clear;
@@ -5719,10 +5566,14 @@ begin
   EolNormalized := True;
 end;
 
-function TACLXMLTextReader.TParsingState.GetLinePos: Integer;
+function TACLXMLTextReader.TParsingState.LinePos: Integer;
 begin
   Result := CharPos - LineStartPos;
 end;
+
+{$ENDREGION}
+
+{$REGION 'XML-Loaders'}
 
 { TACLXMLNodeLoader }
 
@@ -5819,7 +5670,7 @@ function TACLXMLNodeLoaders.GetLoader(AReader: TACLXMLReader): TACLXMLNodeLoader
 begin
   Result := GetLoader(AReader, AReader.Name);
   if Result = nil then
-    Result := GetLoader(AReader, EmptyStr);
+    Result := GetLoader(AReader, acEmptyStr);
 end;
 
 function TACLXMLNodeLoaders.GetLoader(AReader: TACLXMLReader; const AName: string): TACLXMLNodeLoader;
@@ -5886,16 +5737,15 @@ end;
 
 constructor TACLXMLDocumentLoader.Create;
 begin
-  FSettings := TACLXMLReaderSettings.Create;
-  FSettings.IgnoreComments := True;
-  FSettings.IgnoreWhitespace := True;
-  FLoaders := TACLXMLNodeLoaders.Create;
+  Settings := TACLXMLReaderSettings.Default;
+  Settings.IgnoreComments := True;
+  Settings.IgnoreWhitespace := True;
+  Loaders := TACLXMLNodeLoaders.Create;
 end;
 
 destructor TACLXMLDocumentLoader.Destroy;
 begin
-  FreeAndNil(FLoaders);
-  FreeAndNil(FSettings);
+  FreeAndNil(Loaders);
   inherited;
 end;
 
@@ -5906,16 +5756,7 @@ var
   ALoaderStack: TStack<TACLXMLNodeLoader>;
   AReader: TACLXMLReader;
 
-  function SafeReadNext: Boolean;
-  begin
-    try
-      Result := AReader.Read;
-    except
-      Result := False;
-    end;
-  end;
-
-  procedure SafeEndElement;
+  procedure DoEndElement;
   var
     ALoader: TACLXMLNodeLoader;
   begin
@@ -5926,24 +5767,28 @@ var
     AContext := AContextStack.Pop;
   end;
 
+var
+  AIsEmptyElement: Boolean;
 begin
   if AStream.Position < AStream.Size then
   begin
     AContextStack := TStack<TObject>.Create;
     ALoaderStack := TStack<TACLXMLNodeLoader>.Create;
     try
-      AReader := FSettings.CreateReader(AStream);
+      AReader := Settings.CreateReader(AStream);
       try
         AContextStack.Push(AContext);
-        while SafeReadNext do
+        while AReader.SafeRead do
           case AReader.NodeType of
             TACLXMLNodeType.EndElement:
-              if AReader.Depth >= Ord(FSkipRootNode) then
-                SafeEndElement;
+              if AReader.Depth >= Ord(SkipRootNode) then
+                DoEndElement;
 
             TACLXMLNodeType.Element:
-              if AReader.Depth >= Ord(FSkipRootNode) then
+              if AReader.Depth >= Ord(SkipRootNode) then
               begin
+                AIsEmptyElement := AReader.IsEmptyElement;
+
                 if ALoaderStack.Count > 0 then
                 begin
                   ALoader := ALoaderStack.Peek;
@@ -5951,7 +5796,7 @@ begin
                     ALoader := ALoader.GetLoader(AReader);
                 end
                 else
-                  ALoader := FLoaders.GetLoader(AReader);
+                  ALoader := Loaders.GetLoader(AReader);
 
                 ALoaderStack.Push(ALoader);
                 AContextStack.Push(AContext);
@@ -5960,8 +5805,8 @@ begin
                   ALoader.OnBegin(AContext);
                   ALoader.OnAttributes(AContext, AReader);
                 end;
-                if AReader.IsEmptyElement then
-                  SafeEndElement;
+                if AIsEmptyElement then
+                  DoEndElement;
               end;
 
             TACLXMLNodeType.CDATA,
@@ -5984,4 +5829,18 @@ begin
   end;
 end;
 
+{ TACLXMLNodeTextLoader }
+
+constructor TACLXMLNodeTextLoader.Create(AProc: TACLXMLTextLoader);
+begin
+  inherited Create;
+  FProc := AProc;
+end;
+
+procedure TACLXMLNodeTextLoader.OnText(AContext: TObject; AReader: TACLXMLReader);
+begin
+  FProc(AContext, AReader.Text);
+end;
+
+{$ENDREGION}
 end.

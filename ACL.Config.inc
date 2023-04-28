@@ -32,7 +32,6 @@
 
 {$DEFINE ACL_BLURFILTER_USE_SHARED_RESOURCES}
 {$DEFINE ACL_TEXTLAYOUT_RTL_SUPPORT}
-{$DEFINE ACL_TEXTLAYOUT_USE_FONTCACHE}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // IDE Versions

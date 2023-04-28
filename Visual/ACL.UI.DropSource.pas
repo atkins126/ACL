@@ -715,7 +715,7 @@ function TACLDragDropDataProviderTextAnsi.Store(var AMedium: TStgMedium;
   const AFormat: TFormatEtc; ATargetConfig: TACLIniFile): Boolean;
 begin
   AMedium.tymed := TYMED_HGLOBAL;
-  AMedium.hGlobal := acTextToHGLOBAL(acAnsiFromUnicode(Text));
+  AMedium.hGlobal := acTextToHGLOBAL(acStringToAnsiString(Text));
   Result := True;
 end;
 
@@ -792,7 +792,10 @@ end;
 
 procedure TACLDropSource.ExecuteInThread;
 begin
-  TACLDropSourceThread.Create(Self);
+  if IsWine then
+    Execute
+  else
+    TACLDropSourceThread.Create(Self);
 end;
 
 procedure TACLDropSource.DoDrop(var AAllowDrop: Boolean);
