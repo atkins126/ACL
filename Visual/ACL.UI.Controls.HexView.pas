@@ -40,6 +40,7 @@ uses
   ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Resources,
   ACL.Utils.Common,
+  ACL.Utils.DPIAware,
   ACL.Utils.Clipboard,
   ACL.Utils.Strings;
 
@@ -392,25 +393,22 @@ implementation
 
 uses
   System.Math,
-  System.AnsiStrings,
-  // ACL
-  ACL.Utils.DPIAware;
+  System.AnsiStrings;
 
 const
   acHexViewHitDataOffset = 'DataOffset';
 
 function FormatHex(const ABytes: TBytes): string;
 var
-  S: TStringBuilder;
-  I: Integer;
+  S: TACLStringBuilder;
 begin
   if ABytes = nil then
-    Exit(EmptyStr);
+    Exit(acEmptyStr);
 
-  S := TStringBuilder.Create;
+  S := TACLStringBuilder.Get(Length(ABytes) * 3);
   try
     S.Capacity := Length(ABytes) * 3;
-    for I := 0 to Length(ABytes) - 1 do
+    for var I := 0 to Length(ABytes) - 1 do
     begin
       if I > 0 then
         S.Append(' ');
@@ -418,7 +416,7 @@ begin
     end;
     Result := S.ToString;
   finally
-    S.Free;
+    S.Release;
   end;
 end;
 
@@ -1067,7 +1065,7 @@ var
 begin
   inherited;
 
-  HexView.IndentBetweenCharacters := ScaleFactor.Apply(4);
+  HexView.IndentBetweenCharacters := dpiApply(4, CurrentDpi);
 
   ARect := Bounds;
   FLabelAreaWidth := acTextSize(SubClass.Font, '00000000').cx;
@@ -1305,10 +1303,10 @@ end;
 
 procedure TACLHexViewViewInfo.CalculateContentLayout;
 begin
-  FRowViewInfo.IndentBetweenViews := ScaleFactor.Apply(IndentBetweenViews);
+  FRowViewInfo.IndentBetweenViews := dpiApply(IndentBetweenViews, CurrentDpi);
   FRowViewInfo.Calculate(Bounds, []);
 
-  FHeaderViewInfo.IndentBetweenViews := ScaleFactor.Apply(IndentBetweenViews);
+  FHeaderViewInfo.IndentBetweenViews := dpiApply(IndentBetweenViews, CurrentDpi);
   FHeaderViewInfo.Calculate(Bounds, []);
   FHeaderHeight := FHeaderViewInfo.MeasureHeight;
 
@@ -1334,7 +1332,7 @@ end;
 procedure TACLHexViewViewInfo.CalculateSubCells(const AChanges: TIntegerSet);
 begin
   inherited;
-  FClientBounds := acRectInflate(FClientBounds, -ScaleFactor.Apply(Padding));
+  FClientBounds := acRectInflate(FClientBounds, -dpiApply(Padding, CurrentDpi));
 end;
 
 procedure TACLHexViewViewInfo.CheckBufferCapacity(ACapacity: Integer);

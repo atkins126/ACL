@@ -585,6 +585,7 @@ type
   strict private
     FEdit: TComponent;
     FEditIntf: IACLInplaceControl;
+    FLockCount: Integer;
     FParams: TACLInplaceInfo;
 
     procedure InitializeParams(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
@@ -593,10 +594,7 @@ type
     function GetValue: UnicodeString;
     procedure SetValue(const AValue: UnicodeString);
   protected
-    FApplyLockCount: Integer;
-
-    procedure Close(AChanges: TIntegerSet = []);
-    //
+    procedure Close(AChanges: TIntegerSet = []; AAccepted: Boolean = False);
     procedure EditApplyHandler(Sender: TObject); virtual;
     procedure EditCancelHandler(Sender: TObject); virtual;
     procedure EditKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState); virtual;
@@ -608,6 +606,7 @@ type
     function IsEditing: Boolean; overload;
     function IsEditing(AItemIndex, AColumnIndex: Integer): Boolean; overload;
     function IsEditing(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil): Boolean; overload;
+    function IsLocked: Boolean;
     //
     procedure Apply;
     procedure Cancel;
@@ -1327,7 +1326,7 @@ begin
     else
 
     if SubClass.OptionsCustomizing.ColumnWidth then
-      if CanResize and (Bounds.Right - AInfo.HitPoint.X <= ScaleFactor.Apply(acResizeHitTestAreaSize)) then
+      if CanResize and (Bounds.Right - AInfo.HitPoint.X <= dpiApply(acResizeHitTestAreaSize, CurrentDpi)) then
       begin
         AInfo.Cursor := crHSplit;
         AInfo.IsResizable := True;
@@ -1371,14 +1370,14 @@ var
   AImageSize: TSize;
 begin
   if Column.ImageIndex >= 0 then
-    AImageSize := acGetImageListSize(OptionsColumns.Images, ScaleFactor)
+    AImageSize := acGetImageListSize(OptionsColumns.Images, CurrentDpi)
   else
     AImageSize := NullSize;
 
   if AHasText then
   begin
     FImageRect := acRectCenterVertically(R, AImageSize.cY);
-    Inc(R.Left, AImageSize.cX + IfThen(AImageSize.cx > 0, ScaleFactor.Apply(acIndentBetweenElements)));
+    Inc(R.Left, AImageSize.cX + IfThen(AImageSize.cx > 0, dpiApply(acIndentBetweenElements, CurrentDpi)));
   end
   else
   begin
@@ -1396,7 +1395,7 @@ begin
     FCheckBoxRect := acRectCenterVertically(R, acRectHeight(NodeViewInfo.CheckBoxRect));
     FCheckBoxRect.Left := R.Left + NodeViewInfo.CheckBoxRect.Left;
     FCheckBoxRect.Right := R.Left + NodeViewInfo.CheckBoxRect.Right;
-    R.Left := CheckBoxRect.Right + ScaleFactor.Apply(acIndentBetweenElements);
+    R.Left := CheckBoxRect.Right + dpiApply(acIndentBetweenElements, CurrentDpi);
   end
   else
     FCheckBoxRect := NullRect;
@@ -1407,7 +1406,7 @@ begin
   R := acRectContent(R, SubClass.Style.ColumnHeader.ContentOffsets);
   CalculateCheckBox(R);
   CalculateSortArea(R);
-  R.Right := SortArrowRect.Left - IfThen(SortArrowRect.Width > 0, ScaleFactor.Apply(acIndentBetweenElements));
+  R.Right := SortArrowRect.Left - IfThen(SortArrowRect.Width > 0, dpiApply(acIndentBetweenElements, CurrentDpi));
   CalculateImageRect(R, (Column = nil) or Column.TextVisible);
   FTextRect := R;
 end;
@@ -1464,7 +1463,7 @@ end;
 
 procedure TACLTreeListColumnViewInfo.InitializeActualWidth;
 begin
-  ActualWidth := ScaleFactor.Apply(Column.Width);
+  ActualWidth := dpiApply(Column.Width, CurrentDpi);
 end;
 
 procedure TACLTreeListColumnViewInfo.OnHotTrack(Action: TACLHotTrackAction);
@@ -1558,7 +1557,7 @@ begin
   if Result = tlAutoHeight then
     Result := CalculateAutoHeight
   else
-    Result := ScaleFactor.Apply(Result);
+    Result := dpiApply(Result, CurrentDpi);
 end;
 
 function TACLTreeListColumnBarViewInfo.MeasureWidth: Integer;
@@ -1779,7 +1778,7 @@ procedure TACLTreeListGroupViewInfo.CalculateCheckBox(var R: TRect);
 begin
   FCheckBoxRect := Owner.NodeViewInfo.CheckBoxRect;
   FCheckBoxRect := acRectOffset(CheckBoxRect, 0, acRectCenterVertically(R, CheckBoxRect.Height).Top - CheckBoxRect.Top);
-  R.Left := CheckBoxRect.Left + GetElementWidthIncludeOffset(CheckBoxRect, SubClass.ScaleFactor);
+  R.Left := CheckBoxRect.Left + GetElementWidthIncludeOffset(CheckBoxRect, SubClass.CurrentDpi);
 end;
 
 procedure TACLTreeListGroupViewInfo.CalculateExpandButton(var R: TRect);
@@ -1791,7 +1790,7 @@ begin
     ASize := SubClass.Style.GroupHeaderExpandButton.FrameSize;
     FExpandButtonRect := acRectSetRight(R, R.Right, ASize.cx);
     FExpandButtonRect := acRectCenterVertically(ExpandButtonRect, ASize.cy);
-    R.Right := ExpandButtonRect.Right - GetElementWidthIncludeOffset(ExpandButtonRect, SubClass.ScaleFactor);
+    R.Right := ExpandButtonRect.Right - GetElementWidthIncludeOffset(ExpandButtonRect, SubClass.CurrentDpi);
   end;
 end;
 
@@ -1812,7 +1811,7 @@ end;
 
 function TACLTreeListGroupViewInfo.GetContentOffsets: TRect;
 begin
-  Result := SubClass.ScaleFactor.Apply(SubClass.Style.GroupHeaderContentOffsets.Value);
+  Result := dpiApply(SubClass.Style.GroupHeaderContentOffsets.Value, SubClass.CurrentDpi);
 end;
 
 function TACLTreeListGroupViewInfo.GetFocusRect: TRect;
@@ -1943,7 +1942,7 @@ var
   ACellRect: TRect;
   ASize: TSize;
 begin
-  ASize := acGetImageListSize(OptionsNodes.Images, SubClass.ScaleFactor);
+  ASize := acGetImageListSize(OptionsNodes.Images, SubClass.CurrentDpi);
   ACellRect := acRectCenterVertically(CellRect[0], ASize.cy);
 
   case OptionsNodes.ImageAlignment of
@@ -1953,13 +1952,13 @@ begin
     taLeftJustify:
       begin
         FImageRect := acRectSetLeft(ACellRect, FTextExtends[True].Left, ASize.cx);
-        Inc(FTextExtends[True].Left, GetElementWidthIncludeOffset(ImageRect, SubClass.ScaleFactor));
+        Inc(FTextExtends[True].Left, GetElementWidthIncludeOffset(ImageRect, SubClass.CurrentDpi));
       end;
 
     taRightJustify:
       begin
         FImageRect := acRectSetRight(ACellRect, ACellRect.Right - FTextExtends[True].Right, ASize.cx);
-        Inc(FTextExtends[True].Right, GetElementWidthIncludeOffset(ImageRect, SubClass.ScaleFactor));
+        Inc(FTextExtends[True].Right, GetElementWidthIncludeOffset(ImageRect, SubClass.CurrentDpi));
       end;
   end;
 end;
@@ -2216,7 +2215,7 @@ end;
 
 function TACLTreeListNodeViewInfo.GetContentOffsets: TRect;
 begin
-  Result := SubClass.ScaleFactor.Apply(SubClass.Style.RowContentOffsets.Value);
+  Result := dpiApply(SubClass.Style.RowContentOffsets.Value, SubClass.CurrentDpi);
 end;
 
 function TACLTreeListNodeViewInfo.GetNode: TACLTreeListNode;
@@ -2268,7 +2267,7 @@ begin
     ASize := NullSize;
   Result := acRectCenterVertically(Bounds, ASize.cy);
   Result := acRectSetLeft(Result, FTextExtends[True].Left, ASize.cx);
-  Inc(FTextExtends[True].Left, GetElementWidthIncludeOffset(Result, SubClass.ScaleFactor));
+  Inc(FTextExtends[True].Left, GetElementWidthIncludeOffset(Result, SubClass.CurrentDpi));
 end;
 
 procedure TACLTreeListNodeViewInfo.SetLevel(AValue: Integer);
@@ -2335,7 +2334,7 @@ end;
 
 function TACLTreeListDropTargetViewInfo.MeasureHeight: Integer;
 begin
-  Result := Owner.ScaleFactor.Apply(3);
+  Result := dpiApply(3, Owner.CurrentDpi);
 end;
 
 function TACLTreeListDropTargetViewInfo.CalculateActualTargetObject: TObject;
@@ -2527,7 +2526,7 @@ begin
     Result := FMeasuredGroupHeight;
   end
   else
-    Result := ScaleFactor.Apply(Result);
+    Result := dpiApply(Result, CurrentDpi);
 end;
 
 function TACLTreeListContentViewInfo.GetActualNodeHeight: Integer;
@@ -2540,7 +2539,7 @@ begin
     Result := FMeasuredNodeHeight;
   end
   else
-    Result := ScaleFactor.Apply(Result);
+    Result := dpiApply(Result, CurrentDpi);
 end;
 
 procedure TACLTreeListContentViewInfo.LockViewItemsPlacement;
@@ -2826,7 +2825,7 @@ end;
 
 function TACLTreeListContentViewInfo.GetLevelIndent: Integer;
 begin
-  Result := SubClass.Style.RowExpandButton.FrameWidth + ScaleFactor.Apply(acIndentBetweenElements);
+  Result := SubClass.Style.RowExpandButton.FrameWidth + dpiApply(acIndentBetweenElements, SubClass.CurrentDpi);
 end;
 
 function TACLTreeListContentViewInfo.GetOptionsBehavior: TACLTreeListOptionsBehavior;
@@ -3003,6 +3002,11 @@ begin
   Result := IsEditing and (ANode.AbsoluteVisibleIndex = FParams.RowIndex) and ((AColumn = nil) or (AColumn.Index = FParams.ColumnIndex));
 end;
 
+function TACLTreeListEditingController.IsLocked: Boolean;
+begin
+  Result := FLockCount > 0;
+end;
+
 procedure TACLTreeListEditingController.Apply;
 begin
   if IsEditing then
@@ -3020,7 +3024,7 @@ begin
   Cancel;
   if SubClass.OptionsBehavior.Editing then
   begin
-    Inc(FApplyLockCount);
+    Inc(FLockCount);
     try
       SubClass.FocusedColumn := AColumn;
       SubClass.HintController.Cancel;
@@ -3036,19 +3040,21 @@ begin
           Cancel;
       end;
     finally
-      Dec(FApplyLockCount);
+      Dec(FLockCount);
     end;
   end;
 end;
 
-procedure TACLTreeListEditingController.Close(AChanges: TIntegerSet = []);
+procedure TACLTreeListEditingController.Close(AChanges: TIntegerSet = []; AAccepted: Boolean = False);
 begin
-  if IsEditing then
+  if IsEditing and not IsLocked then
   begin
     TACLMainThread.RunPostponed(FEdit.Free, Self);
     FEditIntf := nil;
     FEdit := nil;
 
+    if AAccepted then // Sent notification after closing the editor to re-sort and re-group the list
+      SubClass.NodeValuesChanged(FParams.ColumnIndex);
     if not (cccnViewport in AChanges) then
       SubClass.MakeVisible(SubClass.FocusedNode);
     if SubClass.Focused then
@@ -3056,7 +3062,8 @@ begin
   end;
 end;
 
-procedure TACLTreeListEditingController.InitializeParams(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
+procedure TACLTreeListEditingController.InitializeParams(
+  ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
 
   procedure CalculateCellRect(var AParams: TACLInplaceInfo);
   var
@@ -3083,7 +3090,8 @@ procedure TACLTreeListEditingController.InitializeParams(ANode: TACLTreeListNode
     if ContentViewInfo.NodeViewInfo.HasVertSeparators then
       Dec(AParams.Bounds.Right);
     AParams.Bounds := acRectInflate(AParams.Bounds, 0, -1);
-    AParams.TextBounds := acRectContent(AParams.Bounds, ContentViewInfo.NodeViewInfo.CellTextExtends[AColumnViewInfo]);
+    AParams.TextBounds := acRectContent(AParams.Bounds,
+      ContentViewInfo.NodeViewInfo.CellTextExtends[AColumnViewInfo]);
   end;
 
 begin
@@ -3122,18 +3130,19 @@ procedure TACLTreeListEditingController.EditApplyHandler(Sender: TObject);
 var
   ATempValue: UnicodeString;
 begin
-  if (FApplyLockCount = 0) and (Sender = Edit) then
-  begin
+  if not IsLocked and (Sender = Edit) then
+  try
+    Inc(FLockCount);
     try
       ATempValue := EditIntf.InplaceGetValue;
       SubClass.DoEditing(FParams.RowIndex, FParams.ColumnIndex, ATempValue);
       Value := ATempValue;
       SubClass.DoEdited(FParams.RowIndex, FParams.ColumnIndex);
     finally
-      Close;
+      Dec(FLockCount);
     end;
-    // Sent notification after closing the editor to re-sort and re-group the list.
-    SubClass.NodeValuesChanged(FParams.ColumnIndex);
+  finally
+    Close([], True);
   end;
 end;
 
@@ -3340,8 +3349,7 @@ end;
 
 function TACLTreeListSorter.GetGroupName(ANode: TACLTreeListNode): UnicodeString;
 var
-  ABuilder: TStringBuilder;
-  I: Integer;
+  ABuilder: TACLStringBuilder;
 begin
   if IsCustomGroupping then
   begin
@@ -3355,9 +3363,9 @@ begin
   if GroupBy.Count = 1 then
     Exit(ANode.Values[GroupBy.List[0].Index]);
 
-  ABuilder := TACLStringBuilderManager.Get;
+  ABuilder := TACLStringBuilder.Get;
   try
-    for I := 0 to GroupBy.Count - 1 do
+    for var I := 0 to GroupBy.Count - 1 do
     begin
       if I > 0 then
         ABuilder.Append(' / ');
@@ -3365,7 +3373,7 @@ begin
     end;
     Result := ABuilder.ToString;
   finally
-    TACLStringBuilderManager.Release(ABuilder);
+    ABuilder.Release;
   end;
 end;
 
@@ -5086,7 +5094,7 @@ begin
   begin
     BeginLongOperation;
     try
-      Result := ScaleFactor.Revert(AViewInfo.CalculateBestFit);
+      Result := dpiRevert(AViewInfo.CalculateBestFit, CurrentDpi);
     finally
       EndLongOperation;
     end;
