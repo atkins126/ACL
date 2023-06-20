@@ -18,6 +18,7 @@ interface
 uses
   Winapi.Windows,
   // System
+  System.Character,
   System.Classes,
   System.Contnrs,
   System.Generics.Collections,
@@ -59,8 +60,9 @@ type
 
   TACLTextFormatSettings = record
     AllowAutoEmailDetect: Boolean;
+    AllowAutoTimeCodeDetect: Boolean;
     AllowAutoURLDetect: Boolean;
-    AllowCppLikeLineBreaks: Boolean; // support for "\n"
+    AllowCppLikeLineBreaks: Boolean; // \n
     AllowFormatting: Boolean;
 
     class function Default: TACLTextFormatSettings; static;
@@ -74,6 +76,8 @@ type
   { TACLTextLayout }
 
   TACLTextLayout = class
+  public const
+    TimeCodePrefix = 'time:';
   strict private
     FBounds: TRect;
     FFont: TFont;
@@ -115,7 +119,7 @@ type
     function IsTruncated: Boolean;
     function MeasureSize: TSize; virtual;
     procedure SetOption(AOption: TACLTextLayoutOption; AState: Boolean);
-    procedure SetText(const AText: string; const AFormatSettings: TACLTextFormatSettings);
+    procedure SetText(const AText: string; const ASettings: TACLTextFormatSettings);
     function ToString: string; override;
     //
     property Bounds: TRect read FBounds write SetBounds;
@@ -145,7 +149,7 @@ type
 
   TACLTextLayoutBlockList = class(TACLObjectList<TACLTextLayoutBlock>)
   protected
-    procedure AddInit(ABlock: TACLTextLayoutBlock; var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer);
+    procedure AddInit(ABlock: TACLTextLayoutBlock; var AScan: PWideChar; ABlockLength: Integer);
   public
     function BoundingRect: TRect; dynamic;
     function Export(AExporter: TACLTextLayoutExporter; AFreeExporter: Boolean): Boolean; dynamic;
@@ -451,8 +455,6 @@ type
   { TACLTextImporter }
 
   TACLTextImporter = class
-  protected type
-    TTokenController = function (ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
   protected const
     Delimiters = acParserDefaultIdentDelimiters +
       #$200B#$201c#$201D#$2018#$2019#$FF08#$FF09#$FF0C#$FF1A#$FF1B#$FF1F#$060C +
@@ -461,33 +463,38 @@ type
       '^[a-zA-Z0-9.!#$%&''*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}' +
       '[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$';
     Spaces = acParserDefaultSpaceChars;
-    UrlEndDelimiters = Spaces + '[]()';
+    UrlEndDelimiters = '[]()' + Spaces;
   strict private
     class var FEmailValidator: TRegEx;
+  protected type
+  {$REGION 'Sub-Types'}
+    TContext = record
+      Blocks: TACLTextLayoutBlockList;
+      HyperlinkDepth: Integer;
+    end;
+  {$ENDREGION}
+  protected type
+    TTokenController = function (var Ctx: TContext; var Scan: PWideChar): Boolean;
   protected
-    FTokenControllers: TACLList<TTokenController>;
-
-    procedure PopulateTokenControllers(const ASettings: TACLTextFormatSettings); virtual;
+    class procedure PopulateTokenControllers(
+      const AList: TACLList<TTokenController>;
+      const ASettings: TACLTextFormatSettings); virtual;
     //# Token Controllers
-    class function IsCppLikeLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsDelimiterToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsEmail(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsSpaceToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsStyleToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsTextToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
-    class function IsURL(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean; static;
+    class function IsCppLikeLineBreakToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsDelimiterToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsEmail(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsLineBreakToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsSpaceToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsStyleToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsTextToken(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsTimeCode(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
+    class function IsURL(var Ctx: TContext; var Scan: PWideChar): Boolean; static;
     //# Utils
-    class procedure AddTextBlock(ATarget: TACLTextLayout; AText: PWideChar; ALength: Integer); static; inline;
-    class procedure ReplaceWithHyperlink(ATarget: TACLTextLayout;
+    class procedure AddTextBlock(const Ctx: TContext; AText: PWideChar; ALength: Integer); static; inline;
+    class procedure ReplaceWithHyperlink(const Ctx: TContext;
       AFirstBlockToReplace: TACLTextLayoutBlockText; AScan: PWideChar; const AHyperlinkPrefix: string); static;
-    class procedure ScanUntilDelimiter(var AScan: PWideChar;
-      var ALength: Integer; const ADelimiters: UnicodeString); static; inline;
   public
     class constructor Create;
-    constructor Create(const ASettings: TACLTextFormatSettings);
-    destructor Destroy; override;
-    procedure Run(ATarget: TACLTextLayout; const AText: string); virtual;
   end;
 
   { TACLTextPlainTextExporter }
@@ -1069,19 +1076,31 @@ begin
     Options := Options - [AOption];
 end;
 
-procedure TACLTextLayout.SetText(const AText: string; const AFormatSettings: TACLTextFormatSettings);
+procedure TACLTextLayout.SetText(const AText: string; const ASettings: TACLTextFormatSettings);
 var
-  AImporter: TACLTextImporter;
+  AScan: PChar;
+  AContext: TACLTextImporter.TContext;
+  ATokens: TACLList<TACLTextImporter.TTokenController>;
 begin
-  AImporter := TACLTextImporter.Create(AFormatSettings);
+  FLayoutIsDirty := True;
+  FLayout.Clear;
+  FBlocks.Clear;
+  FText := AText;
+
+  ATokens := TACLList<TACLTextImporter.TTokenController>.Create;
   try
-    FLayout.Clear;
-    FBlocks.Clear;
-    FText := AText;
-    AImporter.Run(Self, Text);
-    FLayoutIsDirty := True;
+    AScan := PChar(FText);
+    AContext.Blocks := FBlocks;
+    AContext.HyperlinkDepth := 0;
+    TACLTextImporter.PopulateTokenControllers(ATokens, ASettings);
+    while AScan^ <> #0 do
+      for var I := 0 to ATokens.Count - 1 do
+      begin
+        if ATokens.List[I](AContext, AScan) then
+          Break;
+      end;
   finally
-    AImporter.Free;
+    ATokens.Free;
   end;
 end;
 
@@ -1226,13 +1245,11 @@ end;
 
 { TACLTextLayoutBlockList }
 
-procedure TACLTextLayoutBlockList.AddInit(ABlock: TACLTextLayoutBlock;
-  var AScan: PWideChar; var ALength: Integer; ABlockLength: Integer);
+procedure TACLTextLayoutBlockList.AddInit(ABlock: TACLTextLayoutBlock; var AScan: PWideChar; ABlockLength: Integer);
 begin
   Add(ABlock);
   ABlock.FPositionInText := AScan;
   ABlock.FLength := ABlockLength;
-  Dec(ALength, ABlockLength);
   Inc(AScan, ABlockLength);
 end;
 
@@ -2177,86 +2194,58 @@ begin
   FEmailValidator := TRegEx.Create(EmailPattern);
 end;
 
-constructor TACLTextImporter.Create(const ASettings: TACLTextFormatSettings);
+class procedure TACLTextImporter.PopulateTokenControllers(
+  const AList: TACLList<TTokenController>; const ASettings: TACLTextFormatSettings);
 begin
-  FTokenControllers := TACLList<TTokenController>.Create;
-  PopulateTokenControllers(ASettings);
-end;
-
-destructor TACLTextImporter.Destroy;
-begin
-  FreeAndNil(FTokenControllers);
-  inherited;
-end;
-
-procedure TACLTextImporter.Run(ATarget: TACLTextLayout; const AText: string);
-var
-  ALength: Integer;
-  AScan: PChar;
-begin
-  AScan := PChar(AText);
-  ALength := Length(AText);
-  while ALength > 0 do
-  begin
-    for var I := 0 to FTokenControllers.Count - 1 do
-    begin
-      if FTokenControllers.List[I](ATarget, AScan, ALength) then
-        Break;
-    end;
-  end;
-end;
-
-procedure TACLTextImporter.PopulateTokenControllers(const ASettings: TACLTextFormatSettings);
-begin
-  FTokenControllers.Capacity := 8;
+  AList.EnsureCapacity(9);
 
   if ASettings.AllowFormatting then
-    FTokenControllers.Add(IsStyleToken);
+    AList.Add(IsStyleToken);
 
-  FTokenControllers.Add(IsLineBreakToken);
+  AList.Add(IsLineBreakToken);
   if ASettings.AllowCppLikeLineBreaks then
-    FTokenControllers.Add(IsCppLikeLineBreakToken);
+    AList.Add(IsCppLikeLineBreakToken);
 
   if ASettings.AllowAutoEmailDetect then
-    FTokenControllers.Add(IsEmail);
+    AList.Add(IsEmail);
   if ASettings.AllowAutoURLDetect then
-    FTokenControllers.Add(IsURL);
+    AList.Add(IsURL);
+  if ASettings.AllowAutoTimeCodeDetect then
+    AList.Add(IsTimeCode);
 
-  FTokenControllers.Add(IsSpaceToken);
-  FTokenControllers.Add(IsDelimiterToken);
-  FTokenControllers.Add(IsTextToken);
+  AList.Add(IsSpaceToken);
+  AList.Add(IsDelimiterToken);
+  AList.Add(IsTextToken);
 end;
 
-class function TACLTextImporter.IsDelimiterToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsDelimiterToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 begin
-  Result := acPos(AScan^, Delimiters) > 0;
+  Result := acContains(Scan^, Delimiters);
   if Result then
   begin
-    AddTextBlock(ATarget, AScan, 1);
-    Dec(ALength);
-    Inc(AScan);
+    AddTextBlock(Ctx, Scan, 1);
+    Inc(Scan);
   end;
 end;
 
-class function TACLTextImporter.IsEmail(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsEmail(var Ctx: TContext; var Scan: PWideChar): Boolean;
 var
   ABlock: TACLTextLayoutBlock;
   AFirstTextBlock: TACLTextLayoutBlockText;
-  ATempLength: Integer;
   ATempScan: PWideChar;
   ATextBlock: TACLTextLayoutBlockText;
 begin
   Result := False;
-  if AScan^ = '@' then
+  if (Scan^ = '@') and (Ctx.HyperlinkDepth <= 0) then
   begin
     AFirstTextBlock := nil;
-    for var I := ATarget.FBlocks.Count - 1 downto 0 do
+    for var I := Ctx.Blocks.Count - 1 downto 0 do
     begin
-      ABlock := ATarget.FBlocks.List[I];
+      ABlock := Ctx.Blocks.List[I];
       if ABlock.ClassType = TACLTextLayoutBlockText then
       begin
         ATextBlock := TACLTextLayoutBlockText(ABlock);
-        if (ATextBlock.TextLength = 1) and (acPos(ATextBlock.Text^, UrlEndDelimiters) > 0) then
+        if (ATextBlock.TextLength = 1) and acContains(ATextBlock.Text^, UrlEndDelimiters) then
           Break;
         AFirstTextBlock := ATextBlock;
       end
@@ -2266,55 +2255,54 @@ begin
 
     if AFirstTextBlock <> nil then
     begin
-      ATempScan := AScan;
-      ATempLength := ALength;
-      ScanUntilDelimiter(ATempScan, ATempLength, UrlEndDelimiters);
-      if FEmailValidator.IsMatch(acMakeString(AFirstTextBlock.Text, acStringLength(AFirstTextBlock.Text, ATempScan))) then
+      ATempScan := Scan;
+      while (ATempScan^ <> #0) and not acContains(ATempScan^, UrlEndDelimiters) do
+        Inc(ATempScan);
+      Result := FEmailValidator.IsMatch(acMakeString(AFirstTextBlock.Text, acStringLength(AFirstTextBlock.Text, ATempScan)));
+      if Result then
       begin
-        ReplaceWithHyperlink(ATarget, AFirstTextBlock, ATempScan, acMailToPrefix);
-        AScan := ATempScan;
-        ALength := ATempLength;
+        ReplaceWithHyperlink(Ctx, AFirstTextBlock, ATempScan, acMailToPrefix);
+        Scan := ATempScan;
       end;
     end;
   end;
 end;
 
-class function TACLTextImporter.IsCppLikeLineBreakToken(
-  ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsCppLikeLineBreakToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 begin
-  Result := (AScan^ = '\') and (ALength > 1) and ((AScan + 1)^ = 'n');
+  Result := (Scan^ = '\') and ((Scan + 1)^ = 'n');
   if Result then
-    ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 2);
+    Ctx.Blocks.AddInit(TACLTextLayoutBlockLineBreak.Create, Scan, 2);
 end;
 
-class function TACLTextImporter.IsLineBreakToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsLineBreakToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 begin
   Result := True;
   //#10
-  if Ord(AScan^) = 10 then
-    ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 1)
+  if Scan^ = #10 then
+    Ctx.Blocks.AddInit(TACLTextLayoutBlockLineBreak.Create, Scan, 1)
   else
 
   //#13#10 or #13
-  if Ord(AScan^) = 13 then
+  if Scan^ = #13 then
   begin
-    if Ord((AScan + 1)^) = 10 then
-      ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 2)
+    if (Scan + 1)^ = #10 then
+      Ctx.Blocks.AddInit(TACLTextLayoutBlockLineBreak.Create, Scan, 2)
     else
-      ATarget.FBlocks.AddInit(TACLTextLayoutBlockLineBreak.Create, AScan, ALength, 1);
+      Ctx.Blocks.AddInit(TACLTextLayoutBlockLineBreak.Create, Scan, 1);
   end
   else
     Result := False;
 end;
 
-class function TACLTextImporter.IsSpaceToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsSpaceToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 begin
-  Result := acPos(AScan^, Spaces) > 0;
+  Result := acContains(Scan^, Spaces);
   if Result then
-    ATarget.FBlocks.AddInit(TACLTextLayoutBlockSpace.Create, AScan, ALength, 1);
+    Ctx.Blocks.AddInit(TACLTextLayoutBlockSpace.Create, Scan, 1);
 end;
 
-class function TACLTextImporter.IsStyleToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsStyleToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 var
   ABlock: TACLTextLayoutBlockStyle;
   AIsClosing: Boolean;
@@ -2324,13 +2312,13 @@ var
   ATagLength: Integer;
 begin
   Result := False;
-  if AScan^ = '[' then
+  if Scan^ = '[' then
   begin
-    AScanEnd := WStrScan(AScan, ALength, ']');
+    AScanEnd := WStrScan(Scan, ']');
     if AScanEnd = nil then
       Exit;
 
-    AScanTag := AScan + 1;
+    AScanTag := Scan + 1;
     AIsClosing := AScanTag^ = '/';
     if AIsClosing then
     begin
@@ -2339,7 +2327,7 @@ begin
     end
     else
     begin
-      AScanParam := WStrScan(AScanTag, acStringLength(AScan, AScanEnd), '=');
+      AScanParam := WStrScan(AScanTag, acStringLength(Scan, AScanEnd), '=');
       if AScanParam = nil then
         AScanParam := AScanEnd;
     end;
@@ -2372,44 +2360,71 @@ begin
     if Result then
     begin
       Inc(AScanEnd);
-      ATarget.FBlocks.AddInit(ABlock, AScan, ALength, acStringLength(AScan, AScanEnd));
+      if ABlock.ClassType = TACLTextLayoutBlockHyperlink then
+      begin
+        if AIsClosing then
+          Dec(Ctx.HyperlinkDepth)
+        else
+          Inc(Ctx.HyperlinkDepth);
+      end;
+      Ctx.Blocks.AddInit(ABlock, Scan, acStringLength(Scan, AScanEnd));
     end;
   end;
 end;
 
-class function TACLTextImporter.IsTextToken(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsTextToken(var Ctx: TContext; var Scan: PWideChar): Boolean;
 var
   ACursor: PWideChar;
 begin
-  ACursor := AScan;
+  ACursor := Scan;
   repeat
-    Dec(ALength);
-    Inc(AScan);
-
-    if ALength = 0 then
+    Inc(Scan);
+    if Scan^ = #0 then
     begin
-      AddTextBlock(ATarget, ACursor, acStringLength(ACursor, AScan));
+      AddTextBlock(Ctx, ACursor, acStringLength(ACursor, Scan));
       Break;
     end;
 
-    if acPos(AScan^, Delimiters) > 0 then
+    if acContains(Scan^, Delimiters) then
     begin
-      AddTextBlock(ATarget, ACursor, acStringLength(ACursor, AScan));
+      AddTextBlock(Ctx, ACursor, acStringLength(ACursor, Scan));
       Break;
     end;
   until False;
   Result := True;
 end;
 
-class function TACLTextImporter.IsURL(ATarget: TACLTextLayout; var AScan: PWideChar; var ALength: Integer): Boolean;
+class function TACLTextImporter.IsTimeCode(var Ctx: TContext; var Scan: PWideChar): Boolean;
+var
+  APrev: PWideChar;
+  ATime: Single;
+begin
+  if Ctx.HyperlinkDepth > 0 then
+    Exit(False);
+  if not Scan^.IsDigit then
+    Exit(False);
+  if (Ctx.Blocks.Count > 0) and ((Scan - 1)^ > ' ') then
+    Exit(False);
+  APrev := Scan;
+  Result := TACLTimeFormat.Parse(Scan, ATime);
+  if Result then
+  begin
+    Ctx.Blocks.Add(TACLTextLayoutBlockHyperlink.Create(
+      TACLTextLayout.TimeCodePrefix + IntToStr(Trunc(ATime)), True));
+    Ctx.Blocks.Add(TACLTextLayoutBlockText.Create(APrev, acStringLength(APrev, Scan)));
+    Ctx.Blocks.Add(TACLTextLayoutBlockHyperlink.Create(EmptyStr, False));
+  end;
+end;
+
+class function TACLTextImporter.IsURL(var Ctx: TContext; var Scan: PWideChar): Boolean;
 
   function GetLastBlockAsText(var ABlock: TACLTextLayoutBlockText): Boolean;
   var
     ALastBlock: TACLTextLayoutBlock;
   begin
-    if ATarget.FBlocks.Count > 0 then
+    if Ctx.Blocks.Count > 0 then
     begin
-      ALastBlock := ATarget.FBlocks.Last;
+      ALastBlock := Ctx.Blocks.Last;
       Result := ALastBlock is TACLTextLayoutBlockText;
       if Result then
         ABlock := TACLTextLayoutBlockText(ALastBlock);
@@ -2420,63 +2435,57 @@ class function TACLTextImporter.IsURL(ATarget: TACLTextLayout; var AScan: PWideC
 
   function IsProtocol(var ABlock: TACLTextLayoutBlockText): Boolean;
   begin
-    Result := (ALength > 3) and acCompareTokens(AScan, '://', 3, 3) and GetLastBlockAsText(ABlock);
+    Result := (Scan^ = ':') and ((Scan + 1)^ = '/') and ((Scan + 2)^ = '/') and GetLastBlockAsText(ABlock);
   end;
 
   function IsWWW(var ABlock: TACLTextLayoutBlockText): Boolean;
   begin
-    Result := (AScan^ = '.') and GetLastBlockAsText(ABlock) and acCompareTokens(ABlock.Text, 'www', ABlock.TextLength, 3);
+    Result := (Scan^ = '.') and GetLastBlockAsText(ABlock) and acCompareTokens(ABlock.Text, 'www', ABlock.TextLength, 3);
   end;
 
 var
   ATextBlock: TACLTextLayoutBlockText;
 begin
+  if Ctx.HyperlinkDepth > 0 then
+    Exit(False);
   if IsProtocol(ATextBlock) then
   begin
-    ScanUntilDelimiter(AScan, ALength, UrlEndDelimiters);
-    ReplaceWithHyperlink(ATarget, ATextBlock, AScan, '');
+    while (Scan^ <> #0) and not acContains(Scan^, UrlEndDelimiters) do
+      Inc(Scan);
+    ReplaceWithHyperlink(Ctx, ATextBlock, Scan, '');
     Result := True;
   end
   else
     if IsWWW(ATextBlock) then
     begin
-      ScanUntilDelimiter(AScan, ALength, UrlEndDelimiters);
-      ReplaceWithHyperlink(ATarget, ATextBlock, AScan, 'https://');
+      while (Scan^ <> #0) and not acContains(Scan^, UrlEndDelimiters) do
+        Inc(Scan);
+      ReplaceWithHyperlink(Ctx, ATextBlock, Scan, 'https://');
       Result := True;
     end
     else
       Result := False;
 end;
 
-class procedure TACLTextImporter.AddTextBlock(ATarget: TACLTextLayout; AText: PWideChar; ALength: Integer);
+class procedure TACLTextImporter.AddTextBlock(const Ctx: TContext; AText: PWideChar; ALength: Integer);
 begin
   if ALength > 0 then
-    ATarget.FBlocks.AddInit(TACLTextLayoutBlockText.Create(AText, ALength), AText, ALength, ALength);
+    Ctx.Blocks.AddInit(TACLTextLayoutBlockText.Create(AText, ALength), AText, ALength);
 end;
 
-class procedure TACLTextImporter.ReplaceWithHyperlink(ATarget: TACLTextLayout;
+class procedure TACLTextImporter.ReplaceWithHyperlink(const Ctx: TContext;
   AFirstBlockToReplace: TACLTextLayoutBlockText; AScan: PWideChar; const AHyperlinkPrefix: string);
 var
   AHyperlinkBlock: TACLTextLayoutBlockHyperlink;
   AIndex: Integer;
 begin
-  AIndex := ATarget.FBlocks.IndexOf(AFirstBlockToReplace, TDirection.FromEnd);
-  ATarget.FBlocks.DeleteRange(AIndex + 1, ATarget.FBlocks.Count - 1 - AIndex);
+  AIndex := Ctx.Blocks.IndexOf(AFirstBlockToReplace, TDirection.FromEnd);
+  Ctx.Blocks.DeleteRange(AIndex + 1, Ctx.Blocks.Count - 1 - AIndex);
   AFirstBlockToReplace.FLength := acStringLength(AFirstBlockToReplace.Text, AScan);
 
   AHyperlinkBlock := TACLTextLayoutBlockHyperlink.Create(AHyperlinkPrefix + AFirstBlockToReplace.ToString, True);
-  ATarget.FBlocks.Insert(AIndex, AHyperlinkBlock);
-  ATarget.FBlocks.Add(TACLTextLayoutBlockHyperlink.Create(EmptyStr, False));
-end;
-
-class procedure TACLTextImporter.ScanUntilDelimiter(
-  var AScan: PWideChar; var ALength: Integer; const ADelimiters: UnicodeString);
-begin
-  while (ALength > 0) and (acPos(AScan^, ADelimiters) = 0) do
-  begin
-    Dec(ALength);
-    Inc(AScan);
-  end;
+  Ctx.Blocks.Insert(AIndex, AHyperlinkBlock);
+  Ctx.Blocks.Add(TACLTextLayoutBlockHyperlink.Create(EmptyStr, False));
 end;
 
 { TACLTextLayoutRefreshHelper }

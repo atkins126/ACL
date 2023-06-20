@@ -103,14 +103,15 @@ type
     function LoadFromFile(const AFileName: UnicodeString; AEncoding: TEncoding = nil): Boolean;
     procedure LoadFromStream(AStream: TStream; AEncoding: TEncoding = nil); virtual;
     procedure LoadFromResource(AInstance: HINST; const AName: UnicodeString; AType: PChar);
-    function SaveToFile(const AFile: UnicodeString; AEncoding: TEncoding = nil): Boolean;
+    function SaveToFile(const AFileName: UnicodeString; AEncoding: TEncoding = nil): Boolean;
     procedure SaveToStream(AStream: TStream; AEncoding: TEncoding = nil); virtual;
 
     // Inserting
     function Add(const S: UnicodeString; const AObject: NativeInt): Integer; overload;
     function Add(const S: UnicodeString; const AObject: TObject = nil; AInterface: IUnknown = nil): Integer; overload;
     procedure AddEx(const S: UnicodeString);
-    procedure Append(const ASource: TACLStringList);
+    procedure Append(const ASource: TACLStringList); overload;
+    procedure Append(const ASource: UnicodeString); overload;
     procedure Assign(Source: TPersistent); override;
     procedure Insert(Index: Integer; const S: UnicodeString; const AObject: TObject = nil; AInterface: IUnknown = nil); virtual;
 
@@ -363,12 +364,12 @@ begin
   end;
 end;
 
-function TACLStringList.SaveToFile(const AFile: UnicodeString; AEncoding: TEncoding = nil): Boolean;
+function TACLStringList.SaveToFile(const AFileName: UnicodeString; AEncoding: TEncoding = nil): Boolean;
 var
   AStream: TStream;
 begin
-  acFileSetAttr(AFile, 0);
-  Result := StreamCreateWriter(AFile, AStream);
+  acFileSetAttr(AFileName, 0);
+  Result := StreamCreateWriter(AFileName, AStream);
   if Result then
   try
     SaveToStream(AStream, AEncoding);
@@ -400,13 +401,11 @@ begin
 end;
 
 procedure TACLStringList.Append(const ASource: TACLStringList);
-var
-  I: Integer;
 begin
   BeginUpdate;
   try
     EnsureCapacity(ASource.Count);
-    for I := 0 to ASource.Count - 1 do
+    for var I := 0 to ASource.Count - 1 do
     begin
       with ASource.List[I] do
         Add(FString, FObject, FInterface);
@@ -416,9 +415,19 @@ begin
   end;
 end;
 
+procedure TACLStringList.Append(const ASource: UnicodeString);
+begin
+  BeginUpdate;
+  try
+    ParseBuffer(PWideChar(ASource), Length(ASource))
+  finally
+    EndUpdate;
+  end;
+end;
+
 procedure TACLStringList.Assign(Source: TPersistent);
 begin
-  if Source is TACLStringList then
+  if (Source is TACLStringList) and (Source <> Self) then
   begin
     BeginUpdate;
     try
@@ -695,7 +704,13 @@ end;
 
 procedure TACLStringList.SetText(const S: UnicodeString);
 begin
-  ParseBuffer(PWideChar(S), Length(S));
+  BeginUpdate;
+  try
+    Clear;
+    ParseBuffer(PWideChar(S), Length(S));
+  finally
+    EndUpdate;
+  end;
 end;
 
 procedure TACLStringList.DoAdd(const S: UnicodeString);
@@ -826,36 +841,25 @@ end;
 procedure TACLStringList.ParseBuffer(ABuffer: PWideChar; ACount: Integer);
 var
   P, AFinish, AStart: PWideChar;
-  S: UnicodeString;
 begin
-  BeginUpdate;
-  try
-    Clear;
-    P := ABuffer;
-    AStart := P;
-    AFinish := ABuffer + ACount;
-    while (NativeUInt(P) + SizeOf(WideChar) <= NativeUInt(AFinish)) do
+  P := ABuffer;
+  AStart := P;
+  AFinish := ABuffer + ACount;
+  while (NativeUInt(P) + SizeOf(WideChar) <= NativeUInt(AFinish)) do
+  begin
+    if (P^ <> #10) and (P^ <> #13) and (P^ <> acLineSeparator) then
+      Inc(P)
+    else
     begin
-      if (P^ <> #10) and (P^ <> #13) and (P^ <> acLineSeparator) then
-        Inc(P)
-      else
-      begin
-        System.SetString(S, AStart, P - AStart);
-        Add(S);
-        if P^ = acLineSeparator then Inc(P);
-        if P^ = #13 then Inc(P);
-        if P^ = #10 then Inc(P);
-        AStart := P;
-      end;
+      Add(acMakeString(AStart, P - AStart));
+      if P^ = acLineSeparator then Inc(P);
+      if P^ = #13 then Inc(P);
+      if P^ = #10 then Inc(P);
+      AStart := P;
     end;
-    if NativeUInt(P - AStart) > 0 then
-    begin
-      System.SetString(S, AStart, P - AStart);
-      Add(S);
-    end;
-  finally
-    EndUpdate;
   end;
+  if NativeUInt(P - AStart) > 0 then
+    Add(acMakeString(AStart, P - AStart));
 end;
 
 { TACLSortedStrings }
