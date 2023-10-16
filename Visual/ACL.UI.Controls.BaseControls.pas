@@ -508,7 +508,6 @@ type
     property Enabled;
     property Font;
     property Margins: TACLMargins read FMargins write SetMargins stored IsMarginsStored;
-    property ParentBiDiMode;
     property ParentColor;
     property ParentCtl3D;
     property ParentFont;
@@ -594,7 +593,7 @@ type
     function GetContentOffset: TRect; override;
     procedure Paint; override;
     procedure SetTargetDPI(AValue: Integer); override;
-    //
+    //# Properties
     property Borders: TACLBorders read FBorders write SetBorders default acAllBorders;
   public
     constructor Create(AOwner: TComponent); override;
@@ -612,7 +611,7 @@ type
   protected
     class procedure WMGesture(ACaller: TWinControl; var Message: TMessage);
     class procedure WMGestureNotify(ACaller: TWinControl; var Message: TWMGestureNotify);
-    class function WMSetCursor(ACaller: TWinControl; var AMessage: TWMSetCursor): Boolean;
+    class function WMSetCursor(ACaller: TWinControl; var Message: TWMSetCursor): Boolean;
   public
     class function IsChildOrSelf(AParent, AControl: TControl): Boolean;
     class function ProcessMessage(ACaller: TWinControl; var Message: TMessage): Boolean;
@@ -659,16 +658,16 @@ type
 
   TACLDeferPlacementUpdate = class
   strict private
-    FDictionary: TACLDictionary<TWinControl, TRect>;
-  private
-    function GetBounds(AControl: TWinControl): TRect;
+    FBounds: TACLDictionary<TControl, TRect>;
+
+    function GetBounds(AControl: TControl): TRect;
   public
-    procedure Add(AControl: TWinControl; ALeft, ATop, AWidth, AHeight: Integer); overload;
-    procedure Add(AControl: TWinControl; const ABounds: TRect); overload;
-    procedure BeginUpdate;
-    procedure EndUpdate;
-    //
-    property Bounds[AControl: TWinControl]: TRect read GetBounds;
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(AControl: TControl; ALeft, ATop, AWidth, AHeight: Integer); overload;
+    procedure Add(AControl: TControl; const ABounds: TRect); overload;
+    procedure Apply;
+    property Bounds[AControl: TControl]: TRect read GetBounds;
   end;
 
   { TACLScrollToMode }
@@ -703,11 +702,8 @@ function acGetContainer(AControl: TControl): TControl;
 function acGetTargetDPI(const AControl: TWinControl): Integer; overload;
 function acGetTargetDPI(const APoint: TPoint): Integer; overload;
 function acIsChild(AControl, AChildToTest: TControl): Boolean;
-function acIsDropDownCommand(Key: Word; Shift: TShiftState): Boolean;
 function acIsSemitransparentFill(AContentColor1, AContentColor2: TACLResourceColor): Boolean;
-function acIsShiftPressed(ATest, AState: TShiftState): Boolean;
 function acOpacityToAlphaBlendValue(AOpacity: Integer): Byte;
-function acShiftStateToKeys(AShift: TShiftState): WORD;
 
 procedure acRestoreDC(ACanvas: TCanvas; ASaveIndex: Integer);
 procedure acRestoreFocus(ASavedFocus: HWND);
@@ -723,6 +719,9 @@ procedure acUnlockRedraw(AControl: TWinControl; ARedraw: Boolean);
 function acGetShiftState: TShiftState;
 function acIsAltKeyPressed: Boolean;
 function acIsCtrlKeyPressed: Boolean;
+function acIsDropDownCommand(Key: Word; Shift: TShiftState): Boolean;
+function acIsShiftPressed(ATest, AState: TShiftState): Boolean;
+function acShiftStateToKeys(AShift: TShiftState): Word;
 
 function MouseTracker: TACLMouseTracking;
 implementation
@@ -1466,43 +1465,41 @@ begin
   Message.Result := 1;
 end;
 
-class function TACLControlsHelper.WMSetCursor(ACaller: TWinControl; var AMessage: TWMSetCursor): Boolean;
+class function TACLControlsHelper.WMSetCursor(ACaller: TWinControl; var Message: TWMSetCursor): Boolean;
 
-  function GetCursor(AControl: TControl; const P: TPoint): TCursor;
+  function GetCursor(AControl: TControl): TCursor;
   var
     ACursorProvider: IACLCursorProvider;
   begin
-    if csDesigning in AControl.ComponentState then
-      Result := crArrow
+    if Supports(AControl, IACLCursorProvider, ACursorProvider) then
+      Result := ACursorProvider.GetCursor(TControlAccess(AControl).CalcCursorPos)
     else
-      if Supports(AControl, IACLCursorProvider, ACursorProvider) then
-        Result := ACursorProvider.GetCursor(P)
-      else
-        Result := AControl.Cursor;
+      Result := AControl.Cursor;
   end;
 
 var
-  ACursor: TCursor;
   AControl: TControl;
-  APoint: TPoint;
+  ACursor: TCursor;
 begin
   Result := False;
-  if (AMessage.CursorWnd = ACaller.Handle) and (AMessage.HitTest = HTCLIENT) then
+  if (Message.HitTest = HTCLIENT) and not (csDesigning in ACaller.ComponentState) and
+     (ACaller.HandleAllocated and (Message.CursorWnd = ACaller.Handle)) then
   begin
     ACursor := Screen.Cursor;
     if ACursor = crDefault then
     begin
-      APoint := ACaller.ScreenToClient(Mouse.CursorPos);
-      AControl := ACaller.ControlAtPos(APoint, False);
+      AControl := GetCaptureControl;
+      if AControl = nil then
+        AControl := ACaller.ControlAtPos(TControlAccess(ACaller).CalcCursorPos, False);
       if AControl <> nil then
-        ACursor := GetCursor(AControl, acPointOffset(APoint, AControl.Left, AControl.Top));
+        ACursor := GetCursor(AControl);
       if ACursor = crDefault then
-        ACursor := GetCursor(ACaller, APoint);
+        ACursor := GetCursor(ACaller);
     end;
     if ACursor <> crDefault then
     begin
       Winapi.Windows.SetCursor(Screen.Cursors[ACursor]);
-      AMessage.Result := 1;
+      Message.Result := 1;
       Result := True;
     end;
   end;
@@ -2577,44 +2574,78 @@ end;
 
 { TACLDeferPlacementUpdate }
 
-procedure TACLDeferPlacementUpdate.Add(AControl: TWinControl; const ABounds: TRect);
+constructor TACLDeferPlacementUpdate.Create;
 begin
-  FDictionary.AddOrSetValue(AControl, ABounds);
+  FBounds := TACLDictionary<TControl, TRect>.Create;
 end;
 
-procedure TACLDeferPlacementUpdate.Add(AControl: TWinControl; ALeft, ATop, AWidth, AHeight: Integer);
+destructor TACLDeferPlacementUpdate.Destroy;
 begin
-  Add(AControl, System.Classes.Bounds(ALeft, ATop, AWidth, AHeight));
+  FreeAndNil(FBounds);
+  inherited;
 end;
 
-procedure TACLDeferPlacementUpdate.BeginUpdate;
+procedure TACLDeferPlacementUpdate.Add(AControl: TControl; const ABounds: TRect);
 begin
-  FDictionary := TACLDictionary<TWinControl, TRect>.Create;
+  FBounds.AddOrSetValue(AControl, ABounds);
 end;
 
-procedure TACLDeferPlacementUpdate.EndUpdate;
+procedure TACLDeferPlacementUpdate.Add(AControl: TControl; ALeft, ATop, AWidth, AHeight: Integer);
+begin
+  Add(AControl, Rect(ALeft, ATop, ALeft + AWidth, ATop + AHeight));
+end;
+
+procedure TACLDeferPlacementUpdate.Apply;
 var
+  ABounds: TRect;
   AHandle: THandle;
+  AVclControls: TList;
+  AWinControls: TList;
 begin
-  if FDictionary.Count > 0 then
+  if FBounds.Count > 0 then
   begin
-    AHandle := BeginDeferWindowPos(FDictionary.Count);
+    AVclControls := TList.Create;
+    AWinControls := TList.Create;
     try
-      FDictionary.Enum(
-        procedure (const AControl: TWinControl; const R: TRect)
+      AVclControls.Capacity := FBounds.Count;
+      AWinControls.Capacity := FBounds.Count;
+
+      FBounds.Enum(
+        procedure (const AControl: TControl; const R: TRect)
         begin
-          DeferWindowPos(AHandle, AControl.Handle, 0, R.Left, R.Top, R.Width, R.Height, SWP_NOZORDER);
+          if (AControl is TWinControl) and TWinControl(AControl).HandleAllocated then
+            AWinControls.Add(AControl)
+          else
+            AVclControls.Add(AControl);
         end);
+
+      if AWinControls.Count > 0 then
+      begin
+        AHandle := BeginDeferWindowPos(AWinControls.Count);
+        try
+          for var I := 0 to AWinControls.Count - 1 do
+          begin
+            ABounds := Bounds[AWinControls.List[I]];
+            DeferWindowPos(AHandle, TWinControl(AWinControls.List[I]).Handle, 0,
+              ABounds.Left, ABounds.Top, ABounds.Width, ABounds.Height, SWP_NOZORDER);
+          end;
+        finally
+          EndDeferWindowPos(AHandle)
+        end;
+      end;
+
+      for var I := 0 to AVclControls.Count - 1 do
+        TControl(AVclControls.List[I]).BoundsRect := Bounds[AVclControls.List[I]];
     finally
-      EndDeferWindowPos(AHandle)
+      AWinControls.Free;
+      AVclControls.Free;
     end;
   end;
-  FreeAndNil(FDictionary);
 end;
 
-function TACLDeferPlacementUpdate.GetBounds(AControl: TWinControl): TRect;
+function TACLDeferPlacementUpdate.GetBounds(AControl: TControl): TRect;
 begin
-  Result := FDictionary[AControl];
+  Result := FBounds[AControl];
 end;
 
 { TACLSubControlOptions }

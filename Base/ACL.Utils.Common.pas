@@ -4,7 +4,7 @@
 {*             System Utilities              *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -23,10 +23,12 @@ uses
   Winapi.PsAPI,
 {$ENDIF}
   // System
-  System.UITypes,
-  System.Types,
-  System.SysUtils,
+  System.AnsiStrings,
   System.Classes,
+  System.SysUtils,
+  System.Types,
+  System.TypInfo,
+  System.UITypes,
   System.Math;
 
 const
@@ -127,7 +129,8 @@ type
 
   Safe = class
   public
-    class function Cast(const AObject: TObject; const AClass: TClass; out AValue): Boolean; inline;
+    class function Cast(AObject: TObject; AClass: TClass; out AValue): Boolean; inline;
+    class function CastOrNil<T: class>(AObject: TObject): T; inline;
   end;
 
 var
@@ -197,9 +200,6 @@ uses
 {$IFNDEF ACL_BASE_NOVCL}
   Vcl.Forms,
 {$ENDIF}
-  // System
-  System.AnsiStrings,
-  System.TypInfo,
   // ACL
   ACL.Math,
   ACL.Utils.Strings,
@@ -791,13 +791,21 @@ end;
 
 { Safe }
 
-class function Safe.Cast(const AObject: TObject; const AClass: TClass; out AValue): Boolean;
+class function Safe.Cast(AObject: TObject; AClass: TClass; out AValue): Boolean;
 begin
   Result := (AObject <> nil) and AObject.InheritsFrom(AClass);
   if Result then
     TObject(AValue) := AObject
   else
     TObject(AValue) := nil;
+end;
+
+class function Safe.CastOrNil<T>(AObject: TObject): T;
+begin
+  if (AObject <> nil) and AObject.InheritsFrom(GetTypeData(TypeInfo(T)).ClassType) then
+    Result := T(AObject)
+  else
+    Result := nil;
 end;
 
 initialization

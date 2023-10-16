@@ -1,5 +1,6 @@
 {$R-} { Range-Checking }
 {$Q-} { Overflow checking }
+{$Z1} { Minumum enum size = 1}
 
 {$IF NOT DEFINED(ACL_RTTI_ALL)}
   {$WEAKLINKRTTI ON}
@@ -17,7 +18,7 @@
 {$WARN DUPLICATE_CTOR_DTOR OFF} // We does not support for C++Builder
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Debug and Logging
+// Options
 // ---------------------------------------------------------------------------------------------------------------------
 
 {$IFDEF DEBUG}
@@ -26,12 +27,12 @@
   {.$DEFINE ACL_LOG_REGISTRY}
 {$ENDIF}
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Graphics
-// ---------------------------------------------------------------------------------------------------------------------
-
 {$DEFINE ACL_BLURFILTER_USE_SHARED_RESOURCES}
 {$DEFINE ACL_TEXTLAYOUT_RTL_SUPPORT}
+
+// Options for TStream.WriteVariant()
+{$DEFINE ACL_PACK_VARIANT_ARRAYS}
+{$DEFINE ACL_PACK_VARIANT_INTEGERS}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // IDE Versions

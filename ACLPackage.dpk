@@ -25,7 +25,7 @@
 {$IMAGEBASE $400000}
 {$DEFINE DEBUG}
 {$ENDIF IMPLICITBUILDING}
-{$DESCRIPTION 'Artem''s Components Library v2023.7'}
+{$DESCRIPTION 'Artem''s Components Library v2023.9.1'}
 {$DESIGNONLY}
 {$IMPLICITBUILD ON}
 
@@ -56,6 +56,7 @@ contains
   ACL.UI.Controls.ComboBox in 'Visual\ACL.UI.Controls.ComboBox.pas',
   ACL.UI.Controls.CompoundControl in 'Visual\ACL.UI.Controls.CompoundControl.pas',
   ACL.UI.Controls.CompoundControl.SubClass in 'Visual\ACL.UI.Controls.CompoundControl.SubClass.pas',
+  ACL.UI.Controls.Docking in 'Visual\ACL.UI.Controls.Docking.pas',
   ACL.UI.Controls.DropDown in 'Visual\ACL.UI.Controls.DropDown.pas',
   ACL.UI.Controls.FormattedLabel in 'Visual\ACL.UI.Controls.FormattedLabel.pas',
   ACL.UI.Controls.GroupBox in 'Visual\ACL.UI.Controls.GroupBox.pas',
@@ -92,6 +93,7 @@ contains
   ACL.UI.DesignTime.PropEditors in 'Visual\ACL.UI.DesignTime.PropEditors.pas',
   ACL.UI.DesignTime.PropEditors.ImageList in 'Visual\ACL.UI.DesignTime.PropEditors.ImageList.pas',
   ACL.UI.DesignTime.PropEditors.Texture in 'Visual\ACL.UI.DesignTime.PropEditors.Texture.pas',
+  ACL.UI.DesignTime.PropEditors.Menu in 'Visual\ACL.UI.DesignTime.PropEditors.Menu.pas',
   ACL.UI.DesignTime.Reg in 'Visual\ACL.UI.DesignTime.Reg.pas',
   ACL.UI.Dialogs in 'Visual\ACL.UI.Dialogs.pas',
   ACL.UI.Dialogs.FolderBrowser in 'Visual\ACL.UI.Dialogs.FolderBrowser.pas',
@@ -102,7 +104,7 @@ contains
   ACL.UI.Forms in 'Visual\ACL.UI.Forms.pas',
   ACL.UI.HintWindow in 'Visual\ACL.UI.HintWindow.pas',
   ACL.UI.ImageList in 'Visual\ACL.UI.ImageList.pas',
-  ACL.UI.PopupMenu in 'Visual\ACL.UI.PopupMenu.pas',
+  ACL.UI.Menus in 'Visual\ACL.UI.Menus.pas',
   ACL.UI.Resources in 'Visual\ACL.UI.Resources.pas',
   ACL.UI.TrayIcon in 'Visual\ACL.UI.TrayIcon.pas',
   ACL.UI.Insight in 'Visual\ACL.UI.Insight.pas',

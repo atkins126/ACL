@@ -4,7 +4,7 @@
 {*        Register Components Helper         *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -19,16 +19,18 @@ interface
 uses
   Vcl.Graphics,
   Vcl.ImgList,
+  Vcl.Menus,
   // System
   System.Classes,
   System.Types,
   System.TypInfo,
   System.UITypes,
   // Designer
-  DesignIntf,
   DesignEditors,
-  VCLEditors,
+  DesignIntf,
   FiltEdit,
+  TreeIntf,
+  VCLEditors,
   // ACL
   ACL.UI.DesignTime.PropEditors;
 
@@ -39,10 +41,11 @@ procedure Register;
 implementation
 
 uses
-  System.SysUtils,
   System.Math,
+  System.SysUtils,
+  // Vcl
   Vcl.Controls,
-  //
+  // ACL
   ACL.Classes,
   ACL.Classes.StringList,
   ACL.Classes.Timer,
@@ -62,6 +65,7 @@ uses
   ACL.UI.Controls.ColorPicker,
   ACL.UI.Controls.ComboBox,
   ACL.UI.Controls.DateTimeEdit,
+  ACL.UI.Controls.Docking,
   ACL.UI.Controls.DropDown,
   ACL.UI.Controls.FormattedLabel,
   ACL.UI.Controls.GroupBox,
@@ -93,18 +97,36 @@ uses
   ACL.UI.Forms,
   ACL.UI.ImageList,
   ACL.UI.Insight,
-  ACL.UI.PopupMenu,
+  ACL.UI.Menus,
   ACL.UI.Resources,
   ACL.UI.TrayIcon,
   ACL.Utils.Common,
   ACL.Utils.FileSystem;
 
+type
+  TACLDockGroupSprig = class(TComponentSprig)
+  public
+    function Ghosted: Boolean; override;
+    function UniqueName: string; override;
+  end;
+
+{ TACLDockGroupSprig }
+
+function TACLDockGroupSprig.Ghosted: Boolean;
+begin
+  Result := True;
+end;
+
+function TACLDockGroupSprig.UniqueName: string;
+begin
+  Result := '(Group)';
+end;
+
 procedure HideProperties(AClass: TClass; const PropertyNames: array of string);
 var
-  I: Integer;
   APropInfo: PPropInfo;
 begin
-  for I := 0 to Length(PropertyNames) - 1 do
+  for var I := 0 to Length(PropertyNames) - 1 do
   begin
     APropInfo := GetPropInfo(AClass, PropertyNames[I]);
     if APropInfo = nil then
@@ -161,8 +183,12 @@ begin
   RegisterComponents(sACLComponentsPage, [TACLButton, TACLCheckBox, TACLRadioBox, TACLUIInsightButton]);
 
   // Menus
-  RegisterComponents(sACLComponentsPage, [TACLPopupMenu]);
-  RegisterNoIcon([TACLMenuItem, TACLMenuItemLink]);
+  HideProperties(TACLPopupMenu, ['OnChange']);
+  RegisterNoIcon([TACLMenuItem, TACLMenuItemLink, TACLMenuListItem]);
+  RegisterComponents(sACLComponentsPage, [TACLPopupMenu, TACLMainMenu]);
+  RegisterComponentEditor(TACLMainMenu, TACLMainMenuEditor);
+  RegisterComponentEditor(TACLPopupMenu, TACLPopupMenuEditor);
+  RegisterPropertyEditor(TypeInfo(TMenuItem), TACLPopupMenu, 'Items', TACLMenuPropertyEditor);
 
   // Images
   RegisterComponents(sACLComponentsPage, [TACLImageBox, TACLImageList, TACLSubImageSelector]);
@@ -223,6 +249,11 @@ begin
 
   // Scene2D
   RegisterComponents(sACLComponentsPage, [TACLPaintBox2D]);
+
+  // Docking
+  RegisterComponents('ACL', [TACLDockPanel, TACLDockSite]);
+  RegisterSprigType(TACLDockGroup, TACLDockGroupSprig);
+  RegisterSprigType(TACLDockSite, TComponentSprig);
 end;
 
 end.

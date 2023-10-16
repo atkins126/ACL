@@ -58,7 +58,7 @@ uses
   ACL.UI.DropTarget,
   ACL.UI.HintWindow,
   ACL.UI.ImageList,
-  ACL.UI.PopupMenu,
+  ACL.UI.Menus,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
@@ -598,20 +598,22 @@ type
     procedure EditApplyHandler(Sender: TObject); virtual;
     procedure EditCancelHandler(Sender: TObject); virtual;
     procedure EditKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState); virtual;
-    //
+    //# Properties
     property ContentViewInfo: TACLTreeListContentViewInfo read GetContentViewInfo;
     property Value: UnicodeString read GetValue write SetValue;
   public
     destructor Destroy; override;
+    //# States
     function IsEditing: Boolean; overload;
     function IsEditing(AItemIndex, AColumnIndex: Integer): Boolean; overload;
     function IsEditing(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil): Boolean; overload;
     function IsLocked: Boolean;
-    //
+    function IsModified: Boolean;
+    //# Actions
     procedure Apply;
     procedure Cancel;
     procedure StartEditing(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
-    //
+    //# Properties
     property ColumnIndex: Integer read FParams.ColumnIndex;
     property Edit: TComponent read FEdit;
     property EditIntf: IACLInplaceControl read FEditIntf;
@@ -758,7 +760,7 @@ type
     FSorter: TACLTreeListSorter;
     FStyleInplaceEdit: TACLStyleEdit;
     FStyleInplaceEditButton: TACLStyleEditButton;
-    FStyleMenu: TACLStyleMenu;
+    FStyleMenu: TACLStylePopupMenu;
     FStyleTreeList: TACLStyleTreeList;
 
     FOnCanDeleteSelected: TACLTreeListConfirmationEvent;
@@ -825,7 +827,7 @@ type
     procedure SetOptionsView(AValue: TACLTreeListOptionsView);
     procedure SetStyleInplaceEdit(AValue: TACLStyleEdit);
     procedure SetStyleInplaceEditButton(AValue: TACLStyleEditButton);
-    procedure SetStyleMenu(AValue: TACLStyleMenu);
+    procedure SetStyleMenu(AValue: TACLStylePopupMenu);
     procedure SetStyle(AValue: TACLStyleTreeList);
     procedure SetViewportX(const Value: Integer);
     procedure SetViewportY(const Value: Integer);
@@ -873,8 +875,9 @@ type
     procedure DoNodeChecked(ANode: TACLTreeListNode); virtual;
     function DoNodeDblClicked(ANode: TACLTreeListNode): Boolean; virtual;
     procedure DoSelectionChanged; virtual;
-    procedure DoSorted; virtual;
     procedure DoSorting; virtual;
+    procedure DoSorted; virtual;
+    procedure DoSortReset; virtual;
 
     // CustomDraw Events
     function DoCustomDrawColumnBar(ACanvas: TCanvas; const R: TRect): Boolean; virtual;
@@ -1003,8 +1006,10 @@ type
     procedure ResetSortingParams;
     procedure Resort;
     procedure Sort(ACustomSortProc: TACLTreeListNodeCompareEvent);
-    procedure SortBy(AColumn: TACLTreeListColumn; ADirection: TACLSortDirection; AResetPrevSortingParams: Boolean = False); overload;
-    procedure SortBy(AColumn: TACLTreeListColumn; AResetPrevSortingParams: Boolean = False); overload;
+    procedure SortBy(AColumn: TACLTreeListColumn; ADirection: TACLSortDirection;
+      AResetPrevSortingParams: Boolean = False); overload;
+    procedure SortBy(AColumn: TACLTreeListColumn;
+      AResetPrevSortingParams: Boolean = False); overload;
 
     // Paths
     function FindByPath(APath: UnicodeString; AIgnoreCase: Boolean = True; AExactMatch: Boolean = False): TACLTreeListNode;
@@ -1062,7 +1067,7 @@ type
     property OptionsView: TACLTreeListOptionsView read FOptionsView write SetOptionsView;
     property StyleInplaceEdit: TACLStyleEdit read FStyleInplaceEdit write SetStyleInplaceEdit;
     property StyleInplaceEditButton: TACLStyleEditButton read FStyleInplaceEditButton write SetStyleInplaceEditButton;
-    property StyleMenu: TACLStyleMenu read FStyleMenu write SetStyleMenu;
+    property StyleMenu: TACLStylePopupMenu read FStyleMenu write SetStyleMenu;
     property Style: TACLStyleTreeList read FStyleTreeList write SetStyle;
 
     // Events
@@ -3007,6 +3012,11 @@ begin
   Result := FLockCount > 0;
 end;
 
+function TACLTreeListEditingController.IsModified: Boolean;
+begin
+  Result := IsEditing and (Value <> EditIntf.InplaceGetValue);
+end;
+
 procedure TACLTreeListEditingController.Apply;
 begin
   if IsEditing then
@@ -3530,7 +3540,7 @@ begin
   FStyleInplaceEdit := TACLStyleEdit.Create(Self);
   FStyleInplaceEditButton := TACLStyleEditButton.Create(Self);
   FStyleTreeList := CreateStyle;
-  FStyleMenu := TACLStyleMenu.Create(Self);
+  FStyleMenu := TACLStylePopupMenu.Create(Self);
 end;
 
 destructor TACLTreeListSubClass.Destroy;
@@ -3800,10 +3810,7 @@ begin
       begin
         ASortByList.Remove(AColumn);
         if ASortByList.Count = 0 then
-        begin
-          if Assigned(OnSortReset) then
-            OnSortReset(Self);
-        end;
+          DoSortReset;
       end
       else
         if AColumn.SortByIndex < 0 then
@@ -4314,14 +4321,19 @@ begin
   CallNotifyEvent(Self, OnSelectionChanged);
 end;
 
+procedure TACLTreeListSubClass.DoSorting;
+begin
+  CallNotifyEvent(Self, OnSorting);
+end;
+
 procedure TACLTreeListSubClass.DoSorted;
 begin
   CallNotifyEvent(Self, OnSorted);
 end;
 
-procedure TACLTreeListSubClass.DoSorting;
+procedure TACLTreeListSubClass.DoSortReset;
 begin
-  CallNotifyEvent(Self, OnSorting);
+  CallNotifyEvent(Self, OnSortReset);
 end;
 
 function TACLTreeListSubClass.DoCustomDrawColumnBar(ACanvas: TCanvas; const R: TRect): Boolean;
@@ -4331,7 +4343,8 @@ begin
     OnCustomDrawColumnBar(Self, ACanvas, R, Result);
 end;
 
-function TACLTreeListSubClass.DoCustomDrawNode(ACanvas: TCanvas; const R: TRect; ANode: TACLTreeListNode): Boolean;
+function TACLTreeListSubClass.DoCustomDrawNode(
+  ACanvas: TCanvas; const R: TRect; ANode: TACLTreeListNode): Boolean;
 begin
   Result := False;
   if Assigned(OnCustomDrawNode) then
@@ -5428,7 +5441,7 @@ begin
   FStyleInplaceEditButton.Assign(AValue);
 end;
 
-procedure TACLTreeListSubClass.SetStyleMenu(AValue: TACLStyleMenu);
+procedure TACLTreeListSubClass.SetStyleMenu(AValue: TACLStylePopupMenu);
 begin
   FStyleMenu.Assign(AValue);
 end;

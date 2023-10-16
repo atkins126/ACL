@@ -52,6 +52,8 @@ const
   acFocusRectIndent = 1;
   acTextIndent = 2;
 
+  acDragImageAlpha = 150;
+  acDragImageColor = $8F2929;
   acHatchDefaultColor1 = clWhite;
   acHatchDefaultColor2 = $BFBFBF;
   acHatchDefaultSize = 8;
@@ -68,6 +70,7 @@ type
     HueIntensity: Byte;
 
     constructor Create(AHue: Byte; AHueIntensity: Byte = 100);
+    class function CreateFromColor(AColor: TAlphaColor): TACLColorSchema; static;
     class function Default: TACLColorSchema; static;
     function IsAssigned: Boolean;
 
@@ -383,7 +386,7 @@ procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor); o
 procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor; ABorderColor, AHatchColor1, AHatchColor2: TColor); overload;
 procedure acDrawDotsLineH(DC: HDC; X1, X2, Y: Integer; AColor: TColor);
 procedure acDrawDotsLineV(DC: HDC; X, Y1, Y2: Integer; AColor: TColor);
-procedure acDrawDragImage(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = MaxByte);
+procedure acDrawDragImage(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = acDragImageAlpha);
 procedure acDrawDropArrow(DC: HDC; const R: TRect; AColor: TColor); overload;
 procedure acDrawDropArrow(DC: HDC; const R: TRect; AColor: TColor; const AArrowSize: TSize); overload;
 procedure acDrawExpandButton(DC: HDC; const R: TRect; ABorderColor, AColor: TColor; AExpanded: Boolean);
@@ -1773,10 +1776,10 @@ begin
   end;
 end;
 
-procedure acDrawDragImage(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = MaxByte);
+procedure acDrawDragImage(ACanvas: TCanvas; const R: TRect; AAlpha: Byte);
 begin
-  acFillRect(ACanvas.Handle, R, TAlphaColor.FromColor($8F2929, AAlpha));
-  acDrawFrame(ACanvas.Handle, R, TAlphaColor.FromColor(clBlack, AAlpha), acGetSystemDpi);
+  acFillRect(ACanvas.Handle, R, TAlphaColor.FromColor(acDragImageColor, AAlpha));
+  acDrawFrame(ACanvas.Handle, R, TAlphaColor.FromColor(clBlack, AAlpha), MulDiv(1, acGetSystemDpi, acDefaultDpi));
 end;
 
 procedure acDrawDropArrow(DC: HDC; const R: TRect; AColor: TColor);
@@ -2407,6 +2410,19 @@ begin
   HueIntensity := AHueIntensity;
 end;
 
+class function TACLColorSchema.CreateFromColor(AColor: TAlphaColor): TACLColorSchema;
+var
+  H, S, L: Byte;
+begin
+  if AColor.IsValid then
+  begin
+    TACLColors.RGBtoHSLi(AColor.R, AColor.G, AColor.B, H, S, L);
+    Result := TACLColorSchema.Create(H, MulDiv(100, S, MaxByte));
+  end
+  else
+    Result := TACLColorSchema.Default;
+end;
+
 class function TACLColorSchema.Default: TACLColorSchema;
 begin
   Result := TACLColorSchema.Create(0);
@@ -2809,8 +2825,9 @@ begin
   begin
     with AColors^ do
     begin
-      if Max(Max(rgbBlue, rgbGreen), rgbRed) > rgbReserved then
-        Exit(False);
+      if rgbRed   > rgbReserved then Exit(False);
+      if rgbGreen > rgbReserved then Exit(False);
+      if rgbBlue  > rgbReserved then Exit(False);
     end;
     Inc(AColors);
     Dec(ACount);

@@ -622,7 +622,7 @@ implementation
 uses
   System.Math,
   // ACL
-  ACL.UI.PopupMenu,
+  ACL.UI.Menus,
   ACL.Utils.Strings;
 
 { TACLStyleButton }
@@ -1355,7 +1355,7 @@ end;
 
 procedure TACLSimpleButton.CMFocusChanged(var Message: TCMFocusChanged);
 begin
-  if Message.Sender is TACLCustomButton then
+  if Message.Sender is TACLSimpleButton then
     ViewInfo.IsDefault := Default and (Message.Sender = Self)
   else
     ViewInfo.IsDefault := Default;
