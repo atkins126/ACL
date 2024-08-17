@@ -142,9 +142,6 @@ type
     procedure DrawFocusRect(ACanvas: TCanvas); virtual;
     // Fading
     function FadingCanStarts: Boolean; virtual;
-    procedure FadingPrepareBegin(out AAnimator: TACLBitmapFadingAnimation);
-    procedure FadingPrepareEnd(AAnimator: TACLBitmapFadingAnimation);
-    procedure FadingPrepareFrame(ATarget: TACLBitmap);
     // IACLAnimateControl
     procedure IACLAnimateControl.Animate = Invalidate;
     // Events
@@ -261,7 +258,7 @@ type
     property Align;
     property Anchors;
     property Caption;
-    property Cursor;
+    property Cursor default crHandPoint;
     property DoubleBuffered default True;
     property DragCursor;
     property DragKind;
@@ -361,7 +358,6 @@ type
   protected
     function CreateStyle: TACLStyleButton; override;
     function CreateViewInfo: TACLCustomButtonViewInfo; override;
-    function GetCursor(const P: TPoint): TCursor; override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
     procedure PerformClick; virtual;
     procedure SetTargetDPI(AValue: Integer); override;
@@ -526,6 +522,7 @@ type
     function GetStyle: TACLStyleCheckBox;
     function GetViewInfo: TACLCheckBoxViewInfo;
     function GetWordWrap: Boolean;
+    function IsCursorStored: Boolean;
     procedure SetChecked(AValue: Boolean);
     procedure SetShowCheckMark(AValue: Boolean);
     procedure SetShowLine(AValue: Boolean);
@@ -545,7 +542,6 @@ type
     function CreateSubControlOptions: TACLCheckBoxSubControlOptions; virtual;
     function CreateViewInfo: TACLCustomButtonViewInfo; override;
     function GetActionLinkClass: TControlActionLinkClass; override;
-    function GetCursor(const P: TPoint): TCursor; override;
     procedure Loaded; override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
     procedure SetState(AValue: TCheckBoxState); virtual;
@@ -566,6 +562,7 @@ type
   published
     property Alignment default taLeftJustify;
     property AutoSize default True;
+    property Cursor stored IsCursorStored;
     property ShowCheckMark: Boolean read GetShowCheckMark write SetShowCheckMark default True;
     property ShowLine: Boolean read GetShowLine write SetShowLine default False;
     property Style: TACLStyleCheckBox read GetStyle write SetStyle;
@@ -698,13 +695,13 @@ procedure TACLCustomButtonViewInfo.Draw(ACanvas: TCanvas);
 var
   AClipRgn: HRGN;
 begin
-  if RectVisible(ACanvas.Handle, Bounds) then
+  if acRectVisible(ACanvas.Handle, Bounds) then
   begin
     ACanvas.Font := Font;
     AClipRgn := acSaveClipRegion(ACanvas.Handle);
     try
       acIntersectClipRegion(ACanvas.Handle, Bounds);
-      if not AnimationManager.Draw(Self, ACanvas.Handle, ButtonRect) then
+      if not AnimationManager.Draw(Self, ACanvas, ButtonRect) then
         DrawBackground(ACanvas, ButtonRect);
       if IsFocused then
         DrawFocusRect(ACanvas);
@@ -795,7 +792,7 @@ end;
 
 procedure TACLCustomButtonViewInfo.RefreshState;
 var
-  AAnimator: TACLBitmapFadingAnimation;
+  AAnimator: TACLCustomBitmapAnimation;
   ANewState: TACLButtonState;
 begin
   ANewState := CalculateState;
@@ -803,9 +800,11 @@ begin
   begin
     if FadingCanStarts and (FState = absHover) and (ANewState in [absActive, absNormal]) then
     begin
-      FadingPrepareBegin(AAnimator);
+      AAnimator := TACLBitmapFadingAnimation.Create(Self, acUIFadingTime);
+      AAnimator.AllocateFrame1(ButtonRect, DrawBackground);
       FState := ANewState;
-      FadingPrepareEnd(AAnimator);
+      AAnimator.AllocateFrame2(ButtonRect, DrawBackground);
+      AAnimator.Run;
     end;
     FState := ANewState;
     StateChanged;
@@ -887,23 +886,6 @@ begin
   Result := [bsfEnabled, bsfPressed] * FFlags = [bsfEnabled];
 end;
 
-procedure TACLCustomButtonViewInfo.FadingPrepareBegin(out AAnimator: TACLBitmapFadingAnimation);
-begin
-  AAnimator := TACLBitmapFadingAnimation.Create(Self, acUIFadingTime);
-  FadingPrepareFrame(AAnimator.AllocateFrame1(ButtonRect));
-end;
-
-procedure TACLCustomButtonViewInfo.FadingPrepareEnd(AAnimator: TACLBitmapFadingAnimation);
-begin
-  FadingPrepareFrame(AAnimator.AllocateFrame2(ButtonRect));
-  AAnimator.Run;
-end;
-
-procedure TACLCustomButtonViewInfo.FadingPrepareFrame(ATarget: TACLBitmap);
-begin
-  DrawBackground(ATarget.Canvas, ATarget.ClientRect);
-end;
-
 procedure TACLCustomButtonViewInfo.DoClick;
 begin
   CallNotifyEvent(Self, OnClick);
@@ -972,6 +954,7 @@ end;
 constructor TACLCustomButton.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  Cursor := crHandPoint;
   FocusOnClick := True;
   DoubleBuffered := True;
   TabStop := True;
@@ -1038,7 +1021,7 @@ end;
 procedure TACLCustomButton.FocusChanged;
 begin
   inherited FocusChanged;
-  if not IsDesigning then
+  if not (csDesigning in ComponentState) then
   begin
     ViewInfo.IsFocused := Focused;
     ViewInfo.Invalidate;
@@ -1193,9 +1176,9 @@ procedure TACLButtonViewInfo.Calculate(R: TRect);
 begin
   inherited;
   FButtonRect := R;
-  R := acRectContent(R, Style.ContentOffsets);
+  R.Content(Style.ContentOffsets);
   FFocusRect := R;
-  R := acRectInflate(R, -1);
+  R.Inflate(-1);
   CalculateArrowRect(R);
   CalculateImageRect(R);
   CalculateTextRect(R);
@@ -1217,19 +1200,19 @@ end;
 
 procedure TACLButtonViewInfo.CalculateImageRect(var R: TRect);
 var
-  AImageSize: TSize;
+  LImageSize: TSize;
 begin
   if HasImage then
   begin
-    AImageSize := ImageSize;
-
+    LImageSize := ImageSize;
+    FImageRect := R;
     if Caption <> '' then
     begin
-      FImageRect := acRectCenterVertically(R, AImageSize.cy);
-      FImageRect := acRectSetWidth(FImageRect, AImageSize.cx);
+      FImageRect.CenterVert(LImageSize.cy);
+      FImageRect.Width := LImageSize.cx;
     end
     else
-      FImageRect := acRectCenter(R, AImageSize);
+      FImageRect.Center(LImageSize);
 
     R.Left := FImageRect.Right + GetIndentBetweenElements;
   end;
@@ -1237,7 +1220,8 @@ end;
 
 procedure TACLButtonViewInfo.CalculateTextRect(var R: TRect);
 begin
-  FTextRect := acRectInflate(R, -dpiApply(acTextIndent - 1, CurrentDpi), 0);
+  FTextRect := R;
+  FTextRect.Inflate(-dpiApply(acTextIndent - 1, CurrentDpi), 0);
 end;
 
 function TACLButtonViewInfo.CanClickOnDialogChar(Char: Word): Boolean;
@@ -1278,7 +1262,7 @@ begin
   if FHasArrow then
     acDrawDropArrow(ACanvas.Handle, ArrowRect, TextColor, dpiApply(acDropArrowSize, CurrentDpi));
 
-  if not acRectIsEmpty(ImageRect) then
+  if not ImageRect.IsEmpty then
   begin
     if Glyph <> nil then
       Glyph.Draw(ACanvas.Handle, ImageRect, IsEnabled)
@@ -1370,13 +1354,6 @@ end;
 function TACLSimpleButton.CreateViewInfo: TACLCustomButtonViewInfo;
 begin
   Result := TACLButtonViewInfo.Create(Self);
-end;
-
-function TACLSimpleButton.GetCursor(const P: TPoint): TCursor;
-begin
-  Result := inherited GetCursor(P);
-  if Result = crDefault then
-    Result := crHandPoint;
 end;
 
 procedure TACLSimpleButton.Notification(AComponent: TComponent; Operation: TOperation);
@@ -1517,7 +1494,7 @@ const
 var
   DR: TRect;
 begin
-  DR := acRectSetLeft(R, IfThen(Kind = sbkDropDownButton, DropDownViewInfo.TextureSize.cx));
+  DR := R.Split(srRight, IfThen(Kind = sbkDropDownButton, DropDownViewInfo.TextureSize.cx));
   R.Right := DR.Left;
 
   DropDownViewInfo.HasArrow := True;
@@ -1750,11 +1727,15 @@ begin
   if ShowCheckMark then
   begin
     ASize := TextureSize;
-    FButtonRect := acRectSetWidth(R, ASize.cx);
+    FButtonRect := R;
+    FButtonRect.Width := ASize.cx;
     if WordWrap then
-      FButtonRect := acRectSetTop(FButtonRect, FButtonRect.Top + acFocusRectIndent, ASize.cy)
+    begin
+      FButtonRect.Top := R.Top + acFocusRectIndent;
+      FButtonRect.Height := ASize.cy;
+    end
     else
-      FButtonRect := acRectCenter(FButtonRect, ASize);
+      FButtonRect.Center(ASize);
 
     R.Left := FButtonRect.Right + GetIndentBetweenElements - acTextIndent;
   end
@@ -1768,7 +1749,8 @@ begin
   begin
     if Odd(R.Height) then
       Inc(R.Bottom);
-    FLineRect := acRectCenterVertically(R, 2);
+    FLineRect := R;
+    FLineRect.CenterVert(2);
   end
   else
     FLineRect := NullRect;
@@ -1776,33 +1758,36 @@ end;
 
 procedure TACLCheckBoxViewInfo.CalculateTextRect(var R: TRect);
 var
-  ATextWidth: Integer;
+  LTextWidth: Integer;
 begin
   CalculateTextSize(R, FTextSize);
 
-  ATextWidth := Min(FTextSize.cx, R.Width);
+  FTextRect := R;
+  LTextWidth := Min(FTextSize.cx, R.Width);
   case Alignment of
     taCenter:
-      FTextRect := acRectCenterHorizontally(R, ATextWidth);
+      FTextRect.CenterHorz(LTextWidth);
     taRightJustify:
-      FTextRect := acRectSetRight(R, R.Right, ATextWidth);
+      FTextRect.Left := FTextRect.Right - LTextWidth;
   else
-    FTextRect := acRectSetWidth(R, ATextWidth);
+    FTextRect.Width := LTextWidth;
   end;
 
-  FTextRect := acRectCenterVertically(FTextRect, FTextSize.cy);
+  FTextRect.CenterVert(FTextSize.cy);
   FTextRect.Offset(0, -1);
 
   if TextRect.IsEmpty or (Caption = '') then
   begin
-    FFocusRect := acRectInflate(ButtonRect, -2);
+    FFocusRect := ButtonRect;
+    FFocusRect.Inflate(-2);
     if FFocusRect.IsEmpty then
       FFocusRect := Bounds;
   end
   else
     if ShowCheckMark then
     begin
-      FFocusRect := acRectInflate(TextRect, acTextIndent, acFocusRectIndent);
+      FFocusRect := TextRect;
+      FFocusRect.Inflate(acTextIndent, acFocusRectIndent);
       FFocusRect := TRect.Intersect(FFocusRect, Bounds);
     end
     else
@@ -1815,11 +1800,11 @@ var
 begin
   MeasureCanvas.Font := Font;
   if ShowCheckMark then
-    R := acRectInflate(R, -acTextIndent, -acFocusRectIndent);
+    R.Inflate(-acTextIndent, -acFocusRectIndent);
 
   ATextRect := R;
   acSysDrawText(MeasureCanvas, ATextRect, Caption, DT_CALCRECT or IfThen(WordWrap, DT_WORDBREAK));
-  ATextSize := acSize(ATextRect);
+  ATextSize := ATextRect.Size;
 
   if WordWrap or (FTextSize.cy = 0) then
     ATextSize.cy := Max(ATextSize.cy, acFontHeight(MeasureCanvas));
@@ -1988,13 +1973,6 @@ begin
   Result := TACLCheckBoxActionLink;
 end;
 
-function TACLCustomCheckBox.GetCursor(const P: TPoint): TCursor;
-begin
-  Result := inherited GetCursor(P);
-  if (Result = crDefault) and ShowCheckMark then
-    Result := crHandPoint;
-end;
-
 procedure TACLCustomCheckBox.SetChecked(AValue: Boolean);
 begin
   if AValue then
@@ -2076,6 +2054,14 @@ begin
   Result := ViewInfo.WordWrap;
 end;
 
+function TACLCustomCheckBox.IsCursorStored: Boolean;
+begin
+  if ShowCheckMark then
+    Result := Cursor <> crHandPoint
+  else
+    Result := Cursor <> crDefault;
+end;
+
 procedure TACLCustomCheckBox.Loaded;
 begin
   inherited;
@@ -2091,6 +2077,13 @@ end;
 
 procedure TACLCustomCheckBox.SetShowCheckMark(AValue: Boolean);
 begin
+  if not IsCursorStored then
+  begin
+    if AValue then
+      Cursor := crHandPoint
+    else
+      Cursor := crDefault;
+  end;
   ViewInfo.ShowCheckMark := AValue;
 end;
 

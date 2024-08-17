@@ -31,7 +31,6 @@ uses
   // ACL
   ACL.Classes,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Controls.Buttons,
   ACL.UI.Controls.BaseEditors,
@@ -264,7 +263,7 @@ end;
 
 procedure TACLInnerMemo.WMNCHitTest(var Message: TWMNCHitTest);
 begin
-  if Container.IsDesigning then
+  if csDesigning in Container.ComponentState then
     Message.Result := HTTRANSPARENT
   else
     Message.Result := HTCLIENT;

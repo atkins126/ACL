@@ -4,7 +4,7 @@
 {*             ScrollBar Control             *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -29,7 +29,7 @@ uses
   // ACL
   ACL.Classes,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
+  ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.SkinImage,
@@ -122,10 +122,7 @@ type
     function GetDisplayBounds: TRect;
     procedure SetState(AState: TACLButtonState);
   protected
-    procedure FadingPrepare(out AAnimate: TACLBitmapFadingAnimation);
-    procedure FadingRun(AAnimate: TACLBitmapFadingAnimation);
-    procedure InternalDraw(ABitmap: TACLBitmap); overload;
-    procedure InternalDraw(ACanvas: TCanvas; const R: TRect); overload;
+    procedure InternalDraw(ACanvas: TCanvas; const R: TRect);
     // IACLAnimateControl
     procedure IACLAnimateControl.Animate = Invalidate;
   public
@@ -353,7 +350,7 @@ end;
 
 procedure TACLStyleScrollBox.DrawSizeGripArea(DC: HDC; const R: TRect);
 begin
-  if not acRectIsEmpty(R) then
+  if not R.IsEmpty then
     TextureSizeGripArea.Draw(DC, R);
 end;
 
@@ -366,7 +363,7 @@ begin
   else
     ATexture := TextureThumbHorz;
 
-  Result := not ((ATexture.StretchMode = isCenter) and acMarginIsEmpty(ATexture.Margins));
+  Result := not ((ATexture.StretchMode = isCenter) and ATexture.Margins.IsZero);
 end;
 
 procedure TACLStyleScrollBox.InitializeResources;
@@ -422,30 +419,13 @@ end;
 
 procedure TACLScrollBarViewInfoItem.Draw(ACanvas: TCanvas);
 begin
-  if not AnimationManager.Draw(Self, ACanvas.Handle, DisplayBounds) then
+  if not AnimationManager.Draw(Self, ACanvas, DisplayBounds) then
     InternalDraw(ACanvas, DisplayBounds);
-end;
-
-procedure TACLScrollBarViewInfoItem.FadingPrepare(out AAnimate: TACLBitmapFadingAnimation);
-begin
-  AAnimate := TACLBitmapFadingAnimation.Create(Self, acUIFadingTime);
-  InternalDraw(AAnimate.AllocateFrame1(DisplayBounds));
-end;
-
-procedure TACLScrollBarViewInfoItem.FadingRun(AAnimate: TACLBitmapFadingAnimation);
-begin
-  InternalDraw(AAnimate.AllocateFrame2(DisplayBounds));
-  AAnimate.Run;
 end;
 
 procedure TACLScrollBarViewInfoItem.Invalidate;
 begin
   Owner.Owner.InvalidateRect(Bounds);
-end;
-
-procedure TACLScrollBarViewInfoItem.InternalDraw(ABitmap: TACLBitmap);
-begin
-  InternalDraw(ABitmap.Canvas, ABitmap.ClientRect);
 end;
 
 procedure TACLScrollBarViewInfoItem.InternalDraw(ACanvas: TCanvas; const R: TRect);
@@ -476,7 +456,7 @@ function TACLScrollBarViewInfoItem.GetDisplayBounds: TRect;
 begin
   Result := Bounds;
   if Part = sbpThumbnail then
-    Result := acRectInflate(Result, Owner.Owner.GetThumbExtends);
+    Result.Inflate(Owner.Owner.GetThumbExtends);
 end;
 
 procedure TACLScrollBarViewInfoItem.SetState(AState: TACLButtonState);
@@ -487,9 +467,11 @@ begin
   begin
     if (State = absHover) and (AState = absNormal) and Owner.Owner.AllowFading then
     begin
-      FadingPrepare(AAnimator);
+      AAnimator := TACLBitmapFadingAnimation.Create(Self, acUIFadingTime);
+      AAnimator.AllocateFrame1(DisplayBounds, InternalDraw);
       FState := AState;
-      FadingRun(AAnimator);
+      AAnimator.AllocateFrame2(DisplayBounds, InternalDraw);
+      AAnimator.Run;
     end;
     FState := AState;
     Invalidate;
@@ -530,10 +512,10 @@ function TACLScrollBarViewInfo.CalculatePositionFromThumbnail(ATotal: Integer): 
 begin
   if Kind = sbHorizontal then
     Result := MulDiv(ATotal, Thumbnail.Bounds.Left - ButtonUp.Bounds.Right,
-      ButtonDown.Bounds.Left - ButtonUp.Bounds.Right - acRectWidth(Thumbnail.Bounds))
+      ButtonDown.Bounds.Left - ButtonUp.Bounds.Right - Thumbnail.Bounds.Width)
   else
     Result := MulDiv(ATotal, Thumbnail.Bounds.Top - ButtonUp.Bounds.Bottom,
-      ButtonDown.Bounds.Top - ButtonUp.Bounds.Bottom - acRectHeight(Thumbnail.Bounds));
+      ButtonDown.Bounds.Top - ButtonUp.Bounds.Bottom - Thumbnail.Bounds.Height);
 end;
 
 procedure TACLScrollBarViewInfo.CheckScrollBarSizes(var AWidth, AHeight: Integer);
@@ -560,18 +542,20 @@ end;
 
 function TACLScrollBarViewInfo.CalculateButtonDownRect: TRect;
 begin
+  Result := Bounds;
   if Kind = sbHorizontal then
-    Result := acRectSetLeft(Bounds, Owner.GetButtonDownSize)
+    Result.Left := Result.Right - Owner.GetButtonDownSize
   else
-    Result := acRectSetTop(Bounds, Owner.GetButtonDownSize);
+    Result.Top := Result.Bottom - Owner.GetButtonDownSize;
 end;
 
 function TACLScrollBarViewInfo.CalculateButtonUpRect: TRect;
 begin
+  Result := Bounds;
   if Kind = sbHorizontal then
-    Result := acRectSetWidth(Bounds, Owner.GetButtonUpSize)
+    Result.Width := Owner.GetButtonUpSize
   else
-    Result := acRectSetHeight(Bounds, Owner.GetButtonUpSize);
+    Result.Height := Owner.GetButtonUpSize;
 end;
 
 function TACLScrollBarViewInfo.CalculateThumbnailRect: TRect;
@@ -598,9 +582,9 @@ begin
         if (ADelta < FThumbnailSize) or (ScrollInfo.Max = ScrollInfo.Min) then Exit;
         ASize := Max(FThumbnailSize, ASize);
         Dec(ADelta, ASize);
-        Result := System.Classes.Bounds(ButtonUp.Bounds.Right, Bounds.Top, ASize, acRectHeight(Bounds));
+        Result := System.Classes.Bounds(ButtonUp.Bounds.Right, Bounds.Top, ASize, Bounds.Height);
         ASize := (ScrollInfo.Max - ScrollInfo.Min) - (ScrollInfo.Page - 1);
-        OffsetRect(Result, MulDiv(ADelta, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize), 0);
+        Result.Offset(MulDiv(ADelta, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize), 0);
       end;
     end
     else
@@ -620,9 +604,9 @@ begin
         if (ADelta < FThumbnailSize) or (ScrollInfo.Max = ScrollInfo.Min) then Exit;
         ASize := Max(ASize, FThumbnailSize);
         Dec(ADelta, ASize);
-        Result := System.Classes.Bounds(Bounds.Left, ButtonUp.Bounds.Bottom, acRectWidth(Bounds), ASize);
+        Result := System.Classes.Bounds(Bounds.Left, ButtonUp.Bounds.Bottom, Bounds.Width, ASize);
         ASize := (ScrollInfo.Max - ScrollInfo.Min) - (ScrollInfo.Page - 1);
-        OffsetRect(Result, 0, MulDiv(ADelta, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize));
+        Result.Offset(0, MulDiv(ADelta, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize));
       end;
     end;
   end;
@@ -704,9 +688,9 @@ procedure TACLScrollBarViewInfo.Tracking(X, Y: Integer; const ADownMousePos, ASa
 var
   ADelta, ASize: Integer;
 begin
-  if not PtInRect(acRectInflate(Bounds, acScrollBarHitArea), Point(X, Y)) then
+  if not PtInRect(Bounds.InflateTo(acScrollBarHitArea), Point(X, Y)) then
   begin
-    Thumbnail.Bounds := acRectSetPos(Thumbnail.Bounds, ASaveThumbnailPos);
+    Thumbnail.Bounds.Location := ASaveThumbnailPos;
     Exit;
   end;
 
@@ -715,12 +699,12 @@ begin
     ADelta := X - ADownMousePos.X;
     if ADelta <> 0 then
     begin
-      ASize := acRectWidth(Thumbnail.Bounds);
+      ASize := Thumbnail.Bounds.Width;
       if (ADelta < 0) and (ASaveThumbnailPos.X + ADelta < ButtonUp.Bounds.Right) then
         ADelta := ButtonUp.Bounds.Right - ASaveThumbnailPos.X;
       if (ADelta > 0) and (ASaveThumbnailPos.X + ASize + ADelta > ButtonDown.Bounds.Left) then
         ADelta := ButtonDown.Bounds.Left - (ASaveThumbnailPos.X + ASize);
-      Thumbnail.Bounds := acRectOffset(Thumbnail.Bounds, -Thumbnail.Bounds.Left + ASaveThumbnailPos.X + ADelta, 0)
+      Thumbnail.Bounds.Offset(-Thumbnail.Bounds.Left + ASaveThumbnailPos.X + ADelta, 0)
     end
   end
   else
@@ -728,12 +712,12 @@ begin
     ADelta := Y - ADownMousePos.Y;
     if ADelta <> 0 then
     begin
-      ASize := acRectHeight(Thumbnail.Bounds);
+      ASize := Thumbnail.Bounds.Height;
       if (ADelta < 0) and (ASaveThumbnailPos.Y + ADelta < ButtonUp.Bounds.Bottom) then
         ADelta := ButtonUp.Bounds.Bottom - ASaveThumbnailPos.Y;
       if (ADelta > 0) and (ASaveThumbnailPos.Y + ASize + ADelta > ButtonDown.Bounds.Top) then
         ADelta := ButtonDown.Bounds.Top - (ASaveThumbnailPos.Y + ASize);
-      Thumbnail.Bounds := acRectOffset(Thumbnail.Bounds, 0, -Thumbnail.Bounds.Top + ASaveThumbnailPos.Y + ADelta);
+      Thumbnail.Bounds.Offset(0, -Thumbnail.Bounds.Top + ASaveThumbnailPos.Y + ADelta);
     end;
   end;
 end;
@@ -750,24 +734,22 @@ end;
 
 function TACLScrollBarViewInfo.GetPageDownRect: TRect;
 begin
-  if acRectIsEmpty(Thumbnail.Bounds) then
-    Result := NullRect
+  if Thumbnail.Bounds.IsEmpty then
+    Exit(NullRect);
+  if Kind = sbHorizontal then
+    Result := Rect(Thumbnail.Bounds.Right, Bounds.Top, ButtonDown.Bounds.Left, Bounds.Bottom)
   else
-    if Kind = sbHorizontal then
-      Result := Rect(Thumbnail.Bounds.Right, Bounds.Top, ButtonDown.Bounds.Left, Bounds.Bottom)
-    else
-      Result := Rect(Bounds.Left, Thumbnail.Bounds.Bottom, Bounds.Right, ButtonDown.Bounds.Top);
+    Result := Rect(Bounds.Left, Thumbnail.Bounds.Bottom, Bounds.Right, ButtonDown.Bounds.Top);
 end;
 
 function TACLScrollBarViewInfo.GetPageUpRect: TRect;
 begin
-  if acRectIsEmpty(Thumbnail.Bounds) then
-    Result := NullRect
+  if Thumbnail.Bounds.IsEmpty then
+    Exit(NullRect);
+  if Kind = sbHorizontal then
+    Result := Rect(ButtonUp.Bounds.Right, Bounds.Top, Thumbnail.Bounds.Left, Bounds.Bottom)
   else
-    if Kind = sbHorizontal then
-      Result := Rect(ButtonUp.Bounds.Right, Bounds.Top, Thumbnail.Bounds.Left, Bounds.Bottom)
-    else
-      Result := Rect(Bounds.Left, ButtonUp.Bounds.Bottom, Bounds.Right, Thumbnail.Bounds.Top);
+    Result := Rect(Bounds.Left, ButtonUp.Bounds.Bottom, Bounds.Right, Thumbnail.Bounds.Top);
 end;
 
 procedure TACLScrollBarViewInfo.SetHotPart(APart: TACLScrollBarPart);
@@ -833,7 +815,7 @@ begin
         if ssShift in AShift then
         begin
           FSaveThumbnailPos := ViewInfo.Thumbnail.Bounds.TopLeft;
-          FDownMousePos := acRectCenter(ViewInfo.Thumbnail.Bounds);
+          FDownMousePos := ViewInfo.Thumbnail.Bounds.CenterPoint;
           Scroll(scTrack);
           MouseThumbTracking(X, Y);
           APart := sbpThumbnail;
@@ -1173,7 +1155,7 @@ end;
 
 procedure TACLScrollBar.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
 begin
-  if not IsLoading then
+  if not (csLoading in ComponentState) then
     ViewInfo.CheckScrollBarSizes(AWidth, AHeight);
   inherited SetBounds(ALeft, ATop, AWidth, AHeight);
   ViewInfo.Calculate(ClientRect);

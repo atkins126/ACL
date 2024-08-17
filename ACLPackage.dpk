@@ -25,7 +25,7 @@
 {$IMAGEBASE $400000}
 {$DEFINE DEBUG}
 {$ENDIF IMPLICITBUILDING}
-{$DESCRIPTION 'Artem''s Components Library v2023.9.1'}
+{$DESCRIPTION 'Artem''s Components Library v2023.12'}
 {$DESIGNONLY}
 {$IMPLICITBUILD ON}
 
@@ -112,7 +112,6 @@ contains
   ACL.Classes.Collections in 'Base\ACL.Classes.Collections.pas',
   ACL.Classes in 'Base\ACL.Classes.pas',
   ACL.Classes.StringList in 'Base\ACL.Classes.StringList.pas',
-  ACL.Classes.Timer in 'Base\ACL.Classes.Timer.pas',
   ACL.Crypto in 'Base\ACL.Crypto.pas',
   ACL.DataBroadcaster in 'Base\ACL.DataBroadcaster.pas',
   ACL.Expressions.FormatString in 'Base\ACL.Expressions.FormatString.pas',
@@ -164,11 +163,11 @@ contains
   ACL.Utils.RTTI in 'Base\ACL.Utils.RTTI.pas',
   ACL.Utils.Shell.FileTypeRegistrar in 'Base\ACL.Utils.Shell.FileTypeRegistrar.pas',
   ACL.Utils.Shell in 'Base\ACL.Utils.Shell.pas',
-  ACL.Utils.Shell.UserAccounts in 'Base\ACL.Utils.Shell.UserAccounts.pas',
   ACL.Utils.Stream in 'Base\ACL.Utils.Stream.pas',
   ACL.Utils.Strings in 'Base\ACL.Utils.Strings.pas',
   ACL.Web.Http in 'Base\ACL.Web.Http.pas',
-  ACL.Web in 'Base\ACL.Web.pas';
+  ACL.Web in 'Base\ACL.Web.pas',
+  ACL.Timers in 'Base\ACL.Timers.pas';
 
 end.
 

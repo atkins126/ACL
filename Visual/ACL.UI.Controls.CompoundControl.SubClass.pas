@@ -12,7 +12,6 @@
 unit ACL.UI.Controls.CompoundControl.SubClass;
 
 {$I ACL.Config.inc}
-{$R ACL.UI.Controls.CompoundControl.SubClass.res}
 
 interface
 
@@ -35,7 +34,6 @@ uses
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
   ACL.FileFormats.INI,
   ACL.Geometry,
   ACL.Graphics,
@@ -44,14 +42,15 @@ uses
   ACL.Math,
   ACL.MUI,
   ACL.ObjectLinks,
+  ACL.Timers,
   ACL.UI.Animation,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Controls.Buttons,
+  ACL.UI.Controls.ScrollBar,
   ACL.UI.DropSource,
   ACL.UI.DropTarget,
   ACL.UI.Forms,
   ACL.UI.HintWindow,
-  ACL.UI.Controls.ScrollBar,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.Desktop,
@@ -263,7 +262,7 @@ type
 
   TACLCompoundControlDragWindow = class(TACLForm)
   strict private
-    FBitmap: TBitmap;
+    FBitmap: TACLDib;
     FControl: TWinControl;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
@@ -272,7 +271,7 @@ type
   public
     constructor Create(AOwner: TWinControl); reintroduce;
     destructor Destroy; override;
-    procedure SetBitmap(ABitmap: TBitmap; AMaskByBitmap: Boolean);
+    procedure SetBitmap(ABitmap: TACLDib; AMaskByBitmap: Boolean);
     procedure SetVisible(AValue: Boolean);
   end;
 
@@ -1043,14 +1042,14 @@ end;
 
 function TACLCompoundControlCustomViewInfo.CalculateHitTest(const AInfo: TACLHitTestInfo): Boolean;
 begin
-  Result := acPointInRect(Bounds, AInfo.HitPoint);
+  Result := PtInRect(Bounds, AInfo.HitPoint);
   if Result then
     DoCalculateHitTest(AInfo);
 end;
 
 procedure TACLCompoundControlCustomViewInfo.Draw(ACanvas: TCanvas);
 begin
-  if not acRectIsEmpty(Bounds) and RectVisible(ACanvas.Handle, Bounds) then
+  if acRectVisible(ACanvas.Handle, Bounds) then
     DoDraw(ACanvas);
 end;
 
@@ -1172,7 +1171,7 @@ constructor TACLCompoundControlDragWindow.Create(AOwner: TWinControl);
 begin
   CreateNew(AOwner);
   FControl := AOwner;
-  FBitmap := TBitmap.Create;
+  FBitmap := TACLDib.Create(0, 0);
   AlphaBlend := True;
   AlphaBlendValue := 200;
   BorderStyle := bsNone;
@@ -1195,10 +1194,10 @@ end;
 
 procedure TACLCompoundControlDragWindow.Paint;
 begin
-  Canvas.Draw(0, 0, FBitmap);
+  FBitmap.DrawCopy(Canvas.Handle, NullPoint);
 end;
 
-procedure TACLCompoundControlDragWindow.SetBitmap(ABitmap: TBitmap; AMaskByBitmap: Boolean);
+procedure TACLCompoundControlDragWindow.SetBitmap(ABitmap: TACLDib; AMaskByBitmap: Boolean);
 begin
   FBitmap.Assign(ABitmap);
   SetBounds(Left, Top, FBitmap.Width, FBitmap.Height);
@@ -1260,13 +1259,14 @@ end;
 
 procedure TACLCompoundControlDragObject.InitializeDragWindow(ASourceViewInfo: TACLCompoundControlCustomViewInfo);
 var
-  ABitmap: TACLBitmap;
+  ABitmap: TACLDib;
 begin
   if DragWindow = nil then
     FDragWindow := TACLCompoundControlDragWindow.Create(SubClass.Container.GetControl);
 
-  ABitmap := TACLBitmap.CreateEx(ASourceViewInfo.Bounds, pf24bit);
+  ABitmap := TACLDib.Create(ASourceViewInfo.Bounds);
   try
+    SubClass.StyleHint.Draw(ABitmap.Canvas, ABitmap.ClientRect);
     ASourceViewInfo.DrawTo(ABitmap.Canvas, 0, 0);
     DragWindow.SetBitmap(ABitmap, True);
     DragWindow.BoundsRect := SubClass.ClientToScreen(ASourceViewInfo.Bounds);
@@ -1297,44 +1297,61 @@ begin
     UpdateAutoScrollDirection(0);
 end;
 
-procedure TACLCompoundControlDragObject.UpdateDragTargetZoneWindow(const ATargetScreenBounds: TRect; AVertical: Boolean);
+procedure TACLCompoundControlDragObject.UpdateDragTargetZoneWindow(
+  const ATargetScreenBounds: TRect; AVertical: Boolean);
 
-  function LoadArrowBitmap(const AName: UnicodeString): TACLBitmap;
-  begin
-    Result := TACLBitmap.Create;
-    Result.LoadFromResourceName(HInstance, AName);
-  end;
-
-  function PrepareDragWindowBitmap: TACLBitmap;
+  function PrepareDragWindowBitmap: TACLDib;
   var
-    AArrow1, AArrow2: TACLBitmap;
+    LRect: TRect;
+    LSize: TSize;
   begin
-    AArrow1 := LoadArrowBitmap('CCDW_DOWN');
-    try
-      AArrow2 := LoadArrowBitmap('CCDW_UP');
-      try
-        Result := TACLBitmap.CreateEx(Max(AArrow1.Width, AArrow2.Width), AArrow1.Height + AArrow2.Height +
-          IfThen(AVertical, acRectHeight(ATargetScreenBounds), acRectWidth(ATargetScreenBounds)), pf24bit);
-        acFillRect(Result.Canvas.Handle, Result.ClientRect, clFuchsia);
-        Result.Canvas.Draw(0, 0, AArrow1);
-        Result.Canvas.Draw(0, Result.Height - AArrow2.Height, AArrow2);
-        if not AVertical then
-          Result.Rotate(br270);
-      finally
-        AArrow2.Free;
-      end;
-    finally
-      AArrow1.Free;
+    if AVertical then
+    begin
+      LSize := acGetArrowSize(makBottom, 288);
+      Result := TACLDib.Create(LSize.cx, 2 * LSize.cy + ATargetScreenBounds.Height);
+      Result.Canvas.Brush.Color := clFuchsia;
+      Result.Canvas.FillRect(Result.ClientRect);
+      // Top
+      LRect := TRect.Create(LSize);
+      LRect.Offset(0, -1);
+      acDrawArrow(Result.Canvas.Handle, LRect, clWhite, makBottom, 288);
+      LRect.Inflate(-1);
+      acDrawArrow(Result.Canvas.Handle, LRect, clBlack, makBottom, 192);
+      // Bottom
+      LRect := TRect.Create(LSize);
+      LRect.Offset(0, Result.Height - LSize.cy);
+      acDrawArrow(Result.Canvas.Handle, LRect, clWhite, makTop, 288);
+      LRect.Inflate(-1);
+      acDrawArrow(Result.Canvas.Handle, LRect, clBlack, makTop, 192);
+    end
+    else
+    begin
+      LSize := acGetArrowSize(makRight, 288);
+      Result := TACLDib.Create(2 * LSize.cx + ATargetScreenBounds.Width, LSize.cy);
+      Result.Canvas.Brush.Color := clFuchsia;
+      Result.Canvas.FillRect(Result.ClientRect);
+      // Left
+      LRect := TRect.Create(LSize);
+      LRect.Offset(-1, 0);
+      acDrawArrow(Result.Canvas.Handle, LRect, clWhite, makRight, 288);
+      LRect.Inflate(-1);
+      acDrawArrow(Result.Canvas.Handle, LRect, clBlack, makRight, 192);
+      // Bottom
+      LRect := TRect.Create(LSize);
+      LRect.Offset(Result.Width - LSize.cx, 0);
+      acDrawArrow(Result.Canvas.Handle, LRect, clWhite, makLeft, 288);
+      LRect.Inflate(-1);
+      acDrawArrow(Result.Canvas.Handle, LRect, clBlack, makLeft, 192);
     end;
   end;
 
 var
-  ABitmap: TACLBitmap;
+  ABitmap: TACLDib;
   AIsTargetAssigned: Boolean;
 begin
   if (DragTargetScreenBounds <> ATargetScreenBounds) or (DragTargetZoneWindow = nil) then
   begin
-    AIsTargetAssigned := not acRectIsEmpty(ATargetScreenBounds);
+    AIsTargetAssigned := not ATargetScreenBounds.IsEmpty;
     if DragTargetZoneWindow = nil then
       FDragTargetZoneWindow := TACLCompoundControlDragWindow.Create(SubClass.Container.GetControl);
 
@@ -1343,7 +1360,8 @@ begin
       ABitmap := PrepareDragWindowBitmap;
       try
         DragTargetZoneWindow.SetBitmap(ABitmap, True);
-        DragTargetZoneWindow.BoundsRect := acRectCenter(ATargetScreenBounds, DragTargetZoneWindow.Width, DragTargetZoneWindow.Height);
+        DragTargetZoneWindow.BoundsRect := ATargetScreenBounds.CenterTo(
+          DragTargetZoneWindow.Width, DragTargetZoneWindow.Height);
       finally
         ABitmap.Free;
       end;
@@ -1477,10 +1495,8 @@ begin
 end;
 
 procedure TACLCompoundControlDragAndDropController.AutoScrollTimerHandler(Sender: TObject);
-var
-  I: Integer;
 begin
-  for I := 0 to Abs(FAutoScrollTimer.Tag) - 1 do
+  for var I := 0 to Abs(FAutoScrollTimer.Tag) - 1 do
   begin
     if FAutoScrollTimer.Tag < 0 then
       SubClass.MouseWheel(mwdDown, [])
@@ -1695,7 +1711,7 @@ end;
 
 function TACLCompoundControlBaseContentCell.GetBounds: TRect;
 begin
-  Result := acRectOffset(GetClientBounds, ViewInfo.Owner.GetViewItemsOrigin);
+  Result := GetClientBounds + ViewInfo.Owner.GetViewItemsOrigin;
 end;
 
 { TACLCompoundControlBaseContentCellViewInfo }
@@ -1722,7 +1738,7 @@ begin
   Initialize(AData, ABounds.Height);
   AInfo.HitObject := AData;
   AInfo.HitObjectData[cchdViewInfo] := Self;
-  DoGetHitTest(acPointOffsetNegative(AInfo.HitPoint, ABounds.TopLeft), ABounds.TopLeft, AInfo);
+  DoGetHitTest(AInfo.HitPoint - ABounds.TopLeft, ABounds.TopLeft, AInfo);
 end;
 
 procedure TACLCompoundControlBaseContentCellViewInfo.Draw(ACanvas: TCanvas; AData: TObject; const ABounds: TRect);
@@ -1784,14 +1800,14 @@ end;
 procedure TACLCompoundControlBaseCheckableContentCellViewInfo.DoGetHitTest(
   const P, AOrigin: TPoint; AInfo: TACLHitTestInfo);
 begin
-  if acPointInRect(CheckBoxRect, P) and IsCheckBoxEnabled then
+  if PtInRect(CheckBoxRect, P) and IsCheckBoxEnabled then
   begin
     AInfo.Cursor := crHandPoint;
     AInfo.IsCheckable := True;
     AInfo.HitObjectData[cchdSubPart] := TObject(cchtCheckable);
   end
   else
-    if ExpandButtonVisible and acPointInRect(ExpandButtonRect, P) then
+    if ExpandButtonVisible and PtInRect(ExpandButtonRect, P) then
     begin
       AInfo.Cursor := crHandPoint;
       AInfo.IsExpandable := True;
@@ -1916,7 +1932,8 @@ var
   I: Integer;
   R: TRect;
 begin
-  R := acRectOffset(FOwner.GetViewItemsArea, 0, -FOwner.GetViewItemsOrigin.Y);
+  R := FOwner.GetViewItemsArea;
+  R.Offset(0, -FOwner.GetViewItemsOrigin.Y);
 
   FFirstVisible := Count;
   for I := 0 to Count - 1 do
@@ -2014,7 +2031,7 @@ function TACLCompoundControlScrollBarViewInfo.CalculateScrollDelta(const P: TPoi
 var
   ADelta: TPoint;
 begin
-  ADelta := acPointOffsetNegative(P, acRectCenter(ThumbnailViewInfo.Bounds));
+  ADelta := P - ThumbnailViewInfo.Bounds.CenterPoint;
   if Kind = sbHorizontal then
     Result := Sign(ADelta.X) * Min(Abs(ADelta.X), FPageSizeInPixels)
   else
@@ -2039,21 +2056,23 @@ begin
       FThumbExtends.Left := 0;
 
       R2 := Bounds;
-      R1 := acRectSetBottom(R2, R2.Bottom, Style.TextureButtonsVert.FrameHeight);
+      R1 := R2.Split(srBottom, Style.TextureButtonsVert.FrameHeight);
       Children[0].Calculate(R1, [cccnLayout]);
       R2.Bottom := R1.Top;
 
-      R1 := acRectSetHeight(R2, Style.TextureButtonsVert.FrameHeight);
+      R1 := R2;
+      R1.Height := Style.TextureButtonsVert.FrameHeight;
       Children[1].Calculate(R1, [cccnLayout]);
       R2.Top := R1.Bottom;
 
       FPageSizeInPixels := Max(MulDiv(ScrollInfo.Page, R2.Height, ScrollInfo.Range), 1);
-      ASize := MaxMin(R2.Height, FPageSizeInPixels, Style.TextureThumbVert.FrameHeight - acMarginHeight(FThumbExtends));
+      ASize := MaxMin(R2.Height, FPageSizeInPixels, Style.TextureThumbVert.FrameHeight - FThumbExtends.MarginsHeight);
       Dec(R2.Bottom, ASize);
       FTrackArea := R2;
-      R1 := acRectSetHeight(R2, ASize);
+      R1 := R2;
+      R1.Height := ASize;
       ASize := ScrollInfo.InvisibleArea;
-      R1 := acRectOffset(R1, 0, MulDiv(R2.Height, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize));
+      R1.Offset(0, MulDiv(R2.Height, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize));
     end
     else
     begin
@@ -2062,23 +2081,26 @@ begin
       FThumbExtends.Top := 0;
 
       R2 := Bounds;
-      R1 := acRectSetRight(R2, R2.Right, Style.TextureButtonsHorz.FrameWidth);
+      R1 := R2.Split(srRight, Style.TextureButtonsHorz.FrameWidth);
       Children[0].Calculate(R1, [cccnLayout]);
       R2.Right := R1.Left;
 
-      R1 := acRectSetWidth(R2, Style.TextureButtonsHorz.FrameWidth);
+      R1 := R2;
+      R1.Width := Style.TextureButtonsHorz.FrameWidth;
       Children[1].Calculate(R1, [cccnLayout]);
       R2.Left := R1.Right;
 
       FPageSizeInPixels := Max(MulDiv(ScrollInfo.Page, R2.Width, ScrollInfo.Range), 1);
-      ASize := MaxMin(R2.Width, FPageSizeInPixels, Style.TextureThumbHorz.FrameWidth - acMarginWidth(FThumbExtends));
+      ASize := MaxMin(R2.Width, FPageSizeInPixels, Style.TextureThumbHorz.FrameWidth - FThumbExtends.MarginsWidth);
       Dec(R2.Right, ASize);
       FTrackArea := R2;
-      R1 := acRectSetWidth(R2, ASize);
+      R1 := R2;
+      R1.Width := ASize;
       ASize := ScrollInfo.InvisibleArea;
-      R1 := acRectOffset(R1, MulDiv(R2.Width, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize), 0);
+      R1.Offset(MulDiv(R2.Width, Min(ScrollInfo.Position - ScrollInfo.Min, ASize), ASize), 0);
     end;
-    Children[2].Calculate(acRectInflate(R1, FThumbExtends), [cccnLayout]);
+    R1.Inflate(FThumbExtends);
+    Children[2].Calculate(R1, [cccnLayout]);
   end;
 end;
 
@@ -2112,8 +2134,8 @@ var
   ADelta: TPoint;
   ADragObject: TACLCompoundControlDragObject;
 begin
-  ADelta := acPointOffsetNegative(P, acRectCenter(ThumbnailViewInfo.Bounds));
-  if acPointIsEqual(ADelta, NullPoint) then
+  ADelta := P - ThumbnailViewInfo.Bounds.CenterPoint;
+  if ADelta = NullPoint then
     Exit;
 
   ADragObject := ThumbnailViewInfo.CreateDragObject(nil);
@@ -2140,7 +2162,7 @@ begin
   if Sign(ADelta) <> Sign(AInitialDelta) then
     Exit;
 
-  ACenter := acRectCenter(ThumbnailViewInfo.Bounds);
+  ACenter := ThumbnailViewInfo.Bounds.CenterPoint;
   if Kind = sbHorizontal then
     Inc(ACenter.X, ADelta)
   else
@@ -2231,7 +2253,7 @@ end;
 
 procedure TACLCompoundControlScrollBarPartViewInfo.DoDraw(ACanvas: TCanvas);
 begin
-  if not AnimationManager.Draw(Self, ACanvas.Handle, Bounds) then
+  if not AnimationManager.Draw(Self, ACanvas, Bounds) then
     Style.DrawPart(ACanvas.Handle, Bounds, Part, ActualState, Kind);
 end;
 
@@ -2375,22 +2397,24 @@ procedure TACLCompoundControlScrollBarThumbnailDragObject.DragMove(const P: TPoi
 var
   R: TRect;
 begin
-  R := acRectContent(Owner.Bounds, Owner.Owner.ThumbExtends);
+  R := Owner.Bounds;
+  R.Content(Owner.Owner.ThumbExtends);
   if Owner.Kind = sbHorizontal then
     CheckDeltas(ADeltaX, ADeltaY, R.Left, TrackArea.Left, TrackArea.Right)
   else
     CheckDeltas(ADeltaY, ADeltaX, R.Top, TrackArea.Top, TrackArea.Bottom);
 
-  if PtInRect(acRectInflate(Owner.Owner.Bounds, acScrollBarHitArea), P) then
+  if PtInRect(Owner.Owner.Bounds.InflateTo(acScrollBarHitArea), P) then
   begin
-    OffsetRect(R, ADeltaX, ADeltaY);
+    R.Offset(ADeltaX, ADeltaY);
 
     if Owner.Kind = sbHorizontal then
       Owner.Scroll(CalculatePosition(R.Left, TrackArea.Left, TrackArea.Right))
     else
       Owner.Scroll(CalculatePosition(R.Top, TrackArea.Top, TrackArea.Bottom));
 
-    Owner.Calculate(acRectInflate(R, Owner.Owner.ThumbExtends), [cccnLayout]);
+    R.Inflate(Owner.Owner.ThumbExtends);
+    Owner.Calculate(R, [cccnLayout]);
   end
   else
   begin
@@ -2497,12 +2521,12 @@ begin
       begin
         AInfo.Position := ViewportY;
         AInfo.Max := ContentSize.cy - 1;
-        AInfo.Page := acRectHeight(ClientBounds);
+        AInfo.Page := ClientBounds.Height;
       end;
 
     sbHorizontal:
       begin
-        AInfo.Page := acRectWidth(ClientBounds);
+        AInfo.Page := ClientBounds.Width;
         AInfo.Max := ContentSize.cx - 1;
         AInfo.Position := ViewportX;
       end;
@@ -2547,11 +2571,13 @@ procedure TACLCompoundControlScrollContainerViewInfo.CalculateScrollBarsPosition
 var
   R1: TRect;
 begin
-  R1 := acRectSetTop(R, ScrollBarHorz.MeasureSize);
+  R1 := R;
+  R1.Top := R1.Bottom - ScrollBarHorz.MeasureSize;
   Dec(R1.Right, ScrollBarVert.MeasureSize);
   ScrollBarHorz.Calculate(R1, [cccnLayout]);
 
-  R1 := acRectSetLeft(R, ScrollBarVert.MeasureSize);
+  R1 := R;
+  R1.Left := R1.Right - ScrollBarVert.MeasureSize;
   Dec(R1.Bottom, ScrollBarHorz.MeasureSize);
   ScrollBarVert.Calculate(R1, [cccnLayout]);
 
@@ -2623,7 +2649,7 @@ procedure TACLCompoundControlScrollContainerViewInfo.SetViewportX(AValue: Intege
 var
   ADelta: Integer;
 begin
-  AValue := MaxMin(AValue, 0, ContentSize.cx - acRectWidth(ClientBounds));
+  AValue := MaxMin(AValue, 0, ContentSize.cx - ClientBounds.Width);
   if AValue <> FViewportX then
   begin
     ADelta := FViewportX - AValue;
@@ -2636,7 +2662,7 @@ procedure TACLCompoundControlScrollContainerViewInfo.SetViewportY(AValue: Intege
 var
   ADelta: Integer;
 begin
-  AValue := MaxMin(AValue, 0, ContentSize.cy - acRectHeight(ClientBounds));
+  AValue := MaxMin(AValue, 0, ContentSize.cy - ClientBounds.Height);
   if AValue <> FViewportY then
   begin
     ADelta := FViewportY - AValue;

@@ -4,7 +4,7 @@
 {*           FileSystem Utilities            *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -24,15 +24,11 @@ uses
 {$ENDIF}
   // System
   System.Classes,
-  System.Generics.Collections,
-  System.SyncObjs,
   System.SysUtils,
   System.Types,
   // ACL
   ACL.Classes,
-  ACL.Classes.ByteBuffer,
   ACL.Classes.StringList,
-  ACL.Parsers,
   ACL.Utils.Common,
   ACL.Utils.Stream;
 
@@ -44,6 +40,8 @@ const
   sUncPrefix = '\\';
   sUnixPathDelim = '/';
   sWindowPathDelim = '\';
+
+  sPathDelims: TSysCharSet = [sUnixPathDelim, sWindowPathDelim];
 
 {$IFNDEF MSWINDOWS}
   INVALID_FILE_ATTRIBUTES = DWORD($FFFFFFFF);
@@ -319,13 +317,10 @@ uses
   Posix.Unistd,
 {$ENDIF}
   // System
-  System.Character,
-  System.Math,
   System.RTLConsts,
   // ACL
   ACL.FastCode,
   ACL.FileFormats.INI,
-  ACL.Math,
   ACL.Utils.Strings;
 
 {$IFDEF MSWINDOWS}
@@ -356,17 +351,12 @@ end;
 
 function acIsLnkFileName(const AFileName: UnicodeString): Boolean;
 begin
-  Result := acSameText(acExtractFileExt(AFileName), '.lnk');
+  Result := acEndsWith(AFileName, '.lnk');
 end;
 
 function acIsLocalUnixPath(const AFileName: UnicodeString): Boolean;
 begin
-  Result := (acPos(sUnixPathDelim, AFileName) > 0) and not acIsUrlFileName(AFileName);
-end;
-
-function acIsPathSeparator(const C: Char): Boolean; inline;
-begin
-  Result := (Ord(C) = Ord(sUnixPathDelim)) or (Ord(C) = Ord(sWindowPathDelim));
+  Result := acContains(sUnixPathDelim, AFileName) and not acIsUrlFileName(AFileName);
 end;
 
 function acIsUncFileName(const AFileName: UnicodeString): Boolean;
@@ -378,8 +368,8 @@ function acIsUrlFileName(const AFileName: UnicodeString): Boolean;
 var
   P: PWideChar;
 begin
-  P := WStrScan(PWideChar(AFileName), ':');
-  Result := (P <> nil) and ((P + 1)^ = '/') and ((P + 1)^ = (P + 2)^);
+  P := acStrScan(PWideChar(AFileName), ':');
+  Result := (P <> nil) and ((P + 1)^ = (P + 2)^) and CharInSet((P + 1)^, sPathDelims);
 //  Result := acExtractFileScheme(AFileName) <> '';
 end;
 
@@ -387,8 +377,8 @@ function acIsUrlFileName(const AFileName: PWideChar; ACount: Integer): Boolean; 
 var
   P: PWideChar;
 begin
-  P := WStrScan(PWideChar(AFileName), ACount, ':');
-  Result := (P <> nil) and ((P + 1)^ = '/') and ((P + 1)^ = (P + 2)^);
+  P := acStrScan(PWideChar(AFileName), ACount, ':');
+  Result := (P <> nil) and ((P + 1)^ = (P + 2)^) and CharInSet((P + 1)^, sPathDelims);
 end;
 
 function acPrepareFileName(const AFileName: UnicodeString): UnicodeString; inline;
@@ -639,16 +629,16 @@ begin
   AStartIndex := AEndIndex;
   while (ADepth > 0) and (AStartIndex > 0) do
   begin
-    if acIsPathSeparator(APath[AStartIndex]) then
+    if CharInSet(APath[AStartIndex], sPathDelims) then
       Dec(AStartIndex);
     AStartIndex := acLastDelimiter(PChar(sFilePathDelims), PChar(APath), Length(sFilePathDelims), AStartIndex);
     Dec(ADepth);
   end;
   Inc(AStartIndex);
 
-  while (AStartIndex <  AEndIndex) and acIsPathSeparator(APath[AEndIndex]) do
+  while (AStartIndex <  AEndIndex) and CharInSet(APath[AEndIndex], sPathDelims) do
     Dec(AEndIndex);
-  while (AStartIndex <= AEndIndex) and acIsPathSeparator(APath[AStartIndex]) do
+  while (AStartIndex <= AEndIndex) and CharInSet(APath[AStartIndex], sPathDelims) do
     Inc(AStartIndex);
 
   Result := Copy(APath, AStartIndex, AEndIndex - AStartIndex + 1);
@@ -736,8 +726,8 @@ begin
   C := P;
   while CharInSet(P^, ['A'..'Z', 'a'..'z', '0'..'9']) do
     Inc(P);
-  if (P^ = ':') and CharInSet((P + 1)^, ['\', '/']) and ((P + 1)^ = (P + 2)^) then
-    Result := acExtractString(C, P)
+  if (P^ = ':') and ((P + 1)^ = (P + 2)^) and CharInSet((P + 1)^, sPathDelims) then
+    Result := acMakeString(C, P)
   else
     Result := '';
 end;
@@ -886,7 +876,7 @@ begin
   Inc(Str, StrLength - 1);
   while Result > 0 do
   begin
-    if WStrScan(Delimiters, DelimitersLength, Str^) <> nil then
+    if acStrScan(Delimiters, DelimitersLength, Str^) <> nil then
       Exit;
     Dec(Result);
     Dec(Str);

@@ -47,7 +47,9 @@ type
 
   { TACLCustomGroupBox }
 
-  TACLCustomGroupBox = class(TACLContainer, IACLButtonOwner)
+  TACLCustomGroupBox = class(TACLContainer,
+    IACLButtonOwner,
+    IACLCursorProvider)
   strict private
     FCaptionViewInfo: TACLCheckBoxViewInfo;
     FStyleCaption: TACLStyleCheckBox;
@@ -75,7 +77,6 @@ type
     procedure DoCheckBoxClick; virtual;
     procedure FocusChanged; override;
     function GetContentOffset: TRect; override;
-    function GetCursor(const P: TPoint): TCursor; override;
     procedure ResourceChanged; override;
     procedure SetDefaultSize; override;
     procedure SetTargetDPI(AValue: Integer); override;
@@ -101,6 +102,9 @@ type
     function ButtonOwnerGetFont: TFont;
     function ButtonOwnerGetImages: TCustomImageList;
     function ButtonOwnerGetStyle: TACLStyleButton;
+
+    // IACLCursorProvider
+    function GetCursor(const P: TPoint): TCursor;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -249,19 +253,22 @@ begin
 
     AIndent := Trunc(TACLMargins.DefaultValue * FCurrentPPI / acDefaultDPI);
     AMargins := Padding.GetScaledMargins(FCurrentPPI);
-    acMarginAdd(AMargins, GetContentOffset);
-    acMarginAdd(AMargins, AIndent, 0, AIndent, 0);
+    AMargins.MarginsAdd(GetContentOffset);
+    AMargins.MarginsAdd(AIndent, 0, AIndent, 0);
 
     FCaptionContentRect := R;
     Inc(FCaptionContentRect.Left, AMargins.Left);
     Dec(FCaptionContentRect.Right, AMargins.Right);
-    FCaptionContentRect := acRectSetSize(FCaptionContentRect, Min(AWidth, FCaptionContentRect.Width), AHeight);
+    FCaptionContentRect.Height := AHeight;
+    FCaptionContentRect.Width := Min(AWidth, FCaptionContentRect.Width);
 
-    FCaptionArea := acRectInflate(FCaptionContentRect, dpiApply(acTextIndent, FCurrentPPI), 0)
+    FCaptionArea := FCaptionContentRect;
+    FCaptionArea.Inflate(dpiApply(acTextIndent, FCurrentPPI), 0)
   end
   else
   begin
-    FCaptionArea := acRectSetHeight(R, 0);
+    FCaptionArea := R;
+    FCaptionArea.Height := 0;
     FCaptionContentRect := FCaptionArea;
   end;
 end;
@@ -324,12 +331,12 @@ begin
   if CaptionViewInfo.ShowCheckMark and PtInRect(CaptionViewInfo.Bounds, P) then
     Result := crHandPoint
   else
-    Result := inherited GetCursor(P);
+    Result := Cursor;
 end;
 
 procedure TACLCustomGroupBox.ResourceChanged;
 begin
-  if not IsDestroying then
+  if not (csDestroying in ComponentState) then
     FullRefresh;
   inherited;
 end;
@@ -567,7 +574,7 @@ end;
 
 procedure TACLGroupBox.ApplyCheckBoxState;
 begin
-  if IsDesigning or not CheckBox.Visible then
+  if (csDesigning in ComponentState) or not CheckBox.Visible then
     Exit;
   if CheckBox.Action in [cbaToggleChildrenEnableState, cbaToggleMinimizeState] then
   begin

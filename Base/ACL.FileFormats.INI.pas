@@ -31,7 +31,6 @@ uses
   ACL.Classes.Collections,
   ACL.Classes.StringList,
   ACL.Hashes,
-  ACL.Parsers,
   ACL.Utils.Common,
   ACL.Utils.FileSystem,
   ACL.Utils.Stream,
@@ -98,7 +97,7 @@ type
     procedure WriteColor(const AKey: UnicodeString; AColor: TColor);
     procedure WriteFont(const AKey: UnicodeString; AFont: TFont);
   {$ENDIF}
-    //
+    // Properties
     property Name: UnicodeString read FName write SetName;
     property ValueFromName[const Name: UnicodeString]: UnicodeString read GetValueFromName write WriteString;
   end;
@@ -125,7 +124,8 @@ type
     FModified: Boolean;
     FSections: TACLObjectList<TACLIniFileSection>;
 
-    function FindValue(const AName, AKey: UnicodeString; out ASection: TACLIniFileSection; out AIndex: Integer): Boolean;
+    function FindValue(const AName, AKey: UnicodeString;
+      out ASection: TACLIniFileSection; out AIndex: Integer): Boolean;
     procedure Changed; virtual;
   public
     constructor Create; overload;
@@ -1203,8 +1203,9 @@ var
   AList: TACLIniFileSection;
   I, J: Integer;
 begin
-  if AEncoding = nil then
-    AEncoding := TEncoding.Unicode;
+  if AEncoding = TEncoding.Unicode then
+    AEncoding := nil; // TACLStreamHelper will operate in more optimal way
+
   AStream.WriteBOM(AEncoding);
   for I := 0 to FSections.Count - 1 do
   begin

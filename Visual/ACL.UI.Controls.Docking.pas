@@ -37,13 +37,13 @@ uses
   // ACL
   ACl.Classes,
   ACl.Classes.Collections,
-  ACl.Classes.Timer,
   ACL.FileFormats.XML,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
   ACL.Graphics.SkinImage,
   ACL.Math,
+  ACL.Timers,
   ACL.UI.Animation,
   ACL.UI.Controls.BaseControls,
   ACL.UI.Controls.Category,
@@ -199,7 +199,7 @@ type
 
   { TACLDragSelection }
 
-  TACLDragSelection = class(TACLBasicForm)
+  TACLDragSelection = class(TForm)
   strict private
     procedure CMDesignHitTest(var Message: TCMDesignHitTest); message CM_DESIGNHITTEST;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
@@ -237,7 +237,7 @@ type
   { TACLDockControl }
 
   TACLDockControlClass = class of TACLDockControl;
-  TACLDockControl = class(TACLCustomControl)
+  TACLDockControl = class(TACLCustomControl, IACLCursorProvider)
   protected const
     CursorMap: array[TACLBorder] of TCursor = (crHSplit, crVSplit, crHSplit, crVSplit);
   protected type
@@ -271,8 +271,9 @@ type
     procedure ControlsAligning; virtual;
     function CreateStyle: TACLStyleDocking; virtual;
     procedure DefineProperties(Filer: TFiler); override;
+    //# IACLCursorProvider
+    function GetCursor(const P: TPoint): TCursor; virtual;
     //# Dragging
-    function GetCursor(const P: TPoint): TCursor; override;
     procedure GetDockZones(ASource: TACLDockControl; AList: TACLDockZones); virtual;
     procedure StartDrag(const P: TPoint);
     procedure StartResize(const P: TPoint; ABorder: TACLBorder);
@@ -341,7 +342,6 @@ type
     FLayout: TACLDockGroupLayout;
     FTabActiveIndex: Integer;
     FTabCapture: TTab;
-    FTabDropTarget: TACLDockControl;
     FTabs: array of TTab;
     FTabsArea: TRect;
 
@@ -359,6 +359,7 @@ type
     procedure SetActiveControlIndex(AValue: Integer);
     procedure SetLayout(AValue: TACLDockGroupLayout);
   protected
+    FReferences: Integer;
     FRestSpace: TRect;
 
     procedure AlignControls(AControl: TControl; var ARect: TRect); override;
@@ -381,7 +382,6 @@ type
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     //# Messages
     procedure CMCancelMode(var Message: TWMCancelMode); message CM_CANCELMODE;
-    procedure CMControlChange(var Message: TCMControlChange); message CM_CONTROLCHANGE;
     procedure CMControlListChange(var Message: TMessage); message CM_CONTROLLISTCHANGE;
     procedure CMDesignHitTest(var Message: TCMDesignHitTest); message CM_DESIGNHITTEST;
     procedure CMDockingPack(var Message: TMessage); message CM_DOCKING_PACK;
@@ -498,34 +498,30 @@ type
 
   TACLDockSiteSideBars = class;
 
-  { TACLDockPosition }
-
-  TACLDockPosition = class
-  protected
-    FNext: TACLDockPosition;
-    procedure LayoutLoad(ANode: TACLXMLNode);
-    procedure LayoutSave(ANode: TACLXMLNode);
-  public
-    CtrlAlign: TAlign;
-    CtrlIndex: Integer;
-    SiteLayout: TACLDockGroupLayout;
-
-    destructor Destroy; override;
-  end;
-
   { TACLDockSiteSideBarTab }
 
-  TACLDockSiteSideBarTab = class
+  TACLDockSiteSideBarTab = class(TComponent)
   strict private
     FBounds: TRect;
     FControl: TACLDockControl;
-    FPosition: TACLDockPosition;
+    FPrevAlign: TAlign;
+    FPrevIndex: Integer;
+    FPrevParent: TACLDockGroup;
+
+    procedure SetPrevParent(AValue: TACLDockGroup);
+  protected
+    procedure LayoutLoad(ANode: TACLXMLNode; AOwner: TComponent);
+    procedure LayoutSave(ANode: TACLXMLNode);
+    procedure Notification(AComponent: TComponent; AOperation: TOperation); override;
+
+    property PrevAlign: TAlign read FPrevAlign;
+    property PrevIndex: Integer read FPrevIndex;
+    property PrevParent: TACLDockGroup read FPrevParent;
   public
-    constructor Create(AControl: TACLDockControl);
+    constructor Create(AControl: TACLDockControl); reintroduce;
     destructor Destroy; override;
     property Bounds: TRect read FBounds write FBounds;
     property Control: TACLDockControl read FControl;
-    property Position: TACLDockPosition read FPosition;
   end;
 
   { TACLDockSiteSideBar }
@@ -666,6 +662,7 @@ type
   public const
     AttrAlign = 'align';
     AttrHeight = 'h';
+    AttrIdent = 'id';
     AttrIndex = 'idx';
     AttrLayout = 'layout';
     AttrName = 'name';
@@ -727,7 +724,7 @@ end;
 function TACLStyleDocking.MeasureTabHeight: Integer;
 begin
   MeasureCanvas.Font.Assign(TabFontActive);
-  Result := MeasureCanvas.TextHeight('Wg') + acMarginHeight(GetTabMargins) + dpiApply(TabControlOffset, TargetDPI);
+  Result := MeasureCanvas.TextHeight('Wg') + GetTabMargins.MarginsHeight + dpiApply(TabControlOffset, TargetDPI);
 end;
 
 function TACLStyleDocking.MeasureTabWidth(const ACaption: string): Integer;
@@ -737,7 +734,7 @@ begin
   Result := Max(Result, acTextSize(MeasureCanvas, ACaption).cx);
   MeasureCanvas.Font.Assign(TabFontActive);
   Result := Max(Result, acTextSize(MeasureCanvas, ACaption).cx);
-  Inc(Result, acMarginWidth(GetTabMargins));
+  Inc(Result, GetTabMargins.MarginsWidth);
 end;
 
 { TACLStyleDockSite }
@@ -754,7 +751,7 @@ end;
 function TACLStyleDockSite.MeasureSideBarTabHeight: Integer;
 begin
   MeasureCanvas.Font.Assign(SideBarTabFontActive);
-  Result := MeasureCanvas.TextHeight('Wg') + acMarginHeight(GetTabMargins) + dpiApply(TabControlOffset, TargetDPI);
+  Result := MeasureCanvas.TextHeight('Wg') + GetTabMargins.MarginsHeight + dpiApply(TabControlOffset, TargetDPI);
 end;
 
 function TACLStyleDockSite.MeasureSideBarTabWidth(const ACaption: string): Integer;
@@ -764,7 +761,7 @@ begin
   Result := Max(Result, acTextSize(MeasureCanvas, ACaption).cx);
   MeasureCanvas.Font.Assign(SideBarTabFontActive);
   Result := Max(Result, acTextSize(MeasureCanvas, ACaption).cx);
-  Inc(Result, acMarginWidth(GetTabMargins));
+  Inc(Result, GetTabMargins.MarginsWidth);
 end;
 
 {$ENDREGION}
@@ -801,7 +798,7 @@ function TACLDockZone.CalculateBounds: TRect;
 const
   Padding = 5;
 begin
-  Result := acRect(GetSkinSize);
+  Result := TRect.Create(GetSkinSize);
   Inc(Result.Bottom, 2 * dpiApply(Padding, FCurrentPPI));
   Inc(Result.Right, 2 * dpiApply(Padding, FCurrentPPI));
 end;
@@ -868,7 +865,7 @@ begin
   try
     acFillRect(ALayer.Handle, ALayer.ClientRect, TAlphaColor($FFFAFAFA));
     acDrawFrame(ALayer.Handle, ALayer.ClientRect, TAlphaColor($FFA5A5A5));
-    Skin.Draw(ALayer.Handle, acRectCenter(ALayer.ClientRect, GetSkinSize), Ord(Active and Enabled), Enabled);
+    Skin.Draw(ALayer.Handle, ALayer.ClientRect.CenterTo(GetSkinSize), Ord(Active and Enabled), Enabled);
     acUpdateLayeredWindow(Handle, ALayer.Handle, BoundsRect);
   finally
     ALayer.Free;
@@ -1023,7 +1020,8 @@ end;
 
 procedure TACLDockZoneClient.CalculateSelection(ASource: TACLDockControl; var ABounds: TRect);
 begin
-  ABounds := acRectInflate(Parent.ClientToScreen(GetParentClientRect), -dpiApply(16, FCurrentPPI));
+  ABounds := Parent.ClientToScreen(GetParentClientRect);
+  ABounds.Inflate(-dpiApply(16, FCurrentPPI));
 end;
 
 procedure TACLDockZoneClient.CreateLayout(ASource: TACLDockControl);
@@ -1279,26 +1277,37 @@ begin
     end;
     if ADockSite <> nil then
     begin
+      AFloatFormBounds := FDragSelection.BoundsRect;
+
       AFloatForm := TACLFloatDockForm.Create(ADockSite);
       AFloatForm.Position := poDesigned;
-      AFloatForm.ScaleForPPI(FExecutor.FCurrentPPI);
+      AFloatForm.BoundsRect := AFloatFormBounds;
+      AFloatForm.ScaleForCurrentDPI;
+      AFloatForm.HandleNeeded; // для 96-dpi
 
       // Чтобы невилировать отступы контента при выключении HasBorders
       AIndents := NullRect;
       FExecutor.AdjustClientRect(AIndents);
+      if AFloatForm.FCurrentPPI <> FExecutor.FCurrentPPI then
+      begin
+        AIndents := dpiRevert(AIndents, FExecutor.FCurrentPPI);
+        AIndents := dpiApply(AIndents, AFloatForm.FCurrentPPI);
+        FNonClientExtends := dpiRevert(FNonClientExtends, FExecutor.FCurrentPPI);
+        FNonClientExtends := dpiApply(FNonClientExtends, AFloatForm.FCurrentPPI);
+      end;
       AExtends := AFloatForm.GetNonClientExtends;
-      acMarginAdd(AExtends,
+      AExtends.MarginsAdd(
         -AIndents.Left, -AIndents.Top, AIndents.Right, AIndents.Bottom);
-      acMarginAdd(AExtends,
+      AExtends.MarginsAdd(
         -FNonClientExtends.Left, -FNonClientExtends.Top,
         -FNonClientExtends.Right, -FNonClientExtends.Bottom);
-      AFloatFormBounds := acRectInflate(FDragSelection.BoundsRect, AExtends);
+      AFloatFormBounds := FDragSelection.BoundsRect;
+      AFloatFormBounds.Inflate(AExtends);
 
       AFloatForm.BoundsRect := AFloatFormBounds;
       FExecutor.Parent := AFloatForm.DockGroup;
       FExecutor.Align := alClient;
       AFloatForm.Show;
-      AFloatForm.BoundsRect := AFloatFormBounds;
 
       ASourceDockGroup.Perform(CM_DOCKING_PACK, 0, 0);
     end;
@@ -1316,7 +1325,7 @@ begin
       FDragTargetZone.CreateLayout(FExecutor);
   end
   else
-    if not FExecutor.IsDesigning then
+    if not (csDesigning in FExecutor.ComponentState) then
       CreateFloatLayout;
 
   PostMessage(FExecutor.Handle, CM_DOCKING_PACK, 0, 0);
@@ -1351,29 +1360,31 @@ procedure TACLDockEngine.UpdateDragTarget(AScreenPos: TPoint; ATarget: TControl)
   end;
 
 var
-  ASelectionBounds: TRect;
-  AUpdateZones: Boolean;
-  AZone: TACLDockZone;
+  LSelectionBounds: TRect;
+  LSize: TSize;
+  LTargetDpi: Integer;
+  LUpdateZones: Boolean;
+  LZone: TACLDockZone;
 begin
-  AZone := nil;
+  LZone := nil;
   if ATarget is TACLDockZone then
   begin
-    AZone := TACLDockZone(ATarget);
-    ATarget := AZone.Parent;
+    LZone := TACLDockZone(ATarget);
+    ATarget := LZone.Parent;
   end;
 
-  AUpdateZones := False;
+  LUpdateZones := False;
   if UpdateDockControl(FDragTargetSite, GetNearestDockControl(ATarget, TACLDockSite)) then
-    AUpdateZones := True;
+    LUpdateZones := True;
   if UpdateDockControl(FDragTarget, GetNearestDockControl(ATarget, TACLDockControl)) then
-    AUpdateZones := True;
-  if AUpdateZones then
+    LUpdateZones := True;
+  if LUpdateZones then
   begin
     FDockZones.UpdateState(FExecutor);
     FDockZones.Show;
   end;
 
-  if AZone <> FDragTargetZone then
+  if LZone <> FDragTargetZone then
   begin
     if FDragTargetZone <> nil then
     begin
@@ -1381,19 +1392,32 @@ begin
         FDragTargetZone.Active := False;
       FDragTargetZone := nil;
     end;
-    if FDockZones.Contains(AZone) then
+    if FDockZones.Contains(LZone) then
     begin
-      FDragTargetZone := AZone;
+      FDragTargetZone := LZone;
       FDragTargetZone.Active := True;
     end;
   end;
 
-  ASelectionBounds := FExecutor.ClientToScreen(FExecutor.ClientRect);
-  ASelectionBounds := acRectInflate(ASelectionBounds, FNonClientExtends);
-  ASelectionBounds.Offset(AScreenPos.X - FInitialPos.X, AScreenPos.Y - FInitialPos.Y);
+  LSelectionBounds := FExecutor.ClientToScreen(FExecutor.ClientRect);
+  LSelectionBounds.Inflate(FNonClientExtends);
+  LSelectionBounds.Offset(AScreenPos.X - FInitialPos.X, AScreenPos.Y - FInitialPos.Y);
+  LTargetDpi := acGetTargetDPI(LSelectionBounds.CenterPoint);
+  if LTargetDpi <> FExecutor.FCurrentPPI then
+  begin
+    LSize := dpiApply(dpiRevert(LSelectionBounds.Size, FExecutor.FCurrentPPI), LTargetDpi);
+    LSelectionBounds.Bottom := AScreenPos.Y +
+      MulDiv(LSize.cy, LSelectionBounds.Bottom - AScreenPos.Y, LSelectionBounds.Height);
+    LSelectionBounds.Left := AScreenPos.X -
+      MulDiv(LSize.cx, AScreenPos.X - LSelectionBounds.Left, LSelectionBounds.Width);
+    LSelectionBounds.Right := AScreenPos.X +
+      MulDiv(LSize.cx, LSelectionBounds.Right - AScreenPos.X, LSelectionBounds.Width);
+    LSelectionBounds.Top := AScreenPos.Y -
+      MulDiv(LSize.cy, AScreenPos.Y - LSelectionBounds.Top, LSelectionBounds.Height);
+  end;
   if (FDragTargetZone <> nil) and FDragTargetZone.Enabled then
-    FDragTargetZone.CalculateSelection(FExecutor, ASelectionBounds);
-  FDragSelection.BoundsRect := ASelectionBounds;
+    FDragTargetZone.CalculateSelection(FExecutor, LSelectionBounds);
+  FDragSelection.BoundsRect := LSelectionBounds;
   FDragSelection.Show;
 end;
 
@@ -1409,7 +1433,7 @@ begin
   Align := alClient;
   ControlStyle := ControlStyle + [csAcceptsControls] - [csDoubleClicks, csCaptureMouse];
   FStyle := CreateStyle;
-  FCustomSize := acSize(100, 100);
+  FCustomSize := TSize.Create(100, 100);
   FDragCapture := InvalidPoint;
   DoubleBuffered := True;
 end;
@@ -1436,7 +1460,7 @@ end;
 procedure TACLDockControl.ChangeScale(M, D: Integer; isDpiChange: Boolean);
 begin
   inherited;
-  FCustomSize := acSizeScale(FCustomSize, M, D);
+  FCustomSize.Scale(M, D);
 end;
 
 procedure TACLDockControl.ControlsAligning;
@@ -1485,12 +1509,12 @@ end;
 
 function TACLDockControl.GetMinHeight: Integer;
 begin
-  Result := Style.MeasureHeaderHeight + acMarginHeight(GetOuterPadding);
+  Result := Style.MeasureHeaderHeight + GetOuterPadding.MarginsHeight;
 end;
 
 function TACLDockControl.GetOuterPadding: TRect;
 begin
-  Result := acMargins(dpiApply(TACLStyleDocking.OuterPadding, FCurrentPPI));
+  Result := TRect.CreateMargins(dpiApply(TACLStyleDocking.OuterPadding, FCurrentPPI));
 end;
 
 function TACLDockControl.GetSize(Side: TACLBorder): Integer;
@@ -1537,7 +1561,7 @@ begin
   AClientRect := ClientRect;
   if PtInRect(AClientRect, P) then
   begin
-    AClientRect := acRectContent(AClientRect, GetOuterPadding);
+    AClientRect.Content(GetOuterPadding);
     if not PtInRect(AClientRect, P) then
     begin
       Result := True;
@@ -1550,7 +1574,7 @@ begin
       else if (P.Y >= AClientRect.Bottom) and CheckAllowResize(mBottom) then
         ASide := mBottom
       else if Safe.Cast(Parent, TACLDockGroup, AGroup) then
-        Result := AGroup.HitOnSizeBox(acPointOffset(P, Left, Top), AResizeHandler, ASide)
+        Result := AGroup.HitOnSizeBox(P + Point(Left, Top), AResizeHandler, ASide)
       else
         Result := False;
     end;
@@ -1780,7 +1804,7 @@ begin
   if Parent <> nil then
     Parent.Perform(CM_DOCKING_VISIBILITY, Message.WParam, LPARAM(Self));
   inherited;
-  if IsDesigning and HandleAllocated then
+  if (csDesigning in ComponentState) and HandleAllocated then
     RedrawWindow(Parent.Handle, nil, 0, RDW_ALLCHILDREN or RDW_INVALIDATE);
 end;
 
@@ -1790,6 +1814,7 @@ constructor TACLDockGroup.Create(AOwner: TComponent);
 begin
   inherited;
   FActiveControlIndex := -1;
+  Name := CreateUniqueName(Self, 'TACL', '');
   DoubleBuffered := False;
 end;
 
@@ -1823,7 +1848,7 @@ begin
       acExcludeFromClipRegion(ACanvas.Handle, ATab.Bounds);
     end;
 
-    ARect := acRectContent(ARect, GetOuterPadding, TabAreaBorders);
+    ARect.Content(GetOuterPadding, TabAreaBorders);
     if not Style.TabArea.IsEmpty then
       acFillRect(ACanvas.Handle, ARect, Style.TabArea.Value);
     Style.DrawBorder(ACanvas, ARect, acAllBorders);
@@ -1842,7 +1867,7 @@ end;
 procedure TACLDockGroup.DrawTabText(ACanvas: TCanvas; const ATab: TTab);
 begin
   acTextDraw(ACanvas, ATab.Control.ToString, 
-    acRectContent(ATab.Bounds, Style.GetTabMargins), 
+    ATab.Bounds.Split(Style.GetTabMargins),
     taCenter, taVerticalCenter, True, True);
 end;
 
@@ -1908,7 +1933,7 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if IsDesigning or AChild.Visible then
+    if (csDesigning in ComponentState) or AChild.Visible then
     begin
       if AChild.Align in AlignFirst + AlignLast then
         Inc(AFixedSize, AChild.CustomWidth);
@@ -1931,13 +1956,13 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignFirst) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignFirst) then
     begin
       AChild.FNeighbours[mLeft] := AChildPrev;
       if AChildPrev <> nil then
         AChildPrev.FNeighbours[mRight] := AChild;
       AChildSize := MulDiv(AChild.CustomWidth, AZoom, 100);
-      ABounds.Add(AChild, acRectSetWidth(ARect, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srLeft, AChildSize));
       AChildPrev := AChild;
       Inc(ARect.Left, AChildSize);
     end;
@@ -1948,13 +1973,13 @@ begin
   for var I := ControlCount - 1 downto 0 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignLast) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignLast) then
     begin
       AChild.FNeighbours[mRight] := AChildNext;
       if AChildNext <> nil then
         AChildNext.FNeighbours[mLeft] := AChild;
       AChildSize := MulDiv(AChild.CustomWidth, AZoom, 100);
-      ABounds.Add(AChild, acRectSetRight(ARect, ARect.Right, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srRight, AChildSize));
       AChildNext := AChild;
       Dec(ARect.Right, AChildSize);
     end;
@@ -1965,7 +1990,7 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignClient) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignClient) then
     begin
       AChild.FNeighbours[mRight] := AChildNext;
       AChild.FNeighbours[mLeft] := AChildPrev;
@@ -1974,7 +1999,7 @@ begin
       if AChildNext <> nil then
         AChildNext.FNeighbours[mLeft] := AChild;
       AChildSize := MulDiv(AChild.CustomWidth, ALeftSize, AClientSize);
-      ABounds.Add(AChild, acRectSetWidth(ARect, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srLeft, AChildSize));
       AChildPrev := AChild;
       Inc(ARect.Left, AChildSize);
     end;
@@ -1992,8 +2017,8 @@ begin
   begin
     AOuterPadding := GetOuterPadding;
     FTabsArea := Rect(ARect.Left, ARect.Top, ARect.Right, ARect.Bottom - 2{visual borders});
-    FTabsArea := acRectContent(FTabsArea, AOuterPadding, TabAreaBorders); // from client to borders
-    FTabsArea := acRectContent(FTabsArea, AOuterPadding, TabAreaBorders); // from borders to tabs
+    FTabsArea.Content(AOuterPadding, TabAreaBorders); // from client to borders
+    FTabsArea.Content(AOuterPadding, TabAreaBorders); // from borders to tabs
     FTabsArea.Top := FTabsArea.Bottom - Style.MeasureTabHeight;
     CalculateTabs(FTabsArea);
     ARect.Bottom := FTabsArea.Top;
@@ -2001,7 +2026,8 @@ begin
   else
     FTabsArea := NullRect;
 
-  AInvisibleRect := acRectSetTop(ARect, -MaxShort, ARect.Height);
+  AInvisibleRect := ARect;
+  AInvisibleRect.SetLocation(ARect.Left, -MaxShort);
   for var I := 0 to ControlCount - 1 do
   begin
     if I <> ActiveControlIndex then
@@ -2034,7 +2060,7 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if IsDesigning or AChild.Visible then
+    if (csDesigning in ComponentState) or AChild.Visible then
     begin
       if AChild.Align in AlignFirst + AlignLast then
         Inc(AFixedSize, AChild.CustomHeight);
@@ -2057,13 +2083,13 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignFirst) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignFirst) then
     begin
       AChild.FNeighbours[mTop] := AChildPrev;
       if AChildPrev <> nil then
         AChildPrev.FNeighbours[mBottom] := AChild;
       AChildSize := MulDiv(AChild.CustomHeight, AZoom, 100);
-      ABounds.Add(AChild, acRectSetHeight(ARect, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srTop, AChildSize));
       AChildPrev := AChild;
       Inc(ARect.Top, AChildSize);
     end;
@@ -2074,13 +2100,13 @@ begin
   for var I := ControlCount - 1 downto 0 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignLast) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignLast) then
     begin
       AChild.FNeighbours[mBottom] := AChildNext;
       if AChildNext <> nil then
         AChildNext.FNeighbours[mTop] := AChild;
       AChildSize := MulDiv(AChild.CustomHeight, AZoom, 100);
-      ABounds.Add(AChild, acRectSetBottom(ARect, ARect.Bottom, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srBottom, AChildSize));
       AChildNext := AChild;
       Dec(ARect.Bottom, AChildSize);
     end;
@@ -2091,7 +2117,7 @@ begin
   for var I := 0 to ControlCount - 1 do
   begin
     AChild := Controls[I];
-    if (IsDesigning or AChild.Visible) and (AChild.Align in AlignClient) then
+    if ((csDesigning in ComponentState) or AChild.Visible) and (AChild.Align in AlignClient) then
     begin
       AChild.FNeighbours[mBottom] := AChildNext;
       AChild.FNeighbours[mTop] := AChildPrev;
@@ -2100,7 +2126,7 @@ begin
       if AChildNext <> nil then
         AChildNext.FNeighbours[mTop] := AChild;
       AChildSize := MulDiv(AChild.CustomHeight, ALeftSize, AClientSize);
-      ABounds.Add(AChild, acRectSetHeight(ARect, AChildSize));
+      ABounds.Add(AChild, ARect.Split(srTop, AChildSize));
       AChildPrev := AChild;
       Inc(ARect.Top, AChildSize);
     end;
@@ -2138,7 +2164,7 @@ begin
     for var I := 0 to ControlCount - 1 do
     begin
       AChild := Controls[I];
-      if IsDesigning or AChild.Visible then
+      if (csDesigning in ComponentState) or AChild.Visible then
       begin
         ATabWidth := Style.MeasureTabWidth(AChild.ToString) + ATabIndent;
         ACalculator.Add(ATabWidth, 4, ATabWidth, True);
@@ -2153,14 +2179,14 @@ begin
     for var I := 0 to ControlCount - 1 do
     begin
       AChild := Controls[I];
-      if IsDesigning or AChild.Visible then
+      if (csDesigning in ComponentState) or AChild.Visible then
       begin
         ATab.Control := AChild;
-        ATab.Bounds := acRectSetWidth(ARect, ACalculator[ATabIndex].Size);
+        ATab.Bounds := ARect.Split(srLeft, ACalculator[ATabIndex].Size);
         ARect.Left := ATab.Bounds.Right;
         if ATabIndex + 1 < ACalculator.Count then
           Dec(ATab.Bounds.Right, ATabIndent);
-        ATab.Bounds := acRectContent(ATab.Bounds, GetTabPlaceIndents(I = ActiveControlIndex));
+        ATab.Bounds.Content(GetTabPlaceIndents(I = ActiveControlIndex));
         if I = ActiveControlIndex then
           FTabActiveIndex := ATabIndex;
         FTabs[ATabIndex] := ATab;
@@ -2193,16 +2219,11 @@ begin
   inherited;
 end;
 
-procedure TACLDockGroup.CMControlChange(var Message: TCMControlChange);
-begin
-  if not Message.Inserting then
-    Perform(CM_DOCKING_VISIBILITY, 0, LPARAM(Message.Control));
-  inherited;
-end;
-
 procedure TACLDockGroup.CMControlListChange(var Message: TMessage);
 begin
   inherited;
+  if Message.LParam = 0 then
+    Perform(CM_DOCKING_VISIBILITY, 0, Message.WParam);
   if HandleAllocated then
     PostMessage(Handle, CM_DOCKING_UPDATETEXT, 0, 0);
 end;
@@ -2223,6 +2244,9 @@ begin
     Exit;
   if Parent is TACLDockGroup then
   begin
+    if FReferences > 0 then
+      Exit;
+
     if ControlCount = 1 then
     begin
       AChild := Controls[0];
@@ -2362,13 +2386,13 @@ end;
 
 function TACLDockGroup.GetVisibleControlCount: Integer;
 var
-  AControl: TACLDockControl;
+  LControl: TACLDockControl;
 begin
   Result := 0;
   for var I := 0 to ControlCount - 1 do
   begin
-    AControl := Controls[I];
-    if AControl.Visible and (AControl.Align <> alCustom) then
+    LControl := Controls[I];
+    if LControl.Visible and (LControl.Align <> alCustom) then
       Inc(Result);
   end;
 end;
@@ -2380,9 +2404,10 @@ end;
 
 procedure TACLDockGroup.LayoutLoad(ANode: TACLXMLNode);
 var
-  ADockGroup: TACLDockGroup;
-  AName: string;
-  APanel: TACLDockPanel;
+  LChild: TACLXMLNode;
+  LGroup: TACLDockGroup;
+  LName: string;
+  LPanel: TACLDockPanel;
 begin
   DisableAlign;
   try
@@ -2393,22 +2418,26 @@ begin
 
     for var I := 0 to ANode.Count - 1 do
     begin
-      if ANode[I].Attributes.GetValue(TACLDockingSchema.AttrName, AName) then
+      LChild := ANode[I];
+      if LChild.Attributes.GetValue(TACLDockingSchema.AttrName, LName) then
       begin
-        if Safe.Cast(Owner.FindComponent(AName), TACLDockPanel, APanel) then
+        if Safe.Cast(Owner.FindComponent(LName), TACLDockPanel, LPanel) then
         begin
-          APanel.Parent := Self;
-          APanel.LayoutLoad(ANode[I]);
-          SetChildOrder(APanel, I);
+          LPanel.Parent := Self;
+          LPanel.LayoutLoad(LChild);
+          SetChildOrder(LPanel, I);
         end;
       end
       else
       begin
-        ADockGroup := TACLDockGroup.Create(Owner);
-        ADockGroup.Parent := Self;
-        ADockGroup.Style := Style;
-        ADockGroup.LayoutLoad(ANode[I]);
-        SetChildOrder(ADockGroup, I);
+        LGroup := TACLDockGroup.Create(Owner);
+        try
+          LGroup.Name := LChild.Attributes.GetValueDef(TACLDockingSchema.AttrIdent, LGroup.Name);
+        except end;
+        LGroup.Parent := Self;
+        LGroup.Style := Style;
+        LGroup.LayoutLoad(LChild);
+        SetChildOrder(LGroup, I);
       end;
     end;
 
@@ -2424,6 +2453,7 @@ begin
   ANode.Attributes.Add(TACLDockingSchema.AttrLayout,
     GetEnumName(TypeInfo(TACLDockGroupLayout), Ord(Layout)));
   inherited;
+  ANode.Attributes.Add(TACLDockingSchema.AttrIdent, Name);
   if ActiveControlIndex >= 0 then
     ANode.Attributes.Add(TACLDockingSchema.AttrIndex, ActiveControlIndex);
   for var I := 0 to ControlCount - 1 do
@@ -2440,7 +2470,6 @@ begin
     if GetTabAtPos(Point(X, Y), ATab)  then
     begin
       ActiveControlIndex := IndexOfControl(ATab.Control);
-      FTabDropTarget := nil;
       FTabCapture := ATab;
       UpdateCursor;
     end;
@@ -2449,16 +2478,20 @@ end;
 
 procedure TACLDockGroup.MouseMove(Shift: TShiftState; X, Y: Integer);
 var
-  ATab: TTab;
+  LIndexSource: Integer;
+  LIndexTarget: Integer;
+  LTab: TTab;
 begin
   if (ssLeft in Shift) and (FTabCapture.Control <> nil) then
   begin
-    if GetTabAtPos(Point(X, Y), ATab) and (ATab.Control <> FTabDropTarget) then
+    if GetTabAtPos(Point(X, Y), LTab) and (LTab.Control <> FTabCapture.Control) then
     begin
-      FTabDropTarget := ATab.Control;
-      if ATab.Control <> FTabCapture.Control then
+      LIndexTarget := IndexOfControl(LTab.Control);
+      LIndexSource := IndexOfControl(FTabCapture.Control);
+      if (LIndexSource < LIndexTarget) and (X >= LTab.Bounds.CenterPoint.X) or
+         (LIndexSource > LIndexTarget) and (X <= LTab.Bounds.CenterPoint.X) then
       begin
-        SetChildOrder(FTabCapture.Control, IndexOfControl(ATab.Control));
+        SetChildOrder(FTabCapture.Control, LIndexTarget);
         Realign;
         // актуализируем после реордеринга
         ActiveControlIndex := IndexOfControl(FTabCapture.Control);
@@ -2619,8 +2652,9 @@ begin
 
   if HasBorders and ShowCaption then
   begin
-    FCaptionRect := acRectContent(ClientRect, GetOuterPadding);
-    FCaptionRect := acRectSetHeight(FCaptionRect, Style.MeasureHeaderHeight);
+    FCaptionRect := ClientRect;
+    FCaptionRect.Content(GetOuterPadding);
+    FCaptionRect.Height := Style.MeasureHeaderHeight;
     FCaptionTextRect := FCaptionRect;
     CalculateCaptionButtons;
   end
@@ -2640,7 +2674,7 @@ end;
 //    (ASite.Layout <> TACLDockGroupLayout.Tabbed) and
 //    (ASite.VisibleControlCount > 1) or IsMinimized;
 //end;
-//
+
 function TACLDockPanel.AllowPin: Boolean;
 var
   ADockSite: TACLDockSite;
@@ -2663,13 +2697,14 @@ procedure TACLDockPanel.CalculateCaptionButtons;
 var
   ARect: TRect;
 begin
-  ARect := acRectInflate(FCaptionRect, -dpiApply(3, FCurrentPPI));
-  FCaptionButtons[TCaptionButton.Close] := acRectSetRight(ARect, ARect.Right, ARect.Height);
+  ARect := FCaptionRect;
+  ARect.Inflate(-dpiApply(3, FCurrentPPI));
+  FCaptionButtons[TCaptionButton.Close] := ARect.Split(srRight, ARect.Height);
   Dec(ARect.Right, ARect.Height + dpiApply(acTextIndent, FCurrentPPI));
 
 //  if AllowMaximize then
 //  begin
-//    FCaptionButtons[TCaptionButton.Maximize] := acRectSetRight(ARect, ARect.Right, ARect.Height);
+//    FCaptionButtons[TCaptionButton.Maximize] := ARect.Split(srRight, ARect.Height);
 //    Dec(ARect.Right, ARect.Height + dpiApply(acTextIndent, FCurrentPPI));
 //  end
 //  else
@@ -2677,7 +2712,7 @@ begin
 
   if AllowPin then
   begin
-    FCaptionButtons[TCaptionButton.Pin] := acRectSetRight(ARect, ARect.Right, ARect.Height);
+    FCaptionButtons[TCaptionButton.Pin] := ARect.Split(srRight, ARect.Height);
     Dec(ARect.Right, ARect.Height + dpiApply(acTextIndent, FCurrentPPI));
   end
   else
@@ -2766,7 +2801,7 @@ begin
   if HasBorders then
   begin
     Result := GetOuterPadding;
-    acMarginAdd(Result, 2{visual borders});
+    Result.MarginsAdd(2{visual borders});
     if ShowCaption then
       Result.Top := FCaptionRect.Bottom + 1;
   end
@@ -2903,7 +2938,7 @@ var
 begin
   if HasBorders then
   begin
-    Style.DrawBorder(Canvas, acRectContent(ClientRect, GetOuterPadding), acAllBorders);
+    Style.DrawBorder(Canvas, ClientRect.Split(GetOuterPadding), acAllBorders);
     Style.DrawHeader(Canvas.Handle, FCaptionRect);
     Style.DrawHeaderText(Canvas, FCaptionTextRect, Caption);
     AClipRgn := acSaveClipRegion(Canvas.Handle);
@@ -2912,14 +2947,14 @@ begin
       for var I := Low(FCaptionButtons) to High(FCaptionButtons) do
       begin
         Style.HeaderButton.Draw(Canvas.Handle, FCaptionButtons[I], GetCaptionButtonState(I));
-        Style.HeaderButtonGlyphs.Draw(Canvas.Handle, acRectInflate(FCaptionButtons[I], -4), Ord(I));
+        Style.HeaderButtonGlyphs.Draw(Canvas.Handle, FCaptionButtons[I].InflateTo(-4), Ord(I));
       end;
     finally
       acRestoreClipRegion(Canvas.Handle, AClipRgn);
     end;
   end;
-  if IsDesigning and not Visible then
-    acFillRect(Canvas.Handle, acRectContent(ClientRect, GetOuterPadding), TAlphaColor.FromColor(clBlack, 30));
+  if (csDesigning in ComponentState) and not Visible then
+    acFillRect(Canvas.Handle, ClientRect.Split(GetOuterPadding), TAlphaColor.FromColor(clBlack, 30));
 end;
 
 procedure TACLDockPanel.SetParent(AParent: TWinControl);
@@ -3026,7 +3061,7 @@ var
 begin
   AWindowInfo.cbSize := SizeOf(AWindowInfo);
   if HandleAllocated and GetWindowInfo(Handle, AWindowInfo) then
-    Result := acMargins(AWindowInfo.rcWindow, AWindowInfo.rcClient)
+    Result := TRect.CreateMargins(AWindowInfo.rcWindow, AWindowInfo.rcClient)
   else
     Result := NullRect;
 end;
@@ -3107,64 +3142,73 @@ end;
 
 {$REGION ' SideBars '}
 
-{ TACLDockPosition }
-
-destructor TACLDockPosition.Destroy;
-begin
-  FreeAndNil(FNext);
-  inherited;
-end;
-
-procedure TACLDockPosition.LayoutLoad(ANode: TACLXMLNode);
-begin
-  SiteLayout := TACLDockGroupLayout(GetEnumValue(TypeInfo(TACLDockGroupLayout),
-    ANode.Attributes.GetValue(TACLDockingSchema.AttrLayout)));
-  CtrlAlign := TAlign(GetEnumValue(TypeInfo(TAlign),
-    ANode.Attributes.GetValue(TACLDockingSchema.AttrAlign)));
-  CtrlIndex := ANode.Attributes.GetValueAsInteger(TACLDockingSchema.AttrIndex);
-  ANode := ANode.NextSibling;
-  if ANode <> nil then
-  begin
-    FNext := TACLDockPosition.Create;
-    FNext.LayoutLoad(ANode);
-  end;
-end;
-
-procedure TACLDockPosition.LayoutSave(ANode: TACLXMLNode);
-begin
-  ANode.Attributes.Add(TACLDockingSchema.AttrIndex, CtrlIndex);
-  ANode.Attributes.Add(TACLDockingSchema.AttrAlign,
-    GetEnumName(TypeInfo(TAlign), Ord(CtrlAlign)));
-  ANode.Attributes.Add(TACLDockingSchema.AttrLayout,
-    GetEnumName(TypeInfo(TACLDockGroupLayout), Ord(SiteLayout)));
-  if FNext <> nil then
-    FNext.LayoutSave(ANode.Parent.Add(TACLDockingSchema.NodePos));
-end;
-
 { TACLDockSiteSideBarTab }
 
 constructor TACLDockSiteSideBarTab.Create(AControl: TACLDockControl);
-var
-  ADockGroup: TACLDockGroup;
-  APosition: TACLDockPosition;
 begin
+  inherited Create(nil);
   FControl := AControl;
-  while Safe.Cast(AControl.Parent, TACLDockGroup, ADockGroup) do
-  begin
-    APosition := TACLDockPosition.Create;
-    APosition.CtrlAlign := AControl.Align;
-    APosition.CtrlIndex := IndexOfControl(AControl);
-    APosition.SiteLayout := ADockGroup.Layout;
-    APosition.FNext := FPosition;
-    FPosition := APosition;
-    AControl := ADockGroup;
-  end;
+  FPrevAlign := AControl.Align;
+  FPrevIndex := IndexOfControl(AControl);
+  SetPrevParent(AControl.Parent as TACLDockGroup);
 end;
 
 destructor TACLDockSiteSideBarTab.Destroy;
 begin
-  FreeAndNil(FPosition);
+  SetPrevParent(nil);
   inherited;
+end;
+
+procedure TACLDockSiteSideBarTab.LayoutLoad(ANode: TACLXMLNode; AOwner: TComponent);
+var
+  LGroup: TComponent;
+begin
+  FPrevAlign := TAlign(GetEnumValue(TypeInfo(TAlign), ANode.Attributes.GetValue(TACLDockingSchema.AttrAlign)));
+  FPrevIndex := ANode.Attributes.GetValueAsInteger(TACLDockingSchema.AttrIndex);
+
+  if AOwner <> nil then
+    LGroup := AOwner.FindComponent(ANode.Attributes.GetValue(TACLDockingSchema.AttrIdent))
+  else
+    LGroup := nil;
+
+  if LGroup is TACLDockGroup then
+    SetPrevParent(TACLDockGroup(LGroup))
+  else
+    SetPrevParent(nil);
+end;
+
+procedure TACLDockSiteSideBarTab.LayoutSave(ANode: TACLXMLNode);
+begin
+  if (FPrevParent <> nil) and (FPrevParent.Name <> '') then
+    ANode.Attributes.Add(TACLDockingSchema.AttrIdent, FPrevParent.Name);
+  ANode.Attributes.Add(TACLDockingSchema.AttrIndex, FPrevIndex);
+  ANode.Attributes.Add(TACLDockingSchema.AttrAlign, GetEnumName(TypeInfo(TAlign), Ord(FPrevAlign)));
+end;
+
+procedure TACLDockSiteSideBarTab.Notification(AComponent: TComponent; AOperation: TOperation);
+begin
+  inherited;
+  if (AOperation = opRemove) and (AComponent = FPrevParent) then
+    SetPrevParent(nil);
+end;
+
+procedure TACLDockSiteSideBarTab.SetPrevParent(AValue: TACLDockGroup);
+begin
+  if AValue <> FPrevParent then
+  begin
+    if FPrevParent <> nil then
+    begin
+      Dec(FPrevParent.FReferences);
+      FPrevParent.RemoveFreeNotification(Self);
+      FPrevParent := nil;
+    end;
+    if AValue <> nil then
+    begin
+      FPrevParent := AValue;
+      FPrevParent.FreeNotification(Self);
+      Inc(FPrevParent.FReferences);
+    end;
+  end;
 end;
 
 { TACLDockSiteSideBar }
@@ -3197,9 +3241,10 @@ begin
       ASize := Style.MeasureSideBarTabWidth(FTabs.List[I].Control.ToString);
       ACalc.Add(ASize, 4, ASize, True);
     end;
+    ARect := Bounds;
     if Side in [mTop, mBottom] then
     begin
-      ARect := acRectInflate(Bounds, -Bounds.Height, 0);
+      ARect.Inflate(-Bounds.Height, 0);
       ACalc.AvailableSize := ARect.Width;
       ACalc.Calculate;
       for var I := 0 to FTabs.Count - 1 do
@@ -3211,7 +3256,7 @@ begin
     end
     else
     begin
-      ARect := acRectInflate(Bounds, 0, -Bounds.Width);
+      ARect.Inflate(0, -Bounds.Width);
       ACalc.AvailableSize := ARect.Height;
       ACalc.Calculate;
       for var I := 0 to FTabs.Count - 1 do
@@ -3328,22 +3373,22 @@ begin
       if (ACtrlIndex >= 0) and (ACtrlIndex < MainSite.ControlCount) then
       begin
         MainSite.Controls[ACtrlIndex].SideBar := Self;
-        FTabs.Last.Position.LayoutLoad(ANode.Nodes[0]);
+        FTabs.Last.LayoutLoad(ANode.Nodes[0], Owner.Site.Owner);
       end;
     end);
 end;
 
 procedure TACLDockSiteSideBar.LayoutSave(ANode: TACLXMLNode);
 var
-  AChildNode: TACLXMLNode;
-  ATab: TACLDockSiteSideBarTab;
+  LNode: TACLXMLNode;
+  LTab: TACLDockSiteSideBarTab;
 begin
   for var I := 0 to FTabs.Count - 1 do
   begin
-    ATab := FTabs.List[I];
-    AChildNode := ANode.Add(TACLDockingSchema.NodeItem);
-    AChildNode.Attributes.Add(TACLDockingSchema.AttrIndex, IndexOfControl(ATab.Control));
-    ATab.Position.LayoutSave(AChildNode.Add(TACLDockingSchema.NodePos));
+    LTab := FTabs.List[I];
+    LNode := ANode.Add(TACLDockingSchema.NodeItem);
+    LNode.Attributes.Add(TACLDockingSchema.AttrIndex, IndexOfControl(LTab.Control));
+    LTab.LayoutSave(LNode.Add(TACLDockingSchema.NodePos));
   end;
 end;
 
@@ -3355,8 +3400,6 @@ begin
 end;
 
 procedure TACLDockSiteSideBar.Register(AControl: TACLDockControl);
-var
-  AParent: TWinControl;
 begin
   if AControl is TACLDockSite then
     raise EInvalidArgument.Create('Unable to pin DockSite to side bar');
@@ -3366,12 +3409,10 @@ begin
   MainSite.DisableAlign;
   try
     // Keep the order
-    AParent := AControl.Parent;
     FTabs.Add(TACLDockSiteSideBarTab.Create(AControl));
     AControl.Parent := MainSite;
     AControl.Align := alCustom;
     AControl.Visible := False;
-    AParent.Perform(CM_DOCKING_PACK, 0, 0);
     Changed;
   finally
     MainSite.EnableAlign;
@@ -3379,61 +3420,41 @@ begin
 end;
 
 procedure TACLDockSiteSideBar.RestorePosition(ATab: TACLDockSiteSideBarTab);
-
-  procedure DoRestore(ARoot: TACLDockGroup; APos: TACLDockPosition);
-  var
-    AGroup: TACLDockGroup;
-  begin
-    ARoot.DisableAlign;
-    try
-      if APos.FNext <> nil then
-      begin
-        // Можем использовать уже имеющийся док-сайт?
-        if not InRange(APos.CtrlIndex, 0, ARoot.ControlCount - 1) or
-           not Safe.Cast(ARoot.Controls[APos.CtrlIndex], TACLDockGroup, AGroup) or
-          (AGroup.Align <> APos.CtrlAlign) or (AGroup.Layout <> APos.FNext.SiteLayout) then
-        begin
-          AGroup := TACLDockGroup.Create(ARoot.Owner);
-          AGroup.FCustomSize := ATab.Control.FCustomSize;
-          AGroup.Align := APos.CtrlAlign;
-          AGroup.Parent := ARoot;
-          AGroup.Layout := APos.FNext.SiteLayout;
-          ARoot.SetChildOrder(AGroup, APos.CtrlIndex);
-        end;
-        DoRestore(AGroup, APos.FNext);
-      end
-      else
-      begin
-        // Keep the order
-        ATab.Control.Parent := ARoot;
-        ATab.Control.Align := APos.CtrlAlign;
-        ARoot.SetChildOrder(ATab.Control, APos.CtrlIndex);
-        ATab.Control.Visible := True;
-      end;
-    finally
-      ARoot.EnableAlign;
-    end;
-  end;
-
+var
+  LGroup: TACLDockGroup;
 begin
   if csDestroying in ComponentState then
     Exit;
   if csDestroying in ATab.Control.ComponentState then
     Exit;
-  DoRestore(MainSite, ATab.Position);
+
+  LGroup := ATab.PrevParent;
+  if LGroup = nil then
+    LGroup := MainSite;
+
+  LGroup.DisableAlign;
+  try
+    // Keep the order
+    ATab.Control.Parent := LGroup;
+    ATab.Control.Align := ATab.PrevAlign;
+    LGroup.SetChildOrder(ATab.Control, ATab.PrevIndex);
+    ATab.Control.Visible := True;
+  finally
+    LGroup.EnableAlign;
+  end;
 end;
 
 procedure TACLDockSiteSideBar.Unregister(AControl: TACLDockControl);
 var
-  ATab: TACLDockSiteSideBarTab;
+  LTab: TACLDockSiteSideBarTab;
 begin
   if csDestroying in ComponentState then
     Exit;
-  ATab := FindTab(AControl);
-  if ATab <> nil then
+  LTab := FindTab(AControl);
+  if LTab <> nil then
   begin
-    RestorePosition(ATab);
-    FTabs.Remove(ATab);
+    RestorePosition(LTab);
+    FTabs.Remove(LTab);
     Changed;
   end;
 end;
@@ -3566,13 +3587,13 @@ var
 begin
   ASideBarSize := FSite.Style.MeasureTabHeight;
 
-  FBars[mBottom].Bounds := acRectSetBottom(ABounds, ABounds.Bottom,
+  FBars[mBottom].Bounds := ABounds.Split(srBottom,
     IfThen(FBars[mBottom].FTabs.Count > 0, ASideBarSize));
-  FBars[mLeft].Bounds := acRectSetWidth(ABounds,
+  FBars[mLeft].Bounds := ABounds.Split(srLeft,
     IfThen(FBars[mLeft].FTabs.Count > 0, ASideBarSize));
-  FBars[mRight].Bounds := acRectSetRight(ABounds, ABounds.Right,
+  FBars[mRight].Bounds := ABounds.Split(srRight,
     IfThen(FBars[mRight].FTabs.Count > 0, ASideBarSize));
-  FBars[mTop].Bounds := acRectSetHeight(ABounds,
+  FBars[mTop].Bounds := ABounds.Split(srTop,
     IfThen(FBars[mTop].FTabs.Count > 0, ASideBarSize));
 
   ABounds.Bottom := FBars[mBottom].Bounds.Top;
@@ -3810,13 +3831,13 @@ end;
 
 procedure TACLDockSite.LayoutLoad(const AFileName: string);
 var
-  ALayout: TACLXMLDocument;
+  LLayout: TACLXMLDocument;
 begin
-  ALayout := TACLXMLDocument.CreateEx(AFileName);
+  LLayout := TACLXMLDocument.CreateEx(AFileName);
   try
-    LayoutLoad(ALayout);
+    LayoutLoad(LLayout);
   finally
-    ALayout.Free;
+    LLayout.Free;
   end;
 end;
 

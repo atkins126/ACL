@@ -187,7 +187,8 @@ end;
 procedure TACLCustomTextEdit.CalculateContent(const R: TRect);
 begin
   FContentRect := R;
-  FTextRect := acRectInflate(R, -dpiApply(acTextIndent, FCurrentPPI));
+  FTextRect := R;
+  FTextRect.Inflate(-dpiApply(acTextIndent, FCurrentPPI));
 end;
 
 function TACLCustomTextEdit.CalculateEditorPosition: TRect;
@@ -290,7 +291,7 @@ end;
 
 function TACLCustomTextEdit.CanOpenEditor: Boolean;
 begin
-  Result := not IsDesigning;
+  Result := not (csDestroying in ComponentState);
 end;
 
 function TACLCustomTextEdit.CreateEditor: TWinControl;

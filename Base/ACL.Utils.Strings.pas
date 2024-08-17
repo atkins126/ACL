@@ -41,15 +41,13 @@ const
   acZero = #0#0;
   acZeroWidthSpace = WideChar($200B);
 
-  UNICODE_BOM = WideChar($FEFF);
-  UNICODE_BOM_EX = AnsiString(#$FF#$FE);
-  UNICODE_NULL = WideChar($0000);
-
 type
   TAnsiStringDynArray = array of AnsiString;
 
-  TAnsiExplodeStringReceiveResultProc = reference to procedure (ACursorStart, ACursorNext: PAnsiChar; var ACanContinue: Boolean);
-  TWideExplodeStringReceiveResultProc = reference to procedure (ACursorStart, ACursorNext: PWideChar; var ACanContinue: Boolean);
+  TAnsiExplodeStringReceiveResultProc = reference to
+    procedure (ACursorStart, ACursorNext: PAnsiChar; var ACanContinue: Boolean);
+  TWideExplodeStringReceiveResultProc = reference to
+    procedure (ACursorStart, ACursorNext: PWideChar; var ACanContinue: Boolean);
 
   { TACLTimeFormat }
 
@@ -348,6 +346,7 @@ type
   public
     class constructor Create;
     class destructor Destroy;
+    class function ASCII: TEncoding;
     class function Default: TEncoding;
     class procedure EnumAnsiCodePages(const AProc: TProc<Integer, string>);
     class function Get(const CodePage: Integer): TEncoding; overload;
@@ -407,6 +406,10 @@ function acAllocStr(const S: UnicodeString): PWideChar; overload;
 function acAllocStr(const S: UnicodeString; out ALength: Integer): PWideChar; overload;
 function acMakeString(const P: PWideChar; L: Integer): UnicodeString; overload; inline;
 function acMakeString(const P: PAnsiChar; L: Integer): AnsiString; overload; inline;
+function acMakeString(const AScanStart, AScanNext: PAnsiChar): AnsiString; overload;
+function acMakeString(const AScanStart, AScanNext: PWideChar): UnicodeString; overload;
+function acStringLength(const AScanStart, AScanNext: PAnsiChar): Integer; overload;
+function acStringLength(const AScanStart, AScanNext: PWideChar): Integer; overload;
 
 // Explode
 function acExplodeString(AScan: PAnsiChar; AScanCount: Integer;
@@ -449,6 +452,18 @@ function acDetectEncoding(ABuffer: TBytes;
 function acDetectEncoding(AStream: TStream;
   ADefaultEncoding: TEncoding = nil): TEncoding; overload;
 
+// Load/Save String
+function acLoadString(AStream: TStream;
+  ADefaultEncoding: TEncoding; out AEncoding: TEncoding): UnicodeString; overload;
+function acLoadString(AStream: TStream;
+  AEncoding: TEncoding = nil): UnicodeString; overload;
+function acLoadString(const AFileName: UnicodeString;
+  AEncoding: TEncoding = nil): UnicodeString; overload;
+procedure acSaveString(AStream: TStream; const AString: UnicodeString;
+  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True); overload;
+procedure acSaveString(const AFileName, AString: UnicodeString;
+  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True); overload;
+
 // Replacing
 function acRemoveChar(const S: UnicodeString; const ACharToRemove: WideChar): UnicodeString;
 function acRemoveSurrogates(const S: UnicodeString; const AReplaceBy: WideChar = #0): UnicodeString;
@@ -460,8 +475,8 @@ function acStringReplace(const S, OldPattern, NewPattern: string;
   AIgnoreCase: Boolean = False; AWholeWords: Boolean = False): string;
 
 // Integer <-> PWideChar;
-function acPWideCharToIntDef(AChars: PWideChar; ACount: Integer; const ADefaultValue: Int64): Int64; inline;
-function acTryPWideCharToInt(AChars: PWideChar; ACount: Integer; out AValue: Int64): Boolean;
+function acPCharToIntDef(AChars: PWideChar; ACount: Integer; const ADefaultValue: Int64): Int64; inline;
+function acTryPCharToInt(AChars: PWideChar; ACount: Integer; out AValue: Int64): Boolean;
 
 // Linebreaks
 function acDecodeLineBreaks(const S: UnicodeString): UnicodeString;
@@ -499,9 +514,9 @@ function IfThenW(AValue: Boolean; const ATrue: UnicodeString; const AFalse: Unic
 function IfThenW(const A, B: UnicodeString): UnicodeString; overload; inline;
 function acDupeString(const AText: UnicodeString; ACount: Integer): UnicodeString;
 function acTrim(const S: UnicodeString): UnicodeString;
-function WStrLength(S: PWideChar; AMaxScanCount: Integer): Integer; inline;
-function WStrScan(Str: PWideChar; ACount: Integer; C: WideChar): PWideChar; overload; inline;
-function WStrScan(Str: PWideChar; C: WideChar): PWideChar; overload; inline;
+function acStrLen(S: PWideChar; AMaxScanCount: Integer): Integer; inline;
+function acStrScan(Str: PWideChar; ACount: Integer; C: WideChar): PWideChar; overload; inline;
+function acStrScan(Str: PWideChar; C: WideChar): PWideChar; overload; inline;
 procedure acStrLCopy(ADest: PWideChar; const ASource: UnicodeString; AMax: Integer);
 implementation
 
@@ -788,7 +803,7 @@ end;
 
 function acContains(const AChar: WideChar; const AString: UnicodeString): Boolean; inline;
 begin
-  Result := WStrScan(Pointer(AString), AChar) <> nil;
+  Result := acStrScan(Pointer(AString), AChar) <> nil;
 end;
 
 function acContains(const ASubStr, AString: UnicodeString; AIgnoreCase: Boolean = False): Boolean;
@@ -837,7 +852,7 @@ var
   P, R: PWideChar;
 begin
   P := PWideChar(AString);
-  R := WStrScan(P, Length(AString), ACharToSearch);
+  R := acStrScan(P, Length(AString), ACharToSearch);
   if R <> nil then
     Result := 1 + (NativeUInt(R) - NativeUInt(P)) div SizeOf(WideChar)
   else
@@ -912,6 +927,32 @@ begin
     SetString(Result, P, L)
   else
     Result := '';
+end;
+
+function acMakeString(const AScanStart, AScanNext: PAnsiChar): AnsiString; overload;
+begin
+  SetString(Result, AScanStart, acStringLength(AScanStart, AScanNext));
+end;
+
+function acMakeString(const AScanStart, AScanNext: PWideChar): UnicodeString;
+begin
+  SetString(Result, AScanStart, acStringLength(AScanStart, AScanNext));
+end;
+
+function acStringLength(const AScanStart, AScanNext: PAnsiChar): Integer;
+begin
+  if NativeUInt(AScanNext) > NativeUInt(AScanStart) then
+    Result := NativeUInt(AScanNext) - NativeUInt(AScanStart)
+  else
+    Result := 0;
+end;
+
+function acStringLength(const AScanStart, AScanNext: PWideChar): Integer;
+begin
+  if NativeUInt(AScanNext) > NativeUInt(AScanStart) then
+    Result := (NativeUInt(AScanNext) - NativeUInt(AScanStart)) div SizeOf(WideChar)
+  else
+    Result := 0;
 end;
 
 //==============================================================================
@@ -1079,7 +1120,7 @@ begin
     Result := acExplodeString(AScan, AScanCount, ADelimiters,
       procedure (ACursorStart, ACursorNext: PWideChar; var ACanContinue: Boolean)
       begin
-        AArray^ := acExtractString(ACursorStart, ACursorNext);
+        AArray^ := acMakeString(ACursorStart, ACursorNext);
         Dec(AArrayLength);
         Inc(AArray);
         ACanContinue := AArrayLength > 0;
@@ -1144,7 +1185,7 @@ begin
     Result := acExplodeString(S, ADelimiter,
       procedure (ACursorStart, ACursorNext: PWideChar; var ACanContinue: Boolean)
       begin
-        AArray^ := acPWideCharToIntDef(ACursorStart, acStringLength(ACursorStart, ACursorNext), 0);
+        AArray^ := acPCharToIntDef(ACursorStart, acStringLength(ACursorStart, ACursorNext), 0);
         Dec(AArrayLength);
         Inc(AArray);
         ACanContinue := AArrayLength > 0;
@@ -1325,7 +1366,7 @@ begin
         Inc(SL1);
       while (SL2 < P2Len) and (P2 + SL2)^.IsDigit do
         Inc(SL2);
-      Result := Sign(acPWideCharToIntDef(P1, SL1, 0) - acPWideCharToIntDef(P2, SL2, 0));
+      Result := Sign(acPCharToIntDef(P1, SL1, 0) - acPCharToIntDef(P2, SL2, 0));
       Dec(P1Len, SL1);
       Dec(P2Len, SL2);
       Inc(P1, SL1);
@@ -1539,10 +1580,85 @@ begin
 end;
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Integer <-> PWideChar
+// Load/Save String
 // ---------------------------------------------------------------------------------------------------------------------
 
-function acTryPWideCharToInt(AChars: PWideChar; ACount: Integer; out AValue: Int64): Boolean;
+function acLoadString(AStream: TStream; ADefaultEncoding: TEncoding; out AEncoding: TEncoding): UnicodeString;
+var
+  ABytes: TBytes;
+  ASize: Cardinal;
+begin
+  AEncoding := acDetectEncoding(AStream, ADefaultEncoding);
+  ASize := AStream.Size - AStream.Position;
+  if ASize <= 0 then
+    Result := ''
+  else
+    if AEncoding = TEncoding.Unicode then
+    begin
+      ASize := ASize div SizeOf(WideChar);
+      SetLength(Result, ASize);
+      AStream.ReadBuffer(Result[1], ASize * SizeOf(WideChar));
+    end
+    else
+    begin
+      SetLength(ABytes, ASize);
+      AStream.ReadBuffer(ABytes[0], ASize);
+      try
+        Result := AEncoding.GetString(ABytes);
+      except
+        Result := TACLEncodings.Default.GetString(ABytes);
+      end;
+    end;
+end;
+
+function acLoadString(AStream: TStream; AEncoding: TEncoding = nil): UnicodeString;
+var
+  X: TEncoding;
+begin
+  Result := acLoadString(AStream, AEncoding, X);
+end;
+
+function acLoadString(const AFileName: UnicodeString; AEncoding: TEncoding = nil): UnicodeString;
+var
+  AStream: TStream;
+begin
+  AStream := StreamCreateReader(AFileName);
+  if AStream <> nil then
+  try
+    Result := acLoadString(AStream, AEncoding);
+  finally
+    AStream.Free;
+  end
+  else
+    Result := '';
+end;
+
+procedure acSaveString(AStream: TStream; const AString: UnicodeString;
+  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True);
+begin
+  if AWriteBOM then
+    AStream.WriteBOM(AEncoding);
+  AStream.WriteString(AString, AEncoding);
+end;
+
+procedure acSaveString(const AFileName, AString: UnicodeString;
+  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True);
+var
+  LStream: TStream;
+begin
+  LStream := StreamCreateWriter(AFileName);
+  try
+    acSaveString(LStream, AString, AEncoding, AWriteBOM);
+  finally
+    LStream.Free;
+  end;
+end;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Integer <-> PChar
+// ---------------------------------------------------------------------------------------------------------------------
+
+function acTryPCharToInt(AChars: PWideChar; ACount: Integer; out AValue: Int64): Boolean;
 var
   ADigit: Integer;
   ANegative: Boolean;
@@ -1581,9 +1697,9 @@ begin
   Result := True;
 end;
 
-function acPWideCharToIntDef(AChars: PWideChar; ACount: Integer; const ADefaultValue: Int64): Int64; inline;
+function acPCharToIntDef(AChars: PWideChar; ACount: Integer; const ADefaultValue: Int64): Int64; inline;
 begin
-  if not acTryPWideCharToInt(AChars, ACount, Result) then
+  if not acTryPCharToInt(AChars, ACount, Result) then
     Result := ADefaultValue;
 end;
 
@@ -1670,7 +1786,7 @@ begin
   FastMove(PWideChar(ASource)^, ADest^, SizeOf(WideChar) * Min(AMax, Length(ASource)));
 end;
 
-function WStrLength(S: PWideChar; AMaxScanCount: Integer): Integer;
+function acStrLen(S: PWideChar; AMaxScanCount: Integer): Integer;
 begin
   Result := 0;
   if S <> nil then
@@ -1682,7 +1798,7 @@ begin
     end;
 end;
 
-function WStrScan(Str: PWideChar; C: WideChar): PWideChar;
+function acStrScan(Str: PWideChar; C: WideChar): PWideChar;
 begin
   Result := Str;
   if Result <> nil then
@@ -1694,7 +1810,7 @@ begin
     end;
 end;
 
-function WStrScan(Str: PWideChar; ACount: Integer; C: WideChar): PWideChar;
+function acStrScan(Str: PWideChar; ACount: Integer; C: WideChar): PWideChar;
 begin
   Result := Str;
   while (Result <> nil) and (Result^ <> C) do
@@ -1717,6 +1833,16 @@ class destructor TACLEncodings.Destroy;
 begin
   FreeAndNil(FCodePages);
   FreeAndNil(FMap);
+end;
+
+class function TACLEncodings.ASCII: TEncoding;
+begin
+  try
+    Result := TEncoding.ASCII;
+  except
+    // EEncodingError: Invalid code page
+    Result := TEncoding.ANSI;
+  end;
 end;
 
 class function TACLEncodings.Default: TEncoding;
@@ -1968,10 +2094,10 @@ begin
     ACurr2 := ACurr;
     while ACurr2^.IsDigit do
       Inc(ACurr2);
-    if acTryPWideCharToInt(ACurr, acStringLength(ACurr, ACurr2), AMillis) then
+    if acTryPCharToInt(ACurr, acStringLength(ACurr, ACurr2), AMillis) then
     begin
       if AMillis > 0 then
-        ATimeInSeconds := ATimeInSeconds + 1 / AMillis;
+        ATimeInSeconds := ATimeInSeconds + AMillis / 1000;
       ACurr := ACurr2;
     end
     else
@@ -3106,7 +3232,7 @@ begin
     var
       A: AnsiString;
     begin
-      A := acExtractString(ACursorStart, ACursorFinish);
+      A := acMakeString(ACursorStart, ACursorFinish);
       if AResult <> '' then
         AResult := AResult + '.';
       if System.AnsiStrings.SameText(Copy(A, 1, 4), 'xn--') then
@@ -3258,7 +3384,7 @@ begin
       A: AnsiString;
       U: UnicodeString;
     begin
-      U := acExtractString(ACursorStart, ACursorNext);
+      U := acMakeString(ACursorStart, ACursorNext);
       if AResult <> '' then
         AResult := AResult + '.';
       if Encode(U, A) then

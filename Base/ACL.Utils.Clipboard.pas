@@ -215,7 +215,7 @@ var
   ARequiredSize: Integer;
   AText: UnicodeString;
 begin
-  AText := AFileList.GetDelimitedText(UNICODE_NULL);
+  AText := AFileList.GetDelimitedText(#0);
   ARequiredSize := SizeOf(TDropFiles) + (Length(AText) + 1) * SizeOf(WideChar);
   Result := GlobalAlloc(GMEM_MOVEABLE or GMEM_ZEROINIT, ARequiredSize);
   if Result <> 0 then
@@ -292,13 +292,15 @@ var
 begin
   AConfig.Clear;
   if AGlobal <> 0 then
-  begin
-    AStream := TACLHGlobalReadOnlyStream.Create(AGlobal);
+  try
+    AStream := TPointerStream.Create(GlobalLock(AGlobal), GlobalSize(AGlobal), True);
     try
       AConfig.LoadFromStream(AStream);
     finally
       AStream.Free;
     end;
+  finally
+    GlobalUnlock(AGlobal);
   end;
 end;
 

@@ -4,7 +4,7 @@
 {*        Windows 7 AeroPeek Wrapper         *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -32,10 +32,10 @@ uses
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
   ACL.FileFormats.INI,
   ACL.Geometry,
   ACL.Graphics,
+  ACL.Timers,
   ACL.UI.Controls.BaseControls,
   ACL.UI.ImageList,
   ACL.Utils.Common,
@@ -434,7 +434,7 @@ begin
   begin
     APreview := CreatePeekPreview(AHasFrame);
     try
-      ASize := acFitSize(acSize(ABitmap.ClientRect), acSize(APreview.ClientRect), afmProportionalStretch);
+      ASize := acFitSize(ABitmap.ClientRect.Size, APreview.ClientRect.Size, afmProportionalStretch);
       ABitmap.SetSize(ASize.cx, ASize.cy);
       SetStretchBltMode(ABitmap.Canvas.Handle, HALFTONE);
       acStretchBlt(ABitmap.Canvas.Handle, APreview.Canvas.Handle, ABitmap.ClientRect, APreview.ClientRect);
@@ -523,7 +523,7 @@ begin
 
     WM_DWMSENDICONICTHUMBNAIL:
       begin
-        FThumbnailSize := acSize(HiWord(AMessage.LParam), LoWord(AMessage.LParam));
+        FThumbnailSize := TSize.Create(HiWord(AMessage.LParam), LoWord(AMessage.LParam));
         StartLivePreviewTimer;
         Exit;
       end;

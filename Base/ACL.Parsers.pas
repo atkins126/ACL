@@ -4,7 +4,7 @@
 {*             Parsers Routines              *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2024                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -104,15 +104,19 @@ type
     property SkipSpaces: Boolean read FSkipSpaces write FSkipSpaces;
   end;
 
-function acExtractLine(var P: PWideChar; var C: Integer; out AToken: TACLParserToken): Boolean;
+  { TACLTokenComparer }
 
-function acExtractString(const AScanStart, AScanNext: PAnsiChar): AnsiString; overload;
-function acExtractString(const AScanStart, AScanNext: PWideChar): UnicodeString; overload;
+  TACLTokenComparer = class(TInterfacedObject, IEqualityComparer<string>)
+  public
+    // IEqualityComparer<string>
+    function Equals(const Left, Right: string): Boolean; reintroduce;
+    function GetHashCode(const Value: string): Integer; reintroduce;
+  end;
+
+function acExtractLine(var P: PWideChar; var C: Integer; out AToken: TACLParserToken): Boolean;
 function acExtractString(const S, ABeginStr, AEndStr: UnicodeString): UnicodeString; overload;
 function acExtractString(const S, ABeginStr, AEndStr: UnicodeString; out APos1, APos2: Integer): UnicodeString; overload;
 function acExtractString(var P: PWideChar; var C: Integer; out AToken: TACLParserToken; const ADelimiter: WideChar): Boolean; overload;
-function acStringLength(const AScanStart, AScanNext: PAnsiChar): Integer; overload; inline;
-function acStringLength(const AScanStart, AScanNext: PWideChar): Integer; overload; inline;
 
 function acUnquot(var AToken: TACLParserToken): Boolean; overload;
 function acUnquot(var S: UnicodeString): Boolean; overload;
@@ -157,16 +161,6 @@ begin
   Result := AToken.DataLength > 0;
 end;
 
-function acExtractString(const AScanStart, AScanNext: PAnsiChar): AnsiString; overload;
-begin
-  SetString(Result, AScanStart, acStringLength(AScanStart, AScanNext));
-end;
-
-function acExtractString(const AScanStart, AScanNext: PWideChar): UnicodeString;
-begin
-  SetString(Result, AScanStart, acStringLength(AScanStart, AScanNext));
-end;
-
 function acExtractString(var P: PWideChar; var C: Integer; out AToken: TACLParserToken; const ADelimiter: WideChar): Boolean;
 begin
   AToken.Reset;
@@ -205,22 +199,6 @@ begin
     APos2 := Length(S) + 1;
 
   Result := Copy(S, APos1 + Length(ABeginStr), APos2 - APos1 - Length(ABeginStr));
-end;
-
-function acStringLength(const AScanStart, AScanNext: PAnsiChar): Integer;
-begin
-  if NativeUInt(AScanNext) > NativeUInt(AScanStart) then
-    Result := NativeUInt(AScanNext) - NativeUInt(AScanStart)
-  else
-    Result := 0;
-end;
-
-function acStringLength(const AScanStart, AScanNext: PWideChar): Integer;
-begin
-  if NativeUInt(AScanNext) > NativeUInt(AScanStart) then
-    Result := (NativeUInt(AScanNext) - NativeUInt(AScanStart)) div SizeOf(WideChar)
-  else
-    Result := 0;
 end;
 
 function acUnquot(var AToken: TACLParserToken): Boolean;
@@ -512,7 +490,7 @@ begin
   if IgnoreCase then
     Result := acCompareStrings(Data, PWideChar(S), DataLength, DataLength) = 0
   else
-    Result := CompareMem(Data, PWideChar(S), DataLength);
+    Result := CompareMem(Data, PWideChar(S), DataLength * SizeOf(WideChar));
 end;
 
 procedure TACLParserToken.Reset;
@@ -528,12 +506,37 @@ begin
   if IgnoreCase then
     Result := (DataLength >= L) and (acCompareStrings(Data, PWideChar(S), L, L) = 0)
   else
-    Result := (DataLength >= L) and CompareMem(Data, PWideChar(S), L);
+    Result := (DataLength >= L) and CompareMem(Data, PWideChar(S), L * SizeOf(WideChar));
 end;
 
 function TACLParserToken.ToString: UnicodeString;
 begin
   SetString(Result, Data, DataLength);
+end;
+
+{ TACLTokenComparer }
+
+function TACLTokenComparer.Equals(const Left, Right: string): Boolean;
+begin
+  Result := acCompareTokens(Left, Right);
+end;
+
+function TACLTokenComparer.GetHashCode(const Value: string): Integer;
+var
+  LCode: Word;
+  LIndex: Integer;
+begin
+  Result := 0;
+  for var Ch in Value do
+  begin
+    LCode := Word(Ch);
+    if (LCode >= Ord('a')) and (LCode <= Ord('z')) then
+      LCode := LCode xor $20;
+    Result := Result shl 4 + LCode;
+    LIndex := Result and $F0000000;
+    Result := Result xor (LIndex shr 24);
+    Result := Result and (not LIndex);
+  end;
 end;
 
 end.

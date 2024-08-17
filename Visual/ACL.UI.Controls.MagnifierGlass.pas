@@ -172,7 +172,7 @@ procedure TACLMagnifierGlass.PrepareBuffer(const ACursorPos: TPoint);
 
   procedure DrawBackground(DC: HDC; const R: TRect);
   begin
-    if IsDesigning then
+    if csDesigning in ComponentState then
       acFillRect(DC, R, Style.ColorContent1.AsColor)
     else
     begin
@@ -216,8 +216,8 @@ begin
 
     X := Trunc(FBuffer.Width  / (2 * ZoomActual)) * ZoomActual - ZoomActual div 2;
     Y := Trunc(FBuffer.Height / (2 * ZoomActual)) * ZoomActual - ZoomActual div 2;
-    if acPointInRect(FBuffer.ClientRect, Point(X, Y)) then
-      FColorAtPoint := TACLColors.ToColor(FBuffer.Colors^[X + Y * FBuffer.Width]);
+    if PtInRect(FBuffer.ClientRect, Point(X, Y)) then
+      FColorAtPoint := FBuffer.Colors^[X + Y * FBuffer.Width].ToColor;
 
     S := dpiApply(6, FCurrentPPI);
     FBuffer.Canvas.Pen.Color := GetForegroundColor(ColorAtPoint);

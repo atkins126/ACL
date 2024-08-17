@@ -142,7 +142,7 @@ type
 
     procedure Compress; overload;
     procedure Compress(out AOldSize, ANewSize: Int64); overload;
-    procedure Transaction(Proc: TProcedureRef);
+    procedure Transaction(Proc: TProc);
 
     // Statements
     procedure Exec(const AFormatLine: UnicodeString; const AArguments: array of const); overload;
@@ -715,7 +715,7 @@ begin
   end;
 end;
 
-procedure TACLSQLiteBase.Transaction(Proc: TProcedureRef);
+procedure TACLSQLiteBase.Transaction(Proc: TProc);
 begin
   Lock;
   try
@@ -860,7 +860,7 @@ begin
   AValue1 := SQLiteVarToInt32(Vars^[1]);
   AValue2 := SQLiteVarToInt32(Vars^[2]);
   repeat
-    AScan := WStrScan(AKeys, AKeysLength, sKeyDelim);
+    AScan := acStrScan(AKeys, AKeysLength, sKeyDelim);
     if AScan <> nil then
     begin
       AKeyLength := (NativeUInt(AScan) - NativeUInt(AKeys)) div SizeOf(WideChar);
@@ -869,7 +869,7 @@ begin
     else
       AKeyLength := AKeysLength;
 
-    if InRange(acPWideCharToIntDef(AKeys, AKeyLength, 0), AValue1, AValue2) then
+    if InRange(acPCharToIntDef(AKeys, AKeyLength, 0), AValue1, AValue2) then
     begin
       SQLiteResultSet(Context, 1);
       Exit;

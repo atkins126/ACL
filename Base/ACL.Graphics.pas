@@ -4,7 +4,7 @@
 {*            Graphics Utilities             *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
+{*                 2006-2024                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -18,11 +18,7 @@ interface
 uses
   Winapi.GDIPAPI,
   Winapi.Windows,
-  Winapi.Messages,
   // Vcl
-{$IFNDEF ACL_BASE_NOVCL}
-  Vcl.Controls,
-{$ENDIF}
   Vcl.Graphics,
   // System
   System.Classes,
@@ -33,17 +29,11 @@ uses
   // ACL
   ACL.Classes.Collections,
   ACL.Geometry,
-  ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+  ACL.Utils.Common;
 
 type
-  TRGBQuadArray = array [0..0] of TRGBQuad;
-  PRGBQuadArray = ^TRGBQuadArray;
   TRGBColors = array of TRGBQuad;
-
   TACLArrowKind = (makLeft, makRight, makTop, makBottom);
-
-  TACLBitmapRotation = (br0, br90, br180, br270);
 
 const
   acDropArrowSize: TSize = (cx: 7; cy: 3);
@@ -91,6 +81,26 @@ type
   PAlphaColorArray = ^TAlphaColorArray;
   TAlphaColorArray = array[0..0] of TAlphaColor;
 
+  { TACLPixel32 }
+
+  PACLPixel32 = ^TACLPixel32;
+  TACLPixel32 = packed record
+  public const
+    EssenceMask = $00FFFFFF;
+  public
+    B, G, R, A: Byte; // TRGBQuad's order
+    class function Create(A, R, G, B: Byte): TACLPixel32; overload; static; inline;
+    class function Create(AColor: TAlphaColor): TACLPixel32; overload; static;
+    class function Create(AColor: TColor; AAlpha: Byte = MaxByte): TACLPixel32; overload; static;
+    class operator Implicit(const Value: TRGBQuad): TACLPixel32; overload;
+    class operator Implicit(const Value: TACLPixel32): TRGBQuad; overload;
+    function ToColor: TColor;
+  end;
+
+  PACLPixel32Array = ^TACLPixel32Array;
+  TACLPixel32Array = array [0..0] of TACLPixel32;
+  TACLPixel32DynArray = array of TACLPixel32;
+
   { TAlphaColorHelper }
 
   TAlphaColorHelper = record helper for TAlphaColor
@@ -110,12 +120,12 @@ type
     class function ApplyColorSchema(AColor: TAlphaColor; const ASchema: TACLColorSchema): TAlphaColor; static;
     class function FromARGB(const A, R, G, B: Byte): TAlphaColor; static;
     class function FromColor(const AColor: TColor; AAlpha: Byte = MaxByte): TAlphaColor; overload; static;
-    class function FromColor(const AColor: TRGBQuad): TAlphaColor; overload; static;
+    class function FromColor(const AColor: TACLPixel32): TAlphaColor; overload; static;
     class function FromString(AColor: UnicodeString): TAlphaColor; static;
     function IsDefault: Boolean; inline;
     function IsValid: Boolean; inline;
     function ToColor: TColor;
-    function ToQuad: TRGBQuad;
+    function ToPixel: TACLPixel32;
     function ToString: string;
 
     property A: Byte index 3 read GetAlpha write SetComponent;
@@ -132,6 +142,67 @@ type
     procedure SetSize(ASize: Integer; ATargetDpi: Integer);
   end;
 
+  { TACLDib }
+
+  TACLDib = class
+  strict private
+    FBitmap: HBITMAP;
+    FCanvas: TCanvas;
+    FColorCount: Integer;
+    FColors: PACLPixel32Array;
+    FHandle: HDC;
+    FHeight: Integer;
+    FOldBmp: HBITMAP;
+    FWidth: Integer;
+
+    function GetCanvas: TCanvas;
+    function GetClientRect: TRect; inline;
+    function GetEmpty: Boolean; inline;
+  protected
+    procedure CreateHandles(W, H: Integer); virtual;
+    procedure FreeHandles; virtual;
+  public
+    constructor Create; overload;
+    constructor Create(const R: TRect); overload;
+    constructor Create(const S: TSize); overload;
+    constructor Create(const W, H: Integer); overload; virtual;
+    destructor Destroy; override;
+    procedure Assign(ASource: TACLDib); overload;
+    procedure Assign(ASource: TGraphic); overload;
+    procedure AssignParams(DC: HDC);
+    function Clone(out AData: PACLPixel32Array): Boolean;
+    function CoordToFlatIndex(X, Y: Integer): Integer; inline;
+    //# Processing
+    procedure ApplyTint(const AColor: TColor); overload;
+    procedure ApplyTint(const AColor: TACLPixel32); overload;
+    procedure Flip(AHorizontally, AVertically: Boolean);
+    procedure MakeDisabled(AIgnoreMask: Boolean = False);
+    procedure MakeMirror(ASize: Integer);
+    procedure MakeOpaque;
+    procedure MakeTransparent(AColor: TColor);
+    procedure Premultiply(R: TRect); overload;
+    procedure Premultiply; overload;
+    procedure Reset(const R: TRect); overload;
+    procedure Reset; overload;
+    procedure Resize(ANewWidth, ANewHeight: Integer); overload;
+    procedure Resize(const R: TRect); overload;
+    //# Draw
+    procedure DrawBlend(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = MaxByte); overload;
+    procedure DrawBlend(DC: HDC; const P: TPoint; AAlpha: Byte = MaxByte); overload;
+    procedure DrawCopy(DC: HDC; const P: TPoint); overload;
+    procedure DrawCopy(DC: HDC; const R: TRect; ASmoothStretch: Boolean = False); overload;
+    //# Properties
+    property Bitmap: HBITMAP read FBitmap;
+    property Canvas: TCanvas read GetCanvas;
+    property ClientRect: TRect read GetClientRect;
+    property ColorCount: Integer read FColorCount;
+    property Colors: PACLPixel32Array read FColors;
+    property Empty: Boolean read GetEmpty;
+    property Handle: HDC read FHandle;
+    property Height: Integer read FHeight;
+    property Width: Integer read FWidth;
+  end;
+
   { TACLColorList }
 
   TACLColorList = class(TACLList<TColor>);
@@ -140,34 +211,21 @@ type
 
   TACLBitmap = class(TBitmap, IACLColorSchema)
   strict private
-    FStretchMode: TACLStretchMode;
-
     function GetClientRect: TRect;
   public
     constructor CreateEx(const S: TSize; APixelFormat: TPixelFormat = pf32bit; AResetContent: Boolean = False); overload;
     constructor CreateEx(const R: TRect; APixelFormat: TPixelFormat = pf32bit; AResetContent: Boolean = False); overload;
     constructor CreateEx(W, H: Integer; APixelFormat: TPixelFormat = pf32bit; AResetContent: Boolean = False); overload;
-    procedure Clear;
     procedure LoadFromResource(Inst: HINST; const AName, AType: UnicodeString);
     procedure LoadFromStream(Stream: TStream); override;
-    procedure SetSizeEx(const R: TRect);
-    // Drawing
-    procedure DrawMargins(ACanvas: TCanvas; const ADest, AMargins: TRect); overload; virtual;
-    procedure DrawMargins(ACanvas: TCanvas; const ADest, ASource, AMargins: TRect); overload; virtual;
-    procedure DrawStretch(ACanvas: TCanvas; const ADest, ASource: TRect); overload; virtual;
-    procedure DrawStretch(ACanvas: TCanvas; const ADest: TRect); overload; virtual;
-    procedure DrawTo(ACanvas: TCanvas; X, Y: Integer); virtual;
+    procedure SetSize(const R: TRect); reintroduce; overload;
     // Effects
     procedure ApplyColorSchema(const AValue: TACLColorSchema);
-    procedure ChangeAlpha(AValue: Byte);
-    procedure MakeDisabled;
     procedure MakeOpaque;
     procedure MakeTransparent(AColor: TColor);
     procedure Reset;
-    procedure Rotate(ARotation: TACLBitmapRotation; AFlipVertically: Boolean = False);
     // Properties
     property ClientRect: TRect read GetClientRect;
-    property StretchMode: TACLStretchMode read FStretchMode write FStretchMode;
   end;
 
   { TACLRegion }
@@ -230,31 +288,6 @@ type
     property RectsCount: Integer read FCount write SetRectsCount;
   end;
 
-  { TACLBitmapBits }
-
-  TACLBitmapBits = class
-  strict private
-    FDIB: TDIBSection;
-    FValid: Boolean;
-
-    function GetBits: Integer;
-    function GetRow(ARow: Integer): Pointer;
-  protected
-    procedure ReadColors24(var AColors: TRGBColors);
-    procedure ReadColors32(var AColors: TRGBColors);
-    procedure WriteColors24(const AColors: TRGBColors);
-    procedure WriteColors32(const AColors: TRGBColors);
-  public
-    constructor Create(ABitmapHandle: THandle);
-    //
-    function ReadColors(out AColors: TRGBColors): Boolean;
-    function WriteColors(const AColors: TRGBColors): Boolean;
-    //
-    property Bits: Integer read GetBits;
-    property Row[Index: Integer]: Pointer read GetRow;
-    property Valid: Boolean read FValid;
-  end;
-
   { TACLScreenCanvas }
 
   TACLScreenCanvas = class(TCanvas)
@@ -287,50 +320,48 @@ type
 
   TACLColors = class
   public const
-    MaskPixel: TRGBQuad = (rgbBlue: 255; rgbGreen: 0; rgbRed: 255; rgbReserved: 0); // clFuchsia
-    NullPixel: TRGBQuad = (rgbBlue: 0; rgbGreen: 0; rgbRed: 0; rgbReserved: 0);
+    MaskPixel: TACLPixel32 = (B: 255; G: 0; R: 255; A: 0); // clFuchsia
+    NullPixel: TACLPixel32 = (B: 0; G: 0; R: 0; A: 0);
   public class var
     PremultiplyTable: TACLPixelMap;
     UnpremultiplyTable: TACLPixelMap;
   public
     class constructor Create;
-    class function CompareRGB(const Q1, Q2: TRGBQuad): Boolean; inline; static;
+    class function CompareRGB(const Q1, Q2: TACLPixel32): Boolean; inline; static;
     class function IsDark(Color: TColor): Boolean;
-    class function IsMask(const Q: TRGBQuad): Boolean; inline; static;
-    class function ToColor(const Q: TRGBQuad): TColor; static;
-    class function ToQuad(A, R, G, B: Byte): TRGBQuad; overload; static; inline;
-    class function ToQuad(AColor: TAlphaColor): TRGBQuad; overload; static;
-    class function ToQuad(AColor: TColor; AAlpha: Byte = MaxByte): TRGBQuad; overload; static;
+    class function IsMask(const P: TACLPixel32): Boolean; inline; static;
 
     class procedure AlphaBlend(var D: TColor; S: TColor; AAlpha: Integer = 255); overload; inline; static;
-    class procedure AlphaBlend(var D: TRGBQuad; const S: TRGBQuad; AAlpha: Integer = 255; AProcessPerChannelAlpha: Boolean = True); overload; inline; static;
-    class procedure ApplyColorSchema(AColors: PRGBQuad; ACount: Integer; const AValue: TACLColorSchema); overload; inline; static;
+    class procedure AlphaBlend(var D: TACLPixel32; const S: TACLPixel32;
+      AAlpha: Integer = 255; AProcessPerChannelAlpha: Boolean = True); overload; inline; static;
+    class procedure ApplyColorSchema(AColors: PACLPixel32;
+      ACount: Integer; const AValue: TACLColorSchema); overload; inline; static;
     class procedure ApplyColorSchema(const AFont: TFont; const AValue: TACLColorSchema); overload;
     class procedure ApplyColorSchema(var AColor: TAlphaColor; const AValue: TACLColorSchema); overload;
     class procedure ApplyColorSchema(var AColor: TColor; const AValue: TACLColorSchema); overload;
-    class procedure ApplyColorSchema(var AColor: TRGBQuad; const AValue: TACLColorSchema); overload;
-    class function ArePremultiplied(AColors: PRGBQuad; ACount: Integer): Boolean;
-    class procedure Flip(AColors: PRGBQuadArray; AWidth, AHeight: Integer; AHorizontally, AVertically: Boolean);
-    class procedure Flush(var Q: TRGBQuad); inline; static;
-    class procedure Grayscale(Q: PRGBQuad; Count: Integer; IgnoreMask: Boolean = False); overload; static;
-    class procedure Grayscale(var Q: TRGBQuad; IgnoreMask: Boolean = False); overload; inline; static;
+    class procedure ApplyColorSchema(var AColor: TACLPixel32; const AValue: TACLColorSchema); overload;
+    class function ArePremultiplied(AColors: PACLPixel32; ACount: Integer): Boolean;
+    class procedure Flip(AColors: PACLPixel32Array; AWidth, AHeight: Integer; AHorizontally, AVertically: Boolean);
+    class procedure Flush(var P: TACLPixel32); inline; static;
+    class procedure Grayscale(P: PACLPixel32; Count: Integer; IgnoreMask: Boolean = False); overload; static;
+    class procedure Grayscale(var P: TACLPixel32; IgnoreMask: Boolean = False); overload; inline; static;
     class function Hue(Color: TColor): Single; overload; static;
     class function Invert(Color: TColor): TColor; static;
     class function Lightness(Color: TColor): Single; overload; static;
-    class procedure MakeDisabled(Q: PRGBQuad; Count: Integer; IgnoreMask: Boolean = False); overload; static;
-    class procedure MakeDisabled(var Q: TRGBQuad; IgnoreMask: Boolean = False); overload; inline; static;
-    class procedure MakeTransparent(Q: PRGBQuad; ACount: Integer; const AColor: TRGBQuad); overload;
-    class procedure Premultiply(Q: PRGBQuad; ACount: Integer); overload; static;
-    class procedure Premultiply(var Q: TRGBQuad); overload; inline; static;
-    class procedure Unpremultiply(Q: PRGBQuad; ACount: Integer); overload; static;
-    class procedure Unpremultiply(var Q: TRGBQuad); overload; inline; static;
+    class procedure MakeDisabled(P: PACLPixel32; Count: Integer; IgnoreMask: Boolean = False); overload; static;
+    class procedure MakeDisabled(var P: TACLPixel32; IgnoreMask: Boolean = False); overload; inline; static;
+    class procedure MakeTransparent(P: PACLPixel32; ACount: Integer; const AColor: TACLPixel32); overload;
+    class procedure Premultiply(P: PACLPixel32; ACount: Integer); overload; static;
+    class procedure Premultiply(var P: TACLPixel32); overload; inline; static;
+    class procedure Unpremultiply(P: PACLPixel32; ACount: Integer); overload; static;
+    class procedure Unpremultiply(var P: TACLPixel32); overload; inline; static;
 
     // Coloration
     // Pixels must be unpremultiplied
-    class procedure ChangeColor(Q: PRGBQuad; ACount: Integer; const AColor: TRGBQuad); static;
-    class procedure ChangeHue(Q: PRGBQuad; ACount: Integer; AHue: Byte; AIntensity: Byte = 100); overload; static;
-    class procedure ChangeHue(var Q: TRGBQuad; AHue: Byte; AIntensity: Byte = 100); overload; inline; static;
-    class procedure Tint(Q: PRGBQuad; ACount: Integer; const ATintColor: TRGBQuad); overload; static;
+    class procedure ChangeColor(P: PACLPixel32; ACount: Integer; const AColor: TACLPixel32); static;
+    class procedure ChangeHue(P: PACLPixel32; ACount: Integer; AHue: Byte; AIntensity: Byte = 100); overload; static;
+    class procedure ChangeHue(var P: TACLPixel32; AHue: Byte; AIntensity: Byte = 100); overload; inline; static;
+    class procedure Tint(P: PACLPixel32; ACount: Integer; const ATintColor: TACLPixel32); overload; static;
 
     // RGB <-> HSL
     class function HSLtoRGB(H, S, L: Single): TColor; overload;
@@ -365,9 +396,12 @@ type
   end;
 
 // acAlphaBlend
-procedure acAlphaBlend(Dest, Src: HDC; const DR, SR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
-procedure acAlphaBlend(Dest: HDC; ABitmap: TBitmap; const DR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
-procedure acAlphaBlend(Dest: HDC; ABitmap: TBitmap; const DR, SR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
+procedure acAlphaBlend(Dest, Src: HDC;
+  const DR, SR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
+procedure acAlphaBlend(Dest: HDC; ABitmap: TBitmap;
+  const DR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
+procedure acAlphaBlend(Dest: HDC; ABitmap: TBitmap;
+  const DR, SR: TRect; AAlpha: Integer = 255; AUseSourceAlpha: Boolean = True); overload;
 procedure acUpdateLayeredWindow(Wnd: THandle; SrcDC: HDC; const R: TRect; AAlpha: Integer = 255); overload;
 
 // DoubleBuffer
@@ -383,7 +417,8 @@ function acGetArrowSize(AArrowKind: TACLArrowKind; ATargetDPI: Integer): TSize;
 procedure acDrawComplexFrame(DC: HDC; const R: TRect; AColor1, AColor2: TColor; ABorders: TACLBorders = acAllBorders); overload;
 procedure acDrawComplexFrame(DC: HDC; const R: TRect; AColor1, AColor2: TAlphaColor; ABorders: TACLBorders = acAllBorders); overload;
 procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor); overload;
-procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor; ABorderColor, AHatchColor1, AHatchColor2: TColor); overload;
+procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor;
+  ABorderColor, AHatchColor1, AHatchColor2: TColor); overload;
 procedure acDrawDotsLineH(DC: HDC; X1, X2, Y: Integer; AColor: TColor);
 procedure acDrawDotsLineV(DC: HDC; X, Y1, Y2: Integer; AColor: TColor);
 procedure acDrawDragImage(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = acDragImageAlpha);
@@ -404,12 +439,9 @@ procedure acDrawHueColorBar(ACanvas: TCanvas; const R: TRect);
 procedure acDrawHueIntensityBar(ACanvas: TCanvas; const R: TRect; AHue: Byte = 0);
 procedure acDrawSelectionRect(DC: HDC; const R: TRect; AColor: TAlphaColor);
 procedure acDrawShadow(ACanvas: TCanvas; const ARect: TRect; ABKColor: TColor; AShadowSize: Integer = 5);
-{$IFNDEF ACL_BASE_NOVCL}
-procedure acDrawTransparentControlBackground(AControl: TWinControl; DC: HDC; R: TRect; APaintWithChildren: Boolean = True);
-{$ENDIF}
 procedure acFillRect(DC: HDC; const ARect: TRect; AColor: TAlphaColor); overload;
 procedure acFillRect(DC: HDC; const ARect: TRect; AColor: TColor); overload;
-procedure acFitFileName(ACanvas: TCanvas; ATargetWidth: Integer; var S: UnicodeString);
+procedure acFitFileName(ACanvas: TCanvas; ATargetWidth: Integer; var S: UnicodeString); deprecated;
 procedure acResetFont(AFont: TFont);
 procedure acResetRect(DC: HDC; const R: TRect); inline;
 procedure acStretchBlt(DC, SourceDC: HDC; const ADest, ASource: TRect); inline;
@@ -432,8 +464,9 @@ function acRegionClone(ARegion: HRGN): HRGN;
 function acRegionCombine(ATarget, ASource: HRGN; AOperation: Integer): Integer; overload;
 function acRegionCombine(ATarget: HRGN; const ASource: TRect; AOperation: Integer): Integer; overload;
 procedure acRegionFree(var ARegion: HRGN); inline;
-function acRegionFromBitmap(ABitmap: TBitmap): HRGN; overload;
-function acRegionFromBitmap(AColors: PRGBQuad; AWidth, AHeight: Integer; ATransparentColor: TColor): HRGN; overload;
+function acRegionFromBitmap(ABitmap: TACLDib): HRGN; overload;
+function acRegionFromBitmap(AColors: PACLPixel32;
+  AWidth, AHeight: Integer; ATransparentColor: TColor): HRGN; overload;
 
 // WindowOrg
 function acMoveWindowOrg(DC: HDC; const P: TPoint): TPoint; overload; inline;
@@ -450,8 +483,7 @@ procedure acWorldTransformFlip(DC: HDC; const APivotPoint: TPointF;
 // Bitmaps
 procedure acFillBitmapInfoHeader(out AHeader: TBitmapInfoHeader; AWidth, AHeight: Integer);
 function acGetBitmapBits(ABitmap: TBitmap): TRGBColors; overload;
-procedure acGetBitmapBits(ABitmap: THandle; AWidth, AHeight: Integer; out AColors: TRGBColors; out ABitmapInfo: TBitmapInfo); overload;
-procedure acSetBitmapBits(ABitmap: TBitmap; var AColors: TRGBColors);
+procedure acSetBitmapBits(ABitmap: TBitmap; const AColors: TRGBColors);
 
 // Colors
 procedure acApplyColorSchema(AObject: TObject; const AColorSchema: TACLColorSchema); inline;
@@ -465,20 +497,10 @@ function StringToColor(AColor: UnicodeString): TColor;
 function acFontHeight(Canvas: TCanvas): Integer; overload;
 function acFontHeight(Font: TFont): Integer; overload;
 
-function acTextSize(ACanvas: TCanvas; const AText: PWideChar; ALength: Integer): TSize; overload;
-function acTextSize(ACanvas: TCanvas; const AText: UnicodeString; AStartIndex: Integer = 1; ALength: Integer = MaxInt): TSize; overload;
-function acTextSize(Font: TFont; const AText: UnicodeString; AStartIndex: Integer = 1; ALength: Integer = MaxInt): TSize; overload;
-function acTextSize(Font: TFont; const AText: PWideChar; ALength: Integer): TSize; overload;
-function acTextSizeMultiline(ACanvas: TCanvas; const AText: UnicodeString; AMaxWidth: Integer = 0): TSize;
-
-function acAlignText(const R: TRect; const ATextSize: TSize; AHorzAlignment: TAlignment;
+function acTextAlign(const R: TRect; const ATextSize: TSize; AHorzAlignment: TAlignment;
   AVertAlignment: TVerticalAlignment; APreventTopLeftExceed: Boolean = False): TPoint;
-function acTextPrepare(ACanvas: TCanvas; const R: TRect; AEndEllipsis: Boolean; AHorzAlignment: TAlignment;
-  AVertAlignment: TVerticalAlignment; var AText: UnicodeString; out ATextSize: TSize; out ATextOffset: TPoint): Integer; overload;
-function acTextPrepare(ACanvas: TCanvas; const R: TRect; AEndEllipsis: Boolean; AHorzAlignment: TAlignment;
-  AVertAlignment: TVerticalAlignment; var AText: UnicodeString; out ATextSize: TSize; out ATextOffset: TPoint;
-  const ATextExtends: TRect; APreventTopLeftExceed: Boolean = False): Integer; overload;
-
+function acTextEllipsize(ACanvas: TCanvas;
+  var AText: UnicodeString; var ATextSize: TSize; AMaxWidth: Integer): Integer;
 procedure acTextDraw(ACanvas: TCanvas; const S: UnicodeString; const R: TRect;
   AHorzAlignment: TAlignment = taLeftJustify; AVertAlignment: TVerticalAlignment = taAlignTop;
   AEndEllipsis: Boolean = False; APreventTopLeftExceed: Boolean = False; AWordWrap: Boolean = False);
@@ -488,6 +510,15 @@ procedure acTextDrawHighlight(ACanvas: TCanvas; const S: UnicodeString; const R:
 procedure acTextDrawVertical(ACanvas: TCanvas; const S: UnicodeString; const R: TRect; AHorzAlignment: TAlignment;
   AVertAlignment: TVerticalAlignment; AEndEllipsis: Boolean = False); overload;
 procedure acTextOut(ACanvas: TCanvas; X, Y: Integer; const S: UnicodeString; AFlags: Integer; ARect: PRect = nil); inline;
+
+function acTextSize(ACanvas: TCanvas; const AText: PWideChar; ALength: Integer): TSize; overload;
+function acTextSize(ACanvas: TCanvas; const AText: UnicodeString;
+  AStartIndex: Integer = 1; ALength: Integer = MaxInt): TSize; overload;
+function acTextSize(Font: TFont; const AText: UnicodeString;
+  AStartIndex: Integer = 1; ALength: Integer = MaxInt): TSize; overload;
+function acTextSize(Font: TFont; const AText: PWideChar; ALength: Integer): TSize; overload;
+function acTextSizeMultiline(ACanvas: TCanvas;
+  const AText: UnicodeString; AMaxWidth: Integer = 0): TSize;
 
 procedure acSysDrawText(ACanvas: TCanvas; var R: TRect; const AText: UnicodeString; AFlags: Cardinal);
 
@@ -539,6 +570,30 @@ type
   TBitmapImageHack = class(TBitmapImage);
 {$IFEND}
 {$IFEND}
+
+  { TACLBitmapBits }
+
+  TACLBitmapBits = class
+  strict private
+    FDIB: TDIBSection;
+    FValid: Boolean;
+
+    function GetBits: Integer;
+    function GetRow(ARow: Integer): Pointer;
+  protected
+    procedure ReadColors24(var AColors: TRGBColors);
+    procedure ReadColors32(var AColors: TRGBColors);
+    procedure WriteColors24(const AColors: TRGBColors);
+    procedure WriteColors32(const AColors: TRGBColors);
+  public
+    constructor Create(ABitmapHandle: THandle);
+    function ReadColors(out AColors: TRGBColors): Boolean;
+    function WriteColors(const AColors: TRGBColors): Boolean;
+    //# Properties
+    property Bits: Integer read GetBits;
+    property Row[Index: Integer]: Pointer read GetRow;
+    property Valid: Boolean read FValid;
+  end;
 
   PRectArray = ^TRectArray;
   TRectArray = array [0..0] of TRect;
@@ -637,79 +692,6 @@ begin
       TACLHexCode.Decode(AColor[5], AColor[6]));
   end;
 end;
-
-{$IFNDEF ACL_BASE_NOVCL}
-procedure acDrawTransparentControlBackground(AControl: TWinControl; DC: HDC; R: TRect; APaintWithChildren: Boolean = True);
-
-  procedure DrawControl(DC: HDC; AControl: TWinControl);
-  begin
-    if IsWindowVisible(AControl.Handle) then
-    begin
-      AControl.ControlState := AControl.ControlState + [csPaintCopy];
-      try
-        AControl.Perform(WM_ERASEBKGND, DC, DC);
-        AControl.Perform(WM_PAINT, DC, 0);
-      finally
-        AControl.ControlState := AControl.ControlState - [csPaintCopy];
-      end;
-    end;
-  end;
-
-  procedure PaintControlTo(ADrawControl: TWinControl; AOffsetX, AOffsetY: Integer; R: TRect);
-  var
-    AChildControl: TControl;
-    I: Integer;
-  begin
-    MoveWindowOrg(DC, AOffsetX, AOffsetY);
-    try
-      if not RectVisible(DC, R) then
-        Exit;
-
-      DrawControl(DC, ADrawControl);
-      if APaintWithChildren then
-      begin
-        for I := 0 to ADrawControl.ControlCount - 1 do
-        begin
-          AChildControl := ADrawControl.Controls[I];
-          if (AChildControl = AControl) and AControl.Visible then
-            Break;
-          if (AChildControl is TWinControl) and AChildControl.Visible then
-          begin
-            R := AChildControl.BoundsRect;
-            OffsetRect(R, -R.Left, -R.Top);
-            PaintControlTo(TWinControl(AChildControl),
-              AChildControl.Left, AChildControl.Top, R);
-          end;
-        end;
-      end;
-    finally
-      MoveWindowOrg(DC, -AOffsetX, -AOffsetY);
-    end;
-  end;
-
-var
-  AParentControl: TWinControl;
-  ASaveIndex: Integer;
-begin
-  AParentControl := AControl.Parent;
-  if (AParentControl = nil) and (AControl.ParentWindow <> 0) then
-  begin
-    AParentControl := FindControl(AControl.ParentWindow);
-    APaintWithChildren := False;
-  end;
-  if Assigned(AParentControl) then
-  begin
-    ASaveIndex := SaveDC(DC);
-    try
-      acIntersectClipRegion(DC, R);
-      OffsetRect(R, AControl.Left, AControl.Top);
-      PaintControlTo(AParentControl, -R.Left, -R.Top, R);
-    finally
-      RestoreDC(DC, ASaveIndex);
-    end;
-  end;
-end;
-{$ENDIF}
 
 procedure acFitFileName(ACanvas: TCanvas; ATargetWidth: Integer; var S: UnicodeString);
 const
@@ -835,16 +817,12 @@ begin
   end;
 end;
 
-function acRegionFromBitmap(ABitmap: TBitmap): HRGN;
-var
-  AColors: TRGBColors;
+function acRegionFromBitmap(ABitmap: TACLDib): HRGN;
 begin
-  AColors := acGetBitmapBits(ABitmap);
-  Result := acRegionFromBitmap(@AColors[0], ABitmap.Width, ABitmap.Height,
-    IfThen(ABitmap.PixelFormat = pf1bit, clWhite, clFuchsia));
+  Result := acRegionFromBitmap(@ABitmap.Colors[0], ABitmap.Width, ABitmap.Height, clFuchsia);
 end;
 
-function acRegionFromBitmap(AColors: PRGBQuad; AWidth, AHeight: Integer; ATransparentColor: TColor): HRGN;
+function acRegionFromBitmap(AColors: PACLPixel32; AWidth, AHeight: Integer; ATransparentColor: TColor): HRGN;
 
   procedure FlushRegion(X, Y: Integer; var ACount: Integer; var ACombined: HRGN);
   var
@@ -866,13 +844,13 @@ function acRegionFromBitmap(AColors: PRGBQuad; AWidth, AHeight: Integer; ATransp
 
 var
   ACount: Integer;
-  ATransparent: TRGBQuad;
+  ATransparent: TACLPixel32;
   X, Y: Integer;
 begin
   Result := 0;
-  ATransparent.rgbBlue := GetBValue(ATransparentColor);
-  ATransparent.rgbGreen := GetGValue(ATransparentColor);
-  ATransparent.rgbRed := GetRValue(ATransparentColor);
+  ATransparent.B := GetBValue(ATransparentColor);
+  ATransparent.G := GetGValue(ATransparentColor);
+  ATransparent.R := GetRValue(ATransparentColor);
   for Y := 0 to AHeight - 1 do
   begin
     ACount := 0;
@@ -921,7 +899,7 @@ end;
 // TextDraw Utilities
 //----------------------------------------------------------------------------------------------------------------------
 
-function acAlignText(const R: TRect; const ATextSize: TSize; AHorzAlignment: TAlignment;
+function acTextAlign(const R: TRect; const ATextSize: TSize; AHorzAlignment: TAlignment;
   AVertAlignment: TVerticalAlignment; APreventTopLeftExceed: Boolean = False): TPoint;
 begin
   case AVertAlignment of
@@ -996,45 +974,48 @@ end;
 
 function acTextSizeMultiline(ACanvas: TCanvas; const AText: UnicodeString; AMaxWidth: Integer = 0): TSize;
 var
-  ATextRect: TRect;
+  LTextRect: TRect;
 begin
-  ATextRect := Rect(0, 0, AMaxWidth, 2);
-  acSysDrawText(ACanvas, ATextRect, AText, DT_CALCRECT or DT_WORDBREAK);
-  Result := acSize(ATextRect);
+  LTextRect := Rect(0, 0, AMaxWidth, 2);
+  acSysDrawText(ACanvas, LTextRect, AText, DT_CALCRECT or DT_WORDBREAK);
+  Result := LTextRect.Size;
 end;
 
-procedure acTextDraw(ACanvas: TCanvas; const S: UnicodeString; const R: TRect; AHorzAlignment: TAlignment;
-  AVertAlignment: TVerticalAlignment; AEndEllipsis, APreventTopLeftExceed, AWordWrap: Boolean);
+procedure acTextDraw(ACanvas: TCanvas; const S: UnicodeString; const R: TRect;
+  AHorzAlignment: TAlignment; AVertAlignment: TVerticalAlignment;
+  AEndEllipsis, APreventTopLeftExceed, AWordWrap: Boolean);
 var
-  AMultiLine: Boolean;
-  AText: UnicodeString;
-  ATextFlags: Integer;
-  ATextOffset: TPoint;
-  ATextRect: TRect;
-  ATextSize: TSize;
+  LMultiLine: Boolean;
+  LText: UnicodeString;
+  LTextFlags: Integer;
+  LTextOffset: TPoint;
+  LTextRect: TRect;
+  LTextSize: TSize;
 begin
   if (S <> '') and acRectVisible(ACanvas.Handle, R) then
   begin
-    AMultiLine := acPos(#13, S) > 0;
-    if AWordWrap or AMultiLine then
+    LMultiLine := acPos(#13, S) > 0;
+    if AWordWrap or LMultiLine then
     begin
-      ATextRect := R;
-      ATextFlags := acTextAlignHorz[AHorzAlignment] or acTextAlignVert[AVertAlignment];
+      LTextRect := R;
+      LTextFlags := acTextAlignHorz[AHorzAlignment] or acTextAlignVert[AVertAlignment];
       if AEndEllipsis then
-        ATextFlags := ATextFlags or DT_END_ELLIPSIS;
+        LTextFlags := LTextFlags or DT_END_ELLIPSIS;
       if AWordWrap then
-        ATextFlags := ATextFlags or DT_WORDBREAK
-      else if not AMultiLine then
-        ATextFlags := ATextFlags or DT_SINGLELINE;
-      acSysDrawText(ACanvas, ATextRect, S, ATextFlags);
+        LTextFlags := LTextFlags or DT_WORDBREAK
+      else if not LMultiLine then
+        LTextFlags := LTextFlags or DT_SINGLELINE;
+      acSysDrawText(ACanvas, LTextRect, S, LTextFlags);
     end
     else
       if (AHorzAlignment <> taLeftJustify) or (AVertAlignment <> taAlignTop) or AEndEllipsis then
       begin
-        AText := S;
-        acTextPrepare(ACanvas, R, AEndEllipsis, AHorzAlignment, AVertAlignment,
-          AText, ATextSize, ATextOffset, NullRect, APreventTopLeftExceed);
-        acTextOut(ACanvas, ATextOffset.X, ATextOffset.Y, AText, ETO_CLIPPED, @R);
+        LText := S;
+        LTextSize := acTextSize(ACanvas, LText);
+        if AEndEllipsis then
+          acTextEllipsize(ACanvas, LText, LTextSize, R.Width);
+        LTextOffset := acTextAlign(R, LTextSize, AHorzAlignment, AVertAlignment, APreventTopLeftExceed);
+        acTextOut(ACanvas, LTextOffset.X, LTextOffset.Y, LText, ETO_CLIPPED, @R);
       end
       else
         acTextOut(ACanvas, R.Left, R.Top, S, ETO_CLIPPED, @R);
@@ -1045,52 +1026,53 @@ procedure acTextDrawHighlight(ACanvas: TCanvas; const S: UnicodeString; const R:
   AHorzAlignment: TAlignment; AVertAlignment: TVerticalAlignment; AEndEllipsis: Boolean;
   AHighlightStart, AHighlightFinish: Integer; AHighlightColor, AHighlightTextColor: TColor);
 var
-  AHighlightRect: TRect;
-  AHighlightTextSize: TSize;
-  APrevTextColor: TColor;
-  ASaveRgn: HRGN;
-  AText: UnicodeString;
-  ATextOffset, X: TPoint;
-  ATextPart: UnicodeString;
-  ATextPartSize: TSize;
-  ATextSize: TSize;
-  ATextVisibleCount: Integer;
+  LHighlightRect: TRect;
+  LHighlightTextSize: TSize;
+  LPrevTextColor: TColor;
+  LSaveRgn: HRGN;
+  LText: UnicodeString;
+  LTextOffset: TPoint;
+  LTextPart: UnicodeString;
+  LTextPartSize: TSize;
+  LTextSize: TSize;
 begin
   if AHighlightFinish > AHighlightStart then
   begin
-    AText := S;
-    ATextVisibleCount := acTextPrepare(ACanvas, R, AEndEllipsis, AHorzAlignment, AVertAlignment, AText, ATextSize, ATextOffset);
-    AHighlightFinish := Min(AHighlightFinish, ATextVisibleCount);
-    ATextPart := Copy(AText, 1, AHighlightStart);
-    acTextPrepare(ACanvas, R, False, taLeftJustify, taAlignTop, ATextPart, ATextPartSize, X);
-    ATextPart := Copy(AText, 1, AHighlightFinish);
-    acTextPrepare(ACanvas, R, False, taLeftJustify, taAlignTop, ATextPart, AHighlightTextSize, X);
-    Dec(AHighlightTextSize.cx, ATextPartSize.cx);
+    LText := S;
+    LTextSize := acTextSize(ACanvas, LText);
+    if AEndEllipsis then
+      AHighlightFinish := Min(AHighlightFinish, acTextEllipsize(ACanvas, LText, LTextSize, R.Width));
+    LTextOffset := acTextAlign(R, LTextSize, AHorzAlignment, AVertAlignment, True);
+    LTextPart := Copy(LText, 1, AHighlightStart);
+    LTextPartSize := acTextSize(ACanvas, LTextPart);
+    LTextPart := Copy(LText, 1, AHighlightFinish);
+    LHighlightTextSize := acTextSize(ACanvas, LTextPart);
+    Dec(LHighlightTextSize.cx, LTextPartSize.cx);
 
-    AHighlightRect := R;
-    AHighlightRect.Left := ATextOffset.X + ATextPartSize.cx;
-    AHighlightRect.Right := AHighlightRect.Left + AHighlightTextSize.cx;
+    LHighlightRect := R;
+    LHighlightRect.Left := LTextOffset.X + LTextPartSize.cx;
+    LHighlightRect.Right := LHighlightRect.Left + LHighlightTextSize.cx;
 
-    ASaveRgn := acSaveClipRegion(ACanvas.Handle);
+    LSaveRgn := acSaveClipRegion(ACanvas.Handle);
     try
-      acExcludeFromClipRegion(ACanvas.Handle, AHighlightRect);
-      acTextOut(ACanvas, ATextOffset.X, ATextOffset.Y, AText, ETO_CLIPPED, @R);
+      acExcludeFromClipRegion(ACanvas.Handle, LHighlightRect);
+      acTextOut(ACanvas, LTextOffset.X, LTextOffset.Y, LText, ETO_CLIPPED, @R);
     finally
-      acRestoreClipRegion(ACanvas.Handle, ASaveRgn);
+      acRestoreClipRegion(ACanvas.Handle, LSaveRgn);
     end;
 
-    ASaveRgn := acSaveClipRegion(ACanvas.Handle);
+    LSaveRgn := acSaveClipRegion(ACanvas.Handle);
     try
-      if acIntersectClipRegion(ACanvas.Handle, AHighlightRect) then
+      if acIntersectClipRegion(ACanvas.Handle, LHighlightRect) then
       begin
-        acFillRect(ACanvas.Handle, AHighlightRect, AHighlightColor);
-        APrevTextColor := ACanvas.Font.Color;
+        acFillRect(ACanvas.Handle, LHighlightRect, AHighlightColor);
+        LPrevTextColor := ACanvas.Font.Color;
         ACanvas.Font.Color := AHighlightTextColor;
-        acTextOut(ACanvas, ATextOffset.X, ATextOffset.Y, AText, ETO_CLIPPED, @R);
-        ACanvas.Font.Color := APrevTextColor;
+        acTextOut(ACanvas, LTextOffset.X, LTextOffset.Y, LText, ETO_CLIPPED, @R);
+        ACanvas.Font.Color := LPrevTextColor;
       end;
     finally
-      acRestoreClipRegion(ACanvas.Handle, ASaveRgn);
+      acRestoreClipRegion(ACanvas.Handle, LSaveRgn);
     end;
   end
   else
@@ -1099,57 +1081,40 @@ end;
 
 procedure acTextDrawVertical(ACanvas: TCanvas; const S: UnicodeString; const R: TRect;
   AHorzAlignment: TAlignment; AVertAlignment: TVerticalAlignment; AEndEllipsis: Boolean = False);
+const
+  MapVert: array[TAlignment] of TVerticalAlignment = (taAlignBottom, taAlignTop, taVerticalCenter);
 var
-  ABitmap: TACLBitmap;
+  LText: string;
+  LTextOffset: TPoint;
+  LTextSize: TSize;
 begin
-  ABitmap := TACLBitmap.CreateEx(R);
+  ACanvas.Font.Orientation := 900;
   try
-    ABitmap.Canvas.Brush.Style := bsClear;
-    acBitBlt(ABitmap.Canvas.Handle, ACanvas.Handle, ABitmap.ClientRect, R.TopLeft);
-    ABitmap.Rotate(br270);
-    ABitmap.Canvas.Lock;
-    try
-      ABitmap.Canvas.Font := ACanvas.Font;
-      acTextDraw(ABitmap.Canvas, S, ABitmap.ClientRect, AHorzAlignment, AVertAlignment, AEndEllipsis);
-    finally
-      ABitmap.Canvas.Unlock;
-    end;
-    ABitmap.Rotate(br90);
-    acBitBlt(ACanvas.Handle, ABitmap, R.TopLeft);
+    LText := S;
+    LTextSize := acTextSize(ACanvas, LText);
+    if AEndEllipsis then
+      acTextEllipsize(ACanvas, LText, LTextSize, R.Height);
+    acExchangeIntegers(LTextSize.cx, LTextSize.cy);
+    LTextOffset := acTextAlign(R, LTextSize, TAlignment(AVertAlignment), MapVert[AHorzAlignment]);
+    acTextOut(ACanvas, LTextOffset.X, LTextOffset.Y + LTextSize.cy, LText, 0);
   finally
-    ABitmap.Free;
+    ACanvas.Font.Orientation := 0;
   end;
 end;
 
-function acTextPrepare(ACanvas: TCanvas; const R: TRect; AEndEllipsis: Boolean; AHorzAlignment: TAlignment;
-  AVertAlignment: TVerticalAlignment; var AText: UnicodeString; out ATextSize: TSize; out ATextOffset: TPoint): Integer;
+function acTextEllipsize(ACanvas: TCanvas;
+  var AText: UnicodeString;
+  var ATextSize: TSize; AMaxWidth: Integer): Integer;
 begin
-  Result := acTextPrepare(ACanvas, R, AEndEllipsis, AHorzAlignment, AVertAlignment, AText, ATextSize, ATextOffset, NullRect);
-end;
-
-function acTextPrepare(ACanvas: TCanvas; const R: TRect; AEndEllipsis: Boolean; AHorzAlignment: TAlignment;
-  AVertAlignment: TVerticalAlignment; var AText: UnicodeString; out ATextSize: TSize; out ATextOffset: TPoint;
-  const ATextExtends: TRect; APreventTopLeftExceed: Boolean = False): Integer;
-var
-  AEllipsisSize: TSize;
-begin
-  ATextSize := acTextSize(ACanvas, AText);
-
-  if AEndEllipsis and (ATextSize.cx > R.Right - R.Left) then
+  if ATextSize.cx > AMaxWidth then
   begin
-    AEllipsisSize := acTextSize(ACanvas, acEndEllipsis);
-    GetTextExtentExPointW(ACanvas.Handle, PWideChar(AText), Length(AText),
-      Max(0, acRectWidth(R) - AEllipsisSize.cx), @Result, nil, ATextSize);
+    GetTextExtentExPointW(ACanvas.Handle, PChar(AText), Length(AText),
+      Max(0, AMaxWidth - acTextSize(ACanvas, acEndEllipsis).cx), @Result, nil, ATextSize);
     AText := Copy(AText, 1, Result) + acEndEllipsis;
     ATextSize := acTextSize(ACanvas, AText);
   end
   else
     Result := Length(AText);
-
-  Inc(ATextSize.cy, acMarginHeight(ATextExtends));
-  Inc(ATextSize.cx, acMarginWidth(ATextExtends));
-
-  ATextOffset := acAlignText(R, ATextSize, AHorzAlignment, AVertAlignment, APreventTopLeftExceed);
 end;
 
 procedure acTextOut(ACanvas: TCanvas; X, Y: Integer; const S: UnicodeString; AFlags: Integer; ARect: PRect = nil);
@@ -1186,7 +1151,7 @@ begin
 //      else
 //        ALayout.DrawTo(ACanvas, R,
 //          acPointOffsetNegative(
-//            acAlignText(R, ALayout.MeasureSize,
+//            acTextAlign(R, ALayout.MeasureSize,
 //              HorzAlignMap[AFlags and DT_RIGHT <> 0, AFlags and DT_CENTER <> 0],
 //              VertAlignMap[AFlags and DT_BOTTOM <> 0, AFlags and DT_VCENTER <> 0], True),
 //            R.TopLeft));
@@ -1316,30 +1281,24 @@ begin
   AHeader.biCompression := BI_RGB;
 end;
 
-procedure acGetBitmapBits(ABitmap: THandle; AWidth, AHeight: Integer;
-  out AColors: TRGBColors; out ABitmapInfo: TBitmapInfo); overload;
+function acGetBitmapBits(ABitmap: TBitmap): TRGBColors; overload;
+var
+  AInfo: TBitmapInfo;
 begin
-  with TACLBitmapBits.Create(ABitmap) do
+  with TACLBitmapBits.Create(ABitmap.Handle) do
   try
-    if not ReadColors(AColors) then
+    if not ReadColors(Result) then
     begin
-      SetLength(AColors, AWidth * AHeight);
-      acFillBitmapInfoHeader(ABitmapInfo.bmiHeader, AWidth, AHeight);
-      GetDIBits(MeasureCanvas.Handle, ABitmap, 0, AHeight, AColors, ABitmapInfo, DIB_RGB_COLORS);
+      SetLength(Result, ABitmap.Width * ABitmap.Height);
+      acFillBitmapInfoHeader(AInfo.bmiHeader, ABitmap.Width, ABitmap.Height);
+      GetDIBits(MeasureCanvas.Handle, ABitmap.Handle, 0, ABitmap.Height, Result, AInfo, DIB_RGB_COLORS);
     end;
   finally
     Free;
   end;
 end;
 
-function acGetBitmapBits(ABitmap: TBitmap): TRGBColors; overload;
-var
-  AInfo: TBitmapInfo;
-begin
-  acGetBitmapBits(ABitmap.Handle, ABitmap.Width, ABitmap.Height, Result, AInfo);
-end;
-
-procedure acSetBitmapBits(ABitmap: TBitmap; var AColors: TRGBColors);
+procedure acSetBitmapBits(ABitmap: TBitmap; const AColors: TRGBColors);
 var
   AInfo: TBitmapInfo;
 begin
@@ -1351,7 +1310,6 @@ begin
       SetDIBits(MeasureCanvas.Handle, ABitmap.Handle, 0, ABitmap.Height, AColors, AInfo, DIB_RGB_COLORS);
     end;
     TBitmapAccess(ABitmap).Changed(ABitmap);
-    AColors := nil;
   finally
     Free;
   end;
@@ -1435,7 +1393,7 @@ begin
   ABlendFunc.SourceConstantAlpha := AAlpha;
 
   N := NullPoint;
-  ASize := acSize(R);
+  ASize := R.Size;
   ATopLeft := R.TopLeft;
   UpdateLayeredWindow(Wnd, 0, @ATopLeft, @ASize, SrcDC, @N, 0, @ABlendFunc, ULW_ALPHA);
 end;
@@ -1489,11 +1447,13 @@ procedure acDrawArrow(DC: HDC; R: TRect; AColor: TColor; AArrowKind: TACLArrowKi
   var
     ABrush: HBRUSH;
   begin
+    R.CenterHorz(1);
+    R.CenterVert(1);
     ABrush := CreateSolidBrush(ColorToRGB(AColor));
     while Count > 0 do
     begin
       FillRect(DC, R, ABrush);
-      R := acRectContent(R, Extends);
+      R.Content(Extends);
       Dec(Count);
     end;
     DeleteObject(ABrush);
@@ -1504,19 +1464,25 @@ var
 begin
   ASize := MulDiv(2, ATargetDPI, acDefaultDPI);
   if AArrowKind in [makLeft, makRight] then
-    R := acRectCenter(R, ASize + 1, ASize * 2 + 1)
+  begin
+    R.CenterHorz(ASize + 1);
+    R.CenterVert(ASize * 2 + 1);
+  end
   else
-    R := acRectCenter(R, ASize * 2 + 1, ASize + 1);
+  begin
+    R.CenterHorz(ASize * 2 + 1);
+    R.CenterVert(ASize + 1);
+  end;
 
   case AArrowKind of
     makLeft:
-      Draw(acRectCenter(acRectSetWidth(R, 1), 1, 1), Rect(1, -1, -1, -1), ASize + 1);
+      Draw(R.Split(srLeft, 1), Rect(1, -1, -1, -1), ASize + 1);
     makRight:
-      Draw(acRectCenter(acRectSetLeft(R, R.Right, 1), 1, 1), Rect(-1, -1, 1, -1), ASize + 1);
+      Draw(R.Split(srLeft, R.Right, 1), Rect(-1, -1, 1, -1), ASize + 1);
     makTop:
-      Draw(acRectCenter(acRectSetHeight(R, 1), 1, 1), Rect(-1, 1, -1, -1), ASize + 1);
+      Draw(R.Split(srTop, 1), Rect(-1, 1, -1, -1), ASize + 1);
     makBottom:
-      Draw(acRectCenter(acRectSetTop(R, R.Bottom, 1), 1, 1), Rect(-1, -1, -1, 1), ASize + 1);
+      Draw(R.Split(srTop, R.Bottom, 1), Rect(-1, -1, -1, 1), ASize + 1);
   end;
 end;
 
@@ -1526,9 +1492,9 @@ var
 begin
   ASize := MulDiv(2, ATargetDPI, acDefaultDPI);
   if AArrowKind in [makLeft, makRight] then
-    Result := acSize(ASize + 1, ASize * 2 + 1)
+    Result := TSize.Create(ASize + 1, ASize * 2 + 1)
   else
-    Result := acSize(ASize * 2 + 1, ASize + 1);
+    Result := TSize.Create(ASize * 2 + 1, ASize + 1);
 end;
 
 procedure acDrawDotsLineV(DC: HDC; X, Y1, Y2: Integer; AColor: TColor);
@@ -1574,14 +1540,15 @@ begin
   acDrawColorPreview(ACanvas, R, AColor, clGray, acHatchDefaultColor1, acHatchDefaultColor2);
 end;
 
-procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect; AColor: TAlphaColor; ABorderColor, AHatchColor1, AHatchColor2: TColor);
+procedure acDrawColorPreview(ACanvas: TCanvas; R: TRect;
+  AColor: TAlphaColor; ABorderColor, AHatchColor1, AHatchColor2: TColor);
 var
   APrevFontColor: TColor;
 begin
   acDrawFrame(ACanvas.Handle, R, ABorderColor);
-  InflateRect(R, -1, -1);
+  R.Inflate(-1);
   acDrawFrame(ACanvas.Handle, R, AHatchColor1);
-  InflateRect(R, -1, -1);
+  R.Inflate(-1);
   if AColor.IsDefault then
   begin
     APrevFontColor := ACanvas.Font.Color;
@@ -1596,7 +1563,7 @@ begin
     acDrawHatch(ACanvas.Handle, R, AHatchColor1, AHatchColor2, 4);
     acFillRect(ACanvas.Handle, R, AColor);
   end;
-  acExcludeFromClipRegion(ACanvas.Handle, acRectInflate(R, 2));
+  acExcludeFromClipRegion(ACanvas.Handle, R.InflateTo(2));
 end;
 
 procedure acDrawFocusRect(ACanvas: TCanvas; const R: TRect);
@@ -1637,15 +1604,12 @@ begin
 end;
 
 function acHatchCreatePattern(ASize: Integer; AColor1, AColor2: TColor): TBitmap;
-var
-  ARect: TRect;
 begin
   Result := TACLBitmap.CreateEx(2 * ASize, 2 * ASize, pf24bit);
-  ARect := Rect(0, 0, ASize, ASize);
-  acFillRect(Result.Canvas.Handle, ARect, AColor2);
-  acFillRect(Result.Canvas.Handle, acRectOffset(ARect, 0, ASize), AColor1);
-  acFillRect(Result.Canvas.Handle, acRectOffset(ARect, ASize, 0), AColor1);
-  acFillRect(Result.Canvas.Handle, acRectOffset(ARect, ASize, ASize), AColor2);
+  acFillRect(Result.Canvas.Handle, Bounds(0,         0, ASize, ASize), AColor2);
+  acFillRect(Result.Canvas.Handle, Bounds(0,     ASize, ASize, ASize), AColor1);
+  acFillRect(Result.Canvas.Handle, Bounds(ASize,     0, ASize, ASize), AColor1);
+  acFillRect(Result.Canvas.Handle, Bounds(ASize, ASize, ASize, ASize), AColor2);
 end;
 
 procedure acDrawSelectionRect(DC: HDC; const R: TRect; AColor: TAlphaColor);
@@ -1697,35 +1661,36 @@ var
   R1: TRect;
 begin
   R1 := R;
-  InflateRect(R1, -1, -1);
+  R1.Inflate(-1);
   acDrawFrame(DC, R1, ABorderColor);
-  InflateRect(R1, -2, -2);
-  acFillRect(DC, acRectCenter(R1, R1.Right - R1.Left, 1), AColor);
+  R1.Inflate(-2);
+  acFillRect(DC, R1.CenterTo(R1.Right - R1.Left, 1), AColor);
   if not AExpanded then
-    acFillRect(DC, acRectCenter(R1, 1, R1.Bottom - R1.Top), AColor);
+    acFillRect(DC, R1.CenterTo(1, R1.Bottom - R1.Top), AColor);
 end;
 
 procedure acTileBlt(DC, SourceDC: HDC; const ADest, ASource: TRect);
 var
   ABrush: HBRUSH;
-  ABrushBitmap: TACLBitmapLayer;
+  ABrushBitmap: TACLDib;
   AClipRgn: HRGN;
   AOrigin: TPoint;
   R: TRect;
   W, H: Integer;
   X, Y, XCount, YCount: Integer;
 begin
-  if not (acRectIsEmpty(ADest) or acRectIsEmpty(ASource)) and RectVisible(DC, ADest) then
+  if not (ADest.IsEmpty or ASource.IsEmpty) and RectVisible(DC, ADest) then
   begin
     W := ASource.Right - ASource.Left;
     H := ASource.Bottom - ASource.Top;
-    R := acRectSetHeight(ADest, H);
+    R := ADest;
+    R.Height := H;
     XCount := acCalcPatternCount(ADest.Right - ADest.Left, W);
     YCount := acCalcPatternCount(ADest.Bottom - ADest.Top, H);
 
     if XCount * YCount > 10 then
     begin
-      ABrushBitmap := TACLBitmapLayer.Create(W, H);
+      ABrushBitmap := TACLDib.Create(W, H);
       try
         acBitBlt(ABrushBitmap.Handle, SourceDC, ABrushBitmap.ClientRect, ASource.TopLeft);
 
@@ -1820,34 +1785,42 @@ begin
   acDrawFrameEx(DC, ARect, AColor, acAllBorders, AThickness);
 end;
 
-procedure acDrawFrameEx(DC: HDC; const ARect: TRect; AColor: TColor; ABorders: TACLBorders; AThickness: Integer = 1);
+procedure acDrawFrameEx(DC: HDC; const ARect: TRect;
+  AColor: TColor; ABorders: TACLBorders; AThickness: Integer = 1);
 var
-  AClipRegion: HRGN;
+  LClipRegion: HRGN;
+  LClipRect: TRect;
 begin
   if AColor <> clNone then
   begin
-    AClipRegion := acSaveClipRegion(DC);
+    LClipRegion := acSaveClipRegion(DC);
     try
-      acExcludeFromClipRegion(DC, acRectContent(ARect, AThickness, ABorders));
+      LClipRect := ARect;
+      LClipRect.Content(AThickness, ABorders);
+      acExcludeFromClipRegion(DC, LClipRect);
       acFillRect(DC, ARect, AColor);
     finally
-      acRestoreClipRegion(DC, AClipRegion);
+      acRestoreClipRegion(DC, LClipRegion);
     end;
   end;
 end;
 
-procedure acDrawFrameEx(DC: HDC; ARect: TRect; AColor: TAlphaColor; ABorders: TACLBorders; AThickness: Integer = 1);
+procedure acDrawFrameEx(DC: HDC; ARect: TRect;
+  AColor: TAlphaColor; ABorders: TACLBorders; AThickness: Integer = 1);
 var
-  AClipRegion: HRGN;
+  LClipRegion: HRGN;
+  LClipRect: TRect;
 begin
   if AColor.IsValid then
   begin
-    AClipRegion := acSaveClipRegion(DC);
+    LClipRegion := acSaveClipRegion(DC);
     try
-      acExcludeFromClipRegion(DC, acRectContent(ARect, AThickness, ABorders));
+      LClipRect := ARect;
+      LClipRect.Content(AThickness, ABorders);
+      acExcludeFromClipRegion(DC, LClipRect);
       acFillRect(DC, ARect, AColor);
     finally
-      acRestoreClipRegion(DC, AClipRegion);
+      acRestoreClipRegion(DC, LClipRegion);
     end;
   end;
 end;
@@ -1873,21 +1846,31 @@ begin
     GdipCreateFromHDC(DC, AHandle);
     GdipFillRectangleI(AHandle,
       TACLGdiplusResourcesCache.BrushGet(AColor),
-      ARect.Left, ARect.Top, acRectWidth(ARect), acRectHeight(ARect));
+      ARect.Left, ARect.Top, ARect.Width, ARect.Height);
     GdipDeleteGraphics(AHandle);
   end;
 end;
 
-procedure acDrawComplexFrame(DC: HDC; const R: TRect; AColor1, AColor2: TColor; ABorders: TACLBorders = acAllBorders);
+procedure acDrawComplexFrame(DC: HDC; const R: TRect;
+  AColor1, AColor2: TColor; ABorders: TACLBorders = acAllBorders);
+var
+  LInnerFrame: TRect;
 begin
+  LInnerFrame := R;
+  LInnerFrame.Content(1, ABorders);
   acDrawFrameEx(DC, R, AColor1, ABorders);
-  acDrawFrameEx(DC, acRectContent(R, 1, ABorders), AColor2, ABorders);
+  acDrawFrameEx(DC, LInnerFrame, AColor2, ABorders);
 end;
 
-procedure acDrawComplexFrame(DC: HDC; const R: TRect; AColor1, AColor2: TAlphaColor; ABorders: TACLBorders = acAllBorders);
+procedure acDrawComplexFrame(DC: HDC; const R: TRect;
+  AColor1, AColor2: TAlphaColor; ABorders: TACLBorders = acAllBorders);
+var
+  LInnerFrame: TRect;
 begin
+  LInnerFrame := R;
+  LInnerFrame.Content(1, ABorders);
   acDrawFrameEx(DC, R, AColor1, ABorders);
-  acDrawFrameEx(DC, acRectContent(R, 1, ABorders), AColor2, ABorders);
+  acDrawFrameEx(DC, LInnerFrame, AColor2, ABorders);
 end;
 
 procedure acDrawGradient(DC: HDC; const ARect: TRect; AFrom, ATo: TColor; AVertical: Boolean = True);
@@ -1925,10 +1908,10 @@ var
   AValue: Single;
   I: Integer;
 begin
-  if not acRectIsEmpty(R) then
+  if not R.IsEmpty then
   begin
     AValue := 0;
-    ADelta := 1.0 / acRectWidth(R);
+    ADelta := 1.0 / R.Width;
     for I := R.Left to R.Right do
     begin
       TACLColors.HSLtoRGB(AHue / 255, AValue, 0.5, AColor);
@@ -1945,10 +1928,10 @@ var
   AValue: Single;
   I: Integer;
 begin
-  if not acRectIsEmpty(R) then
+  if not R.IsEmpty then
   begin
     AValue := 0;
-    ADelta := 1.0 / acRectWidth(R);
+    ADelta := 1.0 / R.Width;
     for I := R.Left to R.Right do
     begin
       TACLColors.HSLtoRGB(AValue, 1.0, 0.5, AColor);
@@ -1956,6 +1939,160 @@ begin
       AValue := AValue + ADelta;
     end;
   end;
+end;
+
+{ TACLPixel32 }
+
+class function TACLPixel32.Create(A, R, G, B: Byte): TACLPixel32;
+begin
+  Result.B := B;
+  Result.G := G;
+  Result.R := R;
+  Result.A := A;
+end;
+
+class function TACLPixel32.Create(AColor: TAlphaColor): TACLPixel32;
+begin
+  Result.B := AColor.B;
+  Result.G := AColor.G;
+  Result.R := AColor.R;
+  Result.A := AColor.A;
+end;
+
+class function TACLPixel32.Create(AColor: TColor; AAlpha: Byte = MaxByte): TACLPixel32;
+begin
+  AColor := ColorToRGB(AColor);
+  Result.R := GetRValue(AColor);
+  Result.G := GetGValue(AColor);
+  Result.B := GetBValue(AColor);
+  Result.A := AAlpha;
+end;
+
+class operator TACLPixel32.Implicit(const Value: TACLPixel32): TRGBQuad;
+begin
+  DWORD(Result) := DWORD(Value);
+end;
+
+function TACLPixel32.ToColor: TColor;
+begin
+  Result := RGB(R, G, B);
+end;
+
+class operator TACLPixel32.Implicit(const Value: TRGBQuad): TACLPixel32;
+begin
+  DWORD(Result) := DWORD(Value);
+end;
+
+{ TAlphaColorHelper }
+
+class function TAlphaColorHelper.ApplyColorSchema(
+  AColor: TAlphaColor; const ASchema: TACLColorSchema): TAlphaColor;
+begin
+  Result := AColor;
+  TACLColors.ApplyColorSchema(Result, ASchema);
+end;
+
+class function TAlphaColorHelper.FromARGB(const A, R, G, B: Byte): TAlphaColor;
+begin
+  Result := (A shl 24) or (R shl 16) or (G shl 8) or B;
+end;
+
+class function TAlphaColorHelper.FromColor(const AColor: TColor; AAlpha: Byte): TAlphaColor;
+begin
+  if AColor = clDefault then
+    Exit(TAlphaColor.Default);
+  if AColor = clNone then
+    Exit(TAlphaColor.None);
+  Result := FromColor(TACLPixel32.Create(AColor, AAlpha));
+end;
+
+class function TAlphaColorHelper.FromColor(const AColor: TACLPixel32): TAlphaColor;
+begin
+  Result := FromARGB(AColor.A, AColor.R, AColor.G, AColor.B);
+end;
+
+class function TAlphaColorHelper.FromString(AColor: UnicodeString): TAlphaColor;
+var
+  P: TACLPixel32;
+begin
+  if AColor = '' then
+    Exit(Default);
+  if Length(AColor) < 6 then
+    AColor := AColor + DupeString('0', 6 - Length(AColor));
+  if Length(AColor) = 6 then
+    AColor := 'FF' + AColor
+  else
+    if Length(AColor) < 8 then
+      AColor := DupeString('0', 8 - Length(AColor)) + AColor;
+
+  P.A := StrToIntDef('$' + Copy(AColor, 1, 2), 0);
+  P.R := StrToIntDef('$' + Copy(AColor, 3, 2), 0);
+  P.G := StrToIntDef('$' + Copy(AColor, 5, 2), 0);
+  P.B := StrToIntDef('$' + Copy(AColor, 7, 2), 0);
+  Result := TAlphaColor.FromColor(P);
+end;
+
+function TAlphaColorHelper.IsDefault: Boolean;
+begin
+  Result := Self = TAlphaColor.Default;
+end;
+
+function TAlphaColorHelper.IsValid: Boolean;
+begin
+  Result := (Self <> TAlphaColor.None) and (Self <> TAlphaColor.Default);
+end;
+
+function TAlphaColorHelper.ToColor: TColor;
+begin
+  if Self = TAlphaColor.Default then
+    Result := clDefault
+  else
+    if Self = TAlphaColor.None then
+      Result := clNone
+    else
+      Result := (GetRValue(Self) shl 16) or (GetGValue(Self) shl 8) or (GetBValue(Self));
+end;
+
+function TAlphaColorHelper.ToPixel: TACLPixel32;
+begin
+  Result.B := Byte(Self shr BlueShift);
+  Result.G := Byte(Self shr GreenShift);
+  Result.R := Byte(Self shr RedShift);
+  Result.A := Self shr AlphaShift;
+end;
+
+function TAlphaColorHelper.ToString: string;
+begin
+  if Self = TAlphaColor.None then
+    Result := 'None'
+  else
+    if Self = TAlphaColor.Default then
+      Result := 'Default'
+    else
+      with ToPixel do
+        Result :=
+          IntToHex(A, 2) +
+          IntToHex(R, 2) +
+          IntToHex(G, 2) +
+          IntToHex(B, 2);
+end;
+
+function TAlphaColorHelper.GetAlpha(const Index: Integer): Byte;
+begin
+  if IsDefault then
+    Result := MaxByte
+  else
+    Result := GetComponent(Index);
+end;
+
+function TAlphaColorHelper.GetComponent(const Index: Integer): Byte;
+begin
+  Result := PARGB(@Self)^[Index];
+end;
+
+procedure TAlphaColorHelper.SetComponent(const Index: Integer; const Value: Byte);
+begin
+  PARGB(@Self)^[Index] := Value;
 end;
 
 { TACLRegion }
@@ -2001,7 +2138,7 @@ begin
   if Empty then
   begin
     GetWindowRect(AWnd, R);
-    OffsetRect(R, -R.Left, -R.Top);
+    R.Offset(-R.Left, -R.Top);
     SetRectRgn(Handle, R.Left, R.Top, R.Right, R.Bottom);
   end;
 end;
@@ -2231,7 +2368,7 @@ begin
     Inc(AScanR);
     for I := 1 to RectsCount - 1 do
     begin
-      acRectUnion(ARect, AScanR^);
+      ARect.Add(AScanR^);
       Inc(AScanR);
     end;
   end
@@ -2289,119 +2426,6 @@ begin
   end;
 end;
 
-{ TAlphaColorHelper }
-
-class function TAlphaColorHelper.ApplyColorSchema(AColor: TAlphaColor; const ASchema: TACLColorSchema): TAlphaColor;
-begin
-  Result := AColor;
-  TACLColors.ApplyColorSchema(Result, ASchema);
-end;
-
-class function TAlphaColorHelper.FromARGB(const A, R, G, B: Byte): TAlphaColor;
-begin
-  Result := (A shl 24) or (R shl 16) or (G shl 8) or B;
-end;
-
-class function TAlphaColorHelper.FromColor(const AColor: TColor; AAlpha: Byte): TAlphaColor;
-begin
-  if AColor = clDefault then
-    Result := TAlphaColor.Default
-  else
-    if AColor <> clNone then
-      Result := FromColor(TACLColors.ToQuad(AColor, AAlpha))
-    else
-      Result := TAlphaColor.None;
-end;
-
-class function TAlphaColorHelper.FromColor(const AColor: TRGBQuad): TAlphaColor;
-begin
-  Result := FromARGB(AColor.rgbReserved, AColor.rgbRed, AColor.rgbGreen, AColor.rgbBlue);
-end;
-
-class function TAlphaColorHelper.FromString(AColor: UnicodeString): TAlphaColor;
-var
-  Q: TRGBQuad;
-begin
-  if AColor = '' then
-    Exit(Default);
-  if Length(AColor) < 6 then
-    AColor := AColor + DupeString('0', 6 - Length(AColor));
-  if Length(AColor) = 6 then
-    AColor := 'FF' + AColor
-  else
-    if Length(AColor) < 8 then
-      AColor := DupeString('0', 8 - Length(AColor)) + AColor;
-
-  Q.rgbReserved := StrToIntDef('$' + Copy(AColor, 1, 2), 0);
-  Q.rgbRed := StrToIntDef('$' + Copy(AColor, 3, 2), 0);
-  Q.rgbGreen := StrToIntDef('$' + Copy(AColor, 5, 2), 0);
-  Q.rgbBlue := StrToIntDef('$' + Copy(AColor, 7, 2), 0);
-  Result := TAlphaColor.FromColor(Q);
-end;
-
-function TAlphaColorHelper.IsDefault: Boolean;
-begin
-  Result := Self = TAlphaColor.Default;
-end;
-
-function TAlphaColorHelper.IsValid: Boolean;
-begin
-  Result := (Self <> TAlphaColor.None) and (Self <> TAlphaColor.Default);
-end;
-
-function TAlphaColorHelper.ToColor: TColor;
-begin
-  if Self = TAlphaColor.Default then
-    Result := clDefault
-  else
-    if Self = TAlphaColor.None then
-      Result := clNone
-    else
-      Result := (GetRValue(Self) shl 16) or (GetGValue(Self) shl 8) or (GetBValue(Self));
-end;
-
-function TAlphaColorHelper.ToQuad: TRGBQuad;
-begin
-  Result.rgbBlue := Byte(Self shr BlueShift);
-  Result.rgbGreen := Byte(Self shr GreenShift);
-  Result.rgbRed := Byte(Self shr RedShift);
-  Result.rgbReserved := Self shr AlphaShift;
-end;
-
-function TAlphaColorHelper.ToString: string;
-begin
-  if Self = TAlphaColor.None then
-    Result := 'None'
-  else
-    if Self = TAlphaColor.Default then
-      Result := 'Default'
-    else
-      with ToQuad do
-        Result :=
-          IntToHex(rgbReserved, 2) +
-          IntToHex(rgbRed, 2) +
-          IntToHex(rgbGreen, 2) +
-          IntToHex(rgbBlue, 2);
-end;
-
-function TAlphaColorHelper.GetAlpha(const Index: Integer): Byte;
-begin
-  if IsDefault then
-    Result := MaxByte
-  else
-    Result := GetComponent(Index);
-end;
-
-function TAlphaColorHelper.GetComponent(const Index: Integer): Byte;
-begin
-  Result := PARGB(@Self)^[Index];
-end;
-
-procedure TAlphaColorHelper.SetComponent(const Index: Integer; const Value: Byte);
-begin
-  PARGB(@Self)^[Index] := Value;
-end;
-
 { TACLColorSchema }
 
 constructor TACLColorSchema.Create(AHue, AHueIntensity: Byte);
@@ -2456,6 +2480,318 @@ begin
   Size := MulDiv(ASize, ATargetDpi, PixelsPerInch);
 end;
 
+{ TACLDib }
+
+constructor TACLDib.Create;
+begin
+  Create(0, 0);
+end;
+
+constructor TACLDib.Create(const R: TRect);
+begin
+  Create(R.Width, R.Height);
+end;
+
+constructor TACLDib.Create(const S: TSize);
+begin
+  Create(S.cx, S.cy);
+end;
+
+constructor TACLDib.Create(const W, H: Integer);
+begin
+  CreateHandles(W, H);
+end;
+
+destructor TACLDib.Destroy;
+begin
+  FreeHandles;
+  inherited Destroy;
+end;
+
+procedure TACLDib.Assign(ASource: TACLDib);
+begin
+  if ASource <> Self then
+  begin
+    Resize(ASource.Width, ASource.Height);
+    acBitBlt(Handle, ASource.Handle, ClientRect, NullPoint);
+//    FastMove(ALayer.Colors^, Colors^, ColorCount * SizeOf(TACLPixel32));
+  end;
+end;
+
+procedure TACLDib.Assign(ASource: TGraphic);
+begin
+  Resize(ASource.Width, ASource.Height);
+  if ASource.SupportsPartialTransparency then
+    Canvas.Draw(0, 0, ASource)
+  else
+    if ASource.Transparent then
+    begin
+      Canvas.Brush.Color := clFuchsia;
+      Canvas.FillRect(ClientRect);
+      Canvas.Draw(0, 0, ASource);
+      MakeTransparent(clFuchsia);
+    end
+    else
+    begin
+      Canvas.Draw(0, 0, ASource);
+      MakeOpaque;
+    end;
+end;
+
+procedure TACLDib.AssignParams(DC: HDC);
+begin
+  SelectObject(Handle, GetCurrentObject(DC, OBJ_BRUSH));
+  SelectObject(Handle, GetCurrentObject(DC, OBJ_FONT));
+  SetTextColor(Handle, GetTextColor(DC));
+end;
+
+function TACLDib.Clone(out AData: PACLPixel32Array): Boolean;
+var
+  ASize: Integer;
+begin
+  ASize := ColorCount * SizeOf(TACLPixel32);
+  Result := ASize > 0;
+  if Result then
+  begin
+    AData := AllocMem(ASize);
+    FastMove(FColors^, AData^, ASize);
+  end;
+end;
+
+function TACLDib.CoordToFlatIndex(X, Y: Integer): Integer;
+begin
+  if (X >= 0) and (X < Width) and (Y >= 0) and (Y < Height) then
+    Result := X + Y * Width
+  else
+    Result := -1;
+end;
+
+procedure TACLDib.ApplyTint(const AColor: TColor);
+begin
+  ApplyTint(TAlphaColor.FromColor(AColor).ToPixel);
+end;
+
+procedure TACLDib.ApplyTint(const AColor: TACLPixel32);
+var
+  P: PACLPixel32;
+  I: Integer;
+begin
+  P := @FColors^[0];
+  for I := 0 to ColorCount - 1 do
+  begin
+    if P^.A > 0 then
+    begin
+      TACLColors.Unpremultiply(P^);
+      P^.B := AColor.B;
+      P^.G := AColor.G;
+      P^.R := AColor.R;
+      TACLColors.Premultiply(P^);
+    end;
+    Inc(P);
+  end;
+end;
+
+procedure TACLDib.DrawBlend(ACanvas: TCanvas; const R: TRect; AAlpha: Byte);
+begin
+  acAlphaBlend(ACanvas.Handle, Handle, R, ClientRect, AAlpha);
+end;
+
+procedure TACLDib.DrawBlend(DC: HDC; const P: TPoint; AAlpha: Byte = 255);
+begin
+  acAlphaBlend(DC, Handle, Bounds(P.X, P.Y, Width, Height), ClientRect, AAlpha);
+end;
+
+procedure TACLDib.DrawCopy(DC: HDC; const P: TPoint);
+begin
+  acBitBlt(DC, Handle, Bounds(P.X, P.Y, Width, Height), NullPoint);
+end;
+
+procedure TACLDib.DrawCopy(DC: HDC; const R: TRect; ASmoothStretch: Boolean = False);
+var
+  AMode: Integer;
+begin
+  if ASmoothStretch and not R.EqualSizes(ClientRect) then
+  begin
+    AMode := SetStretchBltMode(DC, HALFTONE);
+    acStretchBlt(DC, Handle, R, ClientRect);
+    SetStretchBltMode(DC, AMode);
+  end
+  else
+    acStretchBlt(DC, Handle, R, ClientRect);
+end;
+
+procedure TACLDib.Flip(AHorizontally, AVertically: Boolean);
+begin
+  TACLColors.Flip(Colors, Width, Height, AHorizontally, AVertically);
+end;
+
+procedure TACLDib.MakeDisabled(AIgnoreMask: Boolean = False);
+begin
+  TACLColors.MakeDisabled(@FColors^[0], ColorCount, AIgnoreMask);
+end;
+
+procedure TACLDib.MakeMirror(ASize: Integer);
+var
+  AAlpha: Single;
+  AAlphaDelta: Single;
+  AIndex: Integer;
+  I, J, O1, O2, R: Integer;
+begin
+  if (ASize > 0) and (ASize < Height div 2) then
+  begin
+    AAlpha := 60;
+    AAlphaDelta := AAlpha / ASize;
+    O2 := Width;
+    O1 := O2 * (Height - ASize);
+
+    AIndex := O1;
+    for J := 0 to ASize - 1 do
+    begin
+      R := Round(AAlpha);
+      for I := 0 to O2 - 1 do
+      begin
+        TACLColors.AlphaBlend(Colors^[AIndex], Colors^[O1 + I], R, False);
+        Inc(AIndex);
+      end;
+      AAlpha := AAlpha - AAlphaDelta;
+      Dec(O1, O2);
+    end;
+  end;
+end;
+
+procedure TACLDib.MakeOpaque;
+var
+  I: Integer;
+  P: PACLPixel32;
+begin
+  P := @FColors^[0];
+  for I := 0 to ColorCount - 1 do
+  begin
+    P^.A := $FF;
+    Inc(P);
+  end;
+end;
+
+procedure TACLDib.MakeTransparent(AColor: TColor);
+var
+  I: Integer;
+  P: PACLPixel32;
+  R: TACLPixel32;
+begin
+  P := @FColors^[0];
+  R := TACLPixel32.Create(AColor);
+  for I := 0 to ColorCount - 1 do
+  begin
+    if TACLColors.CompareRGB(P^, R) then
+      TACLColors.Flush(P^)
+    else
+      P^.A := $FF;
+    Inc(P);
+  end;
+end;
+
+procedure TACLDib.Premultiply(R: TRect);
+var
+  Y: Integer;
+begin
+  IntersectRect(R, R, ClientRect);
+  for Y := R.Top to R.Bottom - 1 do
+    TACLColors.Premultiply(@FColors^[Y * Width + R.Left], R.Right - R.Left - 1);
+end;
+
+procedure TACLDib.Premultiply;
+begin
+  TACLColors.Premultiply(@FColors^[0], ColorCount);
+end;
+
+procedure TACLDib.Reset;
+var
+  APrevPoint: TPoint;
+begin
+  SetWindowOrgEx(Handle, 0, 0, @APrevPoint);
+  acResetRect(Handle, ClientRect);
+  SetWindowOrgEx(Handle, APrevPoint.X, APrevPoint.Y, nil);
+end;
+
+procedure TACLDib.Reset(const R: TRect);
+begin
+  acResetRect(Handle, R);
+end;
+
+procedure TACLDib.Resize(const R: TRect);
+begin
+  Resize(R.Width, R.Height);
+end;
+
+procedure TACLDib.Resize(ANewWidth, ANewHeight: Integer);
+begin
+  if (ANewWidth <> Width) or (ANewHeight <> Height) then
+  begin
+    FreeHandles;
+    CreateHandles(ANewWidth, ANewHeight);
+  end;
+end;
+
+procedure TACLDib.CreateHandles(W, H: Integer);
+var
+  AInfo: TBitmapInfo;
+begin
+  if (W <= 0) or (H <= 0) then
+    Exit;
+
+  FWidth := W;
+  FHeight := H;
+  FColorCount := W * H;
+  FHandle := CreateCompatibleDC(0);
+  acFillBitmapInfoHeader(AInfo.bmiHeader, Width, Height);
+  FBitmap := CreateDIBSection(0, AInfo, DIB_RGB_COLORS, Pointer(FColors), 0, 0);
+  FOldBmp := SelectObject(Handle, Bitmap);
+  if FColors = nil then
+  begin
+    FreeHandles;
+    raise EInvalidGraphicOperation.CreateFmt('Unable to create bitmap layer (%dx%d)', [W, H]);
+  end;
+end;
+
+procedure TACLDib.FreeHandles;
+begin
+  FreeAndNil(FCanvas);
+  if Handle <> 0 then
+  begin
+    SelectObject(Handle, FOldBmp);
+    DeleteObject(Bitmap);
+    DeleteDC(Handle);
+    FColorCount := 0;
+    FColors := nil;
+    FHeight := 0;
+    FBitmap := 0;
+    FHandle := 0;
+    FWidth := 0;
+  end;
+end;
+
+function TACLDib.GetCanvas: TCanvas;
+begin
+  if FCanvas = nil then
+  begin
+    FCanvas := TCanvas.Create;
+    FCanvas.Lock;
+    FCanvas.Handle := Handle;
+    FCanvas.Brush.Style := bsClear;
+  end;
+  Result := FCanvas;
+end;
+
+function TACLDib.GetClientRect: TRect;
+begin
+  Result := Rect(0, 0, Width, Height);
+end;
+
+function TACLDib.GetEmpty: Boolean;
+begin
+  Result := FColorCount = 0;
+end;
+
 { TACLBitmap }
 
 constructor TACLBitmap.CreateEx(const S: TSize; APixelFormat: TPixelFormat = pf32bit; AResetContent: Boolean = False);
@@ -2480,53 +2816,6 @@ end;
 function TACLBitmap.GetClientRect: TRect;
 begin
   Result := Rect(0, 0, Width, Height);
-end;
-
-procedure TACLBitmap.DrawStretch(ACanvas: TCanvas; const ADest, ASource: TRect);
-begin
-  acStretchDraw(ACanvas.Handle, Self.Canvas.Handle, ADest, ASource, StretchMode);
-end;
-
-procedure TACLBitmap.DrawStretch(ACanvas: TCanvas; const ADest: TRect);
-begin
-  DrawStretch(ACanvas, ADest, ClientRect);
-end;
-
-procedure TACLBitmap.DrawTo(ACanvas: TCanvas; X, Y: Integer);
-begin
-  ACanvas.Draw(X, Y, Self);
-end;
-
-procedure TACLBitmap.DrawMargins(ACanvas: TCanvas; const ADest, AMargins: TRect);
-begin
-  DrawMargins(ACanvas, ADest, ClientRect, AMargins);
-end;
-
-procedure TACLBitmap.DrawMargins(ACanvas: TCanvas; const ADest, ASource, AMargins: TRect);
-var
-  ADestParts: TACLMarginPartBounds;
-  ASourceParts: TACLMarginPartBounds;
-  APart: TACLMarginPart;
-begin
-  if acMarginIsEmpty(AMargins) then
-    DrawStretch(ACanvas, ADest, ASource)
-  else
-  begin
-    acMarginCalculateRects(ASource, AMargins, ASource, ASourceParts, StretchMode);
-    acMarginCalculateRects(ADest, AMargins, ASource, ADestParts, StretchMode);
-    for APart := Low(APart) to High(APart) do
-    begin
-      if acMarginIsPartFixed(APart, StretchMode) then
-        acBitBlt(ACanvas.Handle, Self, ADestParts[APart], ASourceParts[APart].TopLeft)
-      else
-        DrawStretch(ACanvas, ADestParts[APart], ASourceParts[APart]);
-    end;
-  end;
-end;
-
-procedure TACLBitmap.Clear;
-begin
-  SetSize(0, 0);
 end;
 
 procedure TACLBitmap.LoadFromResource(Inst: HINST; const AName, AType: UnicodeString);
@@ -2555,11 +2844,6 @@ begin
   end;
 end;
 
-procedure TACLBitmap.SetSizeEx(const R: TRect);
-begin
-  SetSize(Max(0, acRectWidth(R)), Max(0, acRectHeight(R)));
-end;
-
 procedure TACLBitmap.ApplyColorSchema(const AValue: TACLColorSchema);
 var
   ABits: TRGBColors;
@@ -2575,35 +2859,17 @@ begin
   end;
 end;
 
-procedure TACLBitmap.ChangeAlpha(AValue: Byte);
-var
-  ABits: TRGBColors;
-  I: Integer;
-begin
-  ABits := acGetBitmapBits(Self);
-  try
-    for I := 0 to Length(ABits) - 1 do
-      ABits[I].rgbReserved := AValue;
-  finally
-    acSetBitmapBits(Self, ABits);
-  end;
-end;
-
-procedure TACLBitmap.MakeDisabled;
-var
-  ABits: TRGBColors;
-begin
-  ABits := acGetBitmapBits(Self);
-  try
-    TACLColors.MakeDisabled(@ABits[0], Length(ABits));
-  finally
-    acSetBitmapBits(Self, ABits);
-  end;
-end;
-
 procedure TACLBitmap.MakeOpaque;
+var
+  ABits: TRGBColors;
 begin
-  ChangeAlpha(MaxByte);
+  ABits := acGetBitmapBits(Self);
+  try
+    for var I := 0 to Length(ABits) - 1 do
+      ABits[I].rgbReserved := MaxByte;
+  finally
+    acSetBitmapBits(Self, ABits);
+  end;
 end;
 
 procedure TACLBitmap.MakeTransparent(AColor: TColor);
@@ -2615,66 +2881,21 @@ begin
     PixelFormat := pf32bit;
     ABits := acGetBitmapBits(Self);
     try
-      TACLColors.MakeTransparent(@ABits[0], Length(ABits), TACLColors.ToQuad(AColor));
+      TACLColors.MakeTransparent(@ABits[0], Length(ABits), TACLPixel32.Create(AColor));
     finally
       acSetBitmapBits(Self, ABits);
     end;
   end;
 end;
 
-procedure TACLBitmap.Rotate(ARotation: TACLBitmapRotation; AFlipVertically: Boolean = False);
-var
-  ARow, ACol, H, W, ASourceI, ADestI: Integer;
-  ASource, ADest: TRGBColors;
-begin
-  if (ARotation = br0) and not AFlipVertically then
-    Exit;
-
-  H := Height;
-  W := Width;
-  ASource := acGetBitmapBits(Self);
-  SetLength(ADest, Length(ASource));
-  for ARow := 0 to H - 1 do
-  begin
-    for ACol := 0 to W - 1 do
-    begin
-      ASourceI := ARow * W + ACol;
-      case ARotation of
-        br90:
-          if AFlipVertically then
-            ADestI := ACol * H + ARow
-          else
-            ADestI := (W - ACol - 1) * H + ARow;
-
-        br180:
-          if AFlipVertically then
-            ADestI := ARow * W + W - ACol - 1
-          else
-            ADestI := (H - ARow - 1) * W + W - ACol - 1;
-
-        br270:
-          if AFlipVertically then
-            ADestI := (W - ACol - 1) * H + H - ARow - 1
-          else
-            ADestI := H - 1 + ACol * H - ARow;
-
-        else
-          if AFlipVertically then
-            ADestI := (H - 1 - ARow) * W + ACol
-          else
-            ADestI := ASourceI;
-      end;
-      ADest[ADestI] := ASource[ASourceI];
-    end;
-  end;
-  if ARotation in [br90, br270] then
-    SetSize(H, W);
-  acSetBitmapBits(Self, ADest);
-end;
-
 procedure TACLBitmap.Reset;
 begin
   acResetRect(Canvas.Handle, ClientRect);
+end;
+
+procedure TACLBitmap.SetSize(const R: TRect);
+begin
+  SetSize(Max(0, R.Width), Max(0, R.Height));
 end;
 
 { TACLColors }
@@ -2683,7 +2904,7 @@ class constructor TACLColors.Create;
 var
   I, J: Integer;
 begin
-  for I := 0 to 255 do
+  for I := 1 to 255 do
     for J := I to 255 do
     begin
       PremultiplyTable[I, J] := MulDiv(I, J, 255);
@@ -2694,9 +2915,9 @@ begin
     end;
 end;
 
-class function TACLColors.CompareRGB(const Q1, Q2: TRGBQuad): Boolean;
+class function TACLColors.CompareRGB(const Q1, Q2: TACLPixel32): Boolean;
 begin
-  Result := (Q1.rgbBlue = Q2.rgbBlue) and (Q1.rgbGreen = Q2.rgbGreen) and (Q1.rgbRed = Q2.rgbRed);
+  Result := (Q1.B = Q2.B) and (Q1.G = Q2.G) and (Q1.R = Q2.R);
 end;
 
 class function TACLColors.IsDark(Color: TColor): Boolean;
@@ -2704,67 +2925,38 @@ begin
   Result := Lightness(Color) < 0.45;
 end;
 
-class function TACLColors.IsMask(const Q: TRGBQuad): Boolean;
+class function TACLColors.IsMask(const P: TACLPixel32): Boolean;
 begin
-  Result := (Q.rgbGreen = MaskPixel.rgbGreen) and (Q.rgbBlue = MaskPixel.rgbBlue) and (Q.rgbRed = MaskPixel.rgbRed);
-end;
-
-class function TACLColors.ToQuad(A, R, G, B: Byte): TRGBQuad;
-begin
-  Result.rgbBlue := B;
-  Result.rgbGreen := G;
-  Result.rgbRed := R;
-  Result.rgbReserved := A;
-end;
-
-class function TACLColors.ToQuad(AColor: TAlphaColor): TRGBQuad;
-begin
-  Result.rgbBlue := AColor.B;
-  Result.rgbGreen := AColor.G;
-  Result.rgbRed := AColor.R;
-  Result.rgbReserved := AColor.A;
-end;
-
-class function TACLColors.ToQuad(AColor: TColor; AAlpha: Byte = MaxByte): TRGBQuad;
-begin
-  AColor := ColorToRGB(AColor);
-  Result.rgbRed := GetRValue(AColor);
-  Result.rgbGreen := GetGValue(AColor);
-  Result.rgbBlue := GetBValue(AColor);
-  Result.rgbReserved := AAlpha;
-end;
-
-class function TACLColors.ToColor(const Q: TRGBQuad): TColor;
-begin
-  Result := RGB(Q.rgbRed, Q.rgbGreen, Q.rgbBlue);
+  Result := (P.G = MaskPixel.G) and (P.B = MaskPixel.B) and (P.R = MaskPixel.R);
 end;
 
 class procedure TACLColors.AlphaBlend(var D: TColor; S: TColor; AAlpha: Integer = 255);
 var
-  DQ, SQ: TRGBQuad;
+  DQ, SQ: TACLPixel32;
 begin
-  DQ := ToQuad(D);
-  SQ := ToQuad(S);
+  DQ := TACLPixel32.Create(D);
+  SQ := TACLPixel32.Create(S);
   AlphaBlend(DQ, SQ, AAlpha);
-  D := ToColor(DQ);
+  D := DQ.ToColor;
 end;
 
-class procedure TACLColors.AlphaBlend(var D: TRGBQuad; const S: TRGBQuad; AAlpha: Integer = 255; AProcessPerChannelAlpha: Boolean = True);
+class procedure TACLColors.AlphaBlend(var D: TACLPixel32; const S: TACLPixel32;
+  AAlpha: Integer = 255; AProcessPerChannelAlpha: Boolean = True);
 var
   A: Integer;
 begin
   if AProcessPerChannelAlpha then
-    A := PremultiplyTable[S.rgbReserved, AAlpha]
+    A := PremultiplyTable[S.A, AAlpha]
   else
     A := AAlpha;
 
   if (A <> MaxByte) or (AAlpha <> MaxByte) then
   begin
     A := MaxByte - A;
-    D.rgbRed      := PremultiplyTable[D.rgbRed, A]      + PremultiplyTable[S.rgbRed, AAlpha];
-    D.rgbBlue     := PremultiplyTable[D.rgbBlue, A]     + PremultiplyTable[S.rgbBlue, AAlpha];
-    D.rgbGreen    := PremultiplyTable[D.rgbGreen, A]    + PremultiplyTable[S.rgbGreen, AAlpha];
-    D.rgbReserved := PremultiplyTable[D.rgbReserved, A] + PremultiplyTable[S.rgbReserved, AAlpha];
+    D.R := PremultiplyTable[D.R, A] + PremultiplyTable[S.R, AAlpha];
+    D.B := PremultiplyTable[D.B, A] + PremultiplyTable[S.B, AAlpha];
+    D.G := PremultiplyTable[D.G, A] + PremultiplyTable[S.G, AAlpha];
+    D.A := PremultiplyTable[D.A, A] + PremultiplyTable[S.A, AAlpha];
   end
   else
     TAlphaColor(D) := TAlphaColor(S);
@@ -2772,17 +2964,18 @@ end;
 
 class procedure TACLColors.ApplyColorSchema(var AColor: TColor; const AValue: TACLColorSchema);
 var
-  Q: TRGBQuad;
+  P: TACLPixel32;
 begin
   if AValue.IsAssigned then
   begin
-    Q := ToQuad(AColor);
-    ApplyColorSchema(Q, AValue);
-    AColor := ToColor(Q);
+    P := TACLPixel32.Create(AColor);
+    ApplyColorSchema(P, AValue);
+    AColor := P.ToColor;
   end;
 end;
 
-class procedure TACLColors.ApplyColorSchema(AColors: PRGBQuad; ACount: Integer; const AValue: TACLColorSchema);
+class procedure TACLColors.ApplyColorSchema(
+  AColors: PACLPixel32; ACount: Integer; const AValue: TACLColorSchema);
 begin
   if AValue.IsAssigned then
     ChangeHue(AColors, ACount, AValue.Hue, AValue.HueIntensity);
@@ -2802,32 +2995,32 @@ end;
 
 class procedure TACLColors.ApplyColorSchema(var AColor: TAlphaColor; const AValue: TACLColorSchema);
 var
-  Q: TRGBQuad;
+  P: TACLPixel32;
 begin
   if AColor.IsValid and AValue.IsAssigned then
   begin
-    Q := ToQuad(AColor);
-    ApplyColorSchema(Q, AValue);
-    AColor := TAlphaColor.FromColor(Q);
+    P := TACLPixel32.Create(AColor);
+    ApplyColorSchema(P, AValue);
+    AColor := TAlphaColor.FromColor(P);
   end;
 end;
 
-class procedure TACLColors.ApplyColorSchema(var AColor: TRGBQuad; const AValue: TACLColorSchema);
+class procedure TACLColors.ApplyColorSchema(var AColor: TACLPixel32; const AValue: TACLColorSchema);
 begin
   if AValue.IsAssigned then
     ChangeHue(AColor, AValue.Hue, AValue.HueIntensity);
 end;
 
 //#AI: https://github.com/chromium/chromium/blob/master/ui/base/clipboard/clipboard_win.cc#L652
-class function TACLColors.ArePremultiplied(AColors: PRGBQuad; ACount: Integer): Boolean;
+class function TACLColors.ArePremultiplied(AColors: PACLPixel32; ACount: Integer): Boolean;
 begin
   while ACount > 0 do
   begin
     with AColors^ do
     begin
-      if rgbRed   > rgbReserved then Exit(False);
-      if rgbGreen > rgbReserved then Exit(False);
-      if rgbBlue  > rgbReserved then Exit(False);
+      if R > A then Exit(False);
+      if G > A then Exit(False);
+      if B > A then Exit(False);
     end;
     Inc(AColors);
     Dec(ACount);
@@ -2835,58 +3028,58 @@ begin
   Result := True;
 end;
 
-class procedure TACLColors.ChangeColor(Q: PRGBQuad; ACount: Integer; const AColor: TRGBQuad);
+class procedure TACLColors.ChangeColor(P: PACLPixel32; ACount: Integer; const AColor: TACLPixel32);
 var
   Cmax, Cmin: Integer;
   H, S, L: Byte;
 begin
-  RGBtoHSLi(AColor.rgbRed, AColor.rgbGreen, AColor.rgbBlue, H, S, L);
+  RGBtoHSLi(AColor.R, AColor.G, AColor.B, H, S, L);
   while ACount > 0 do
   begin
-    if not IsMask(Q^) then
+    if not IsMask(P^) then
     begin
-      Cmax := Max(Q^.rgbRed, Max(Q^.rgbGreen, Q^.rgbBlue));
-      Cmin := Min(Q^.rgbRed, Min(Q^.rgbGreen, Q^.rgbBlue));
-      HSLtoRGBi(H, S, MulDiv(MaxByte, Cmax + Cmin, 2 * MaxByte), Q^.rgbRed, Q^.rgbGreen, Q^.rgbBlue);
+      Cmax := Max(P^.R, Max(P^.G, P^.B));
+      Cmin := Min(P^.R, Min(P^.G, P^.B));
+      HSLtoRGBi(H, S, MulDiv(MaxByte, Cmax + Cmin, 2 * MaxByte), P^.R, P^.G, P^.B);
     end;
     Dec(ACount);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.ChangeHue(var Q: TRGBQuad; AHue: Byte; AIntensity: Byte = 100);
+class procedure TACLColors.ChangeHue(var P: TACLPixel32; AHue: Byte; AIntensity: Byte = 100);
 var
   H, S, L: Byte;
 begin
-  if not IsMask(Q) then
+  if not IsMask(P) then
   begin
-    TACLColors.RGBtoHSLi(Q.rgbRed, Q.rgbGreen, Q.rgbBlue, H, S, L);
-    TACLColors.HSLtoRGBi(AHue, MulDiv(S, AIntensity, 100), L, Q.rgbRed, Q.rgbGreen, Q.rgbBlue);
+    TACLColors.RGBtoHSLi(P.R, P.G, P.B, H, S, L);
+    TACLColors.HSLtoRGBi(AHue, MulDiv(S, AIntensity, 100), L, P.R, P.G, P.B);
   end;
 end;
 
-class procedure TACLColors.ChangeHue(Q: PRGBQuad; ACount: Integer; AHue: Byte; AIntensity: Byte = 100);
+class procedure TACLColors.ChangeHue(P: PACLPixel32; ACount: Integer; AHue: Byte; AIntensity: Byte = 100);
 begin
   while ACount > 0 do
   begin
-    ChangeHue(Q^, AHue, AIntensity);
+    ChangeHue(P^, AHue, AIntensity);
     Dec(ACount);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.Flip(AColors: PRGBQuadArray; AWidth, AHeight: Integer; AHorizontally, AVertically: Boolean);
+class procedure TACLColors.Flip(AColors: PACLPixel32Array; AWidth, AHeight: Integer; AHorizontally, AVertically: Boolean);
 var
   I: Integer;
-  Q1, Q2, Q3: PRGBQuad;
-  Q4: TRGBQuad;
+  Q1, Q2, Q3: PACLPixel32;
+  Q4: TACLPixel32;
   RS: Integer;
 begin
   if AVertically then
   begin
     Q1 := @AColors^[0];
     Q2 := @AColors^[(AHeight - 1) * AWidth];
-    RS := AWidth * SizeOf(TRGBQuad);
+    RS := AWidth * SizeOf(TACLPixel32);
     Q3 := AllocMem(RS);
     try
       while NativeUInt(Q1) < NativeUInt(Q2) do
@@ -2918,28 +3111,28 @@ begin
     end;
 end;
 
-class procedure TACLColors.Flush(var Q: TRGBQuad);
+class procedure TACLColors.Flush(var P: TACLPixel32);
 begin
-  PCardinal(@Q)^ := 0;
+  PCardinal(@P)^ := 0;
 end;
 
-class procedure TACLColors.Grayscale(Q: PRGBQuad; Count: Integer; IgnoreMask: Boolean = False);
+class procedure TACLColors.Grayscale(P: PACLPixel32; Count: Integer; IgnoreMask: Boolean = False);
 begin
   while Count > 0 do
   begin
-    Grayscale(Q^, IgnoreMask);
+    Grayscale(P^, IgnoreMask);
     Dec(Count);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.Grayscale(var Q: TRGBQuad; IgnoreMask: Boolean = False);
+class procedure TACLColors.Grayscale(var P: TACLPixel32; IgnoreMask: Boolean = False);
 begin
-  if IgnoreMask or not IsMask(Q) then
+  if IgnoreMask or not IsMask(P) then
   begin
-    Q.rgbBlue := PremultiplyTable[Q.rgbBlue, 77] + PremultiplyTable[Q.rgbGreen, 150] + PremultiplyTable[Q.rgbRed, 28];
-    Q.rgbGreen := Q.rgbBlue;
-    Q.rgbRed := Q.rgbBlue;
+    P.B := PremultiplyTable[P.B, 77] + PremultiplyTable[P.G, 150] + PremultiplyTable[P.R, 28];
+    P.G := P.B;
+    P.R := P.B;
   end;
 end;
 
@@ -2955,116 +3148,116 @@ begin
   TACLColors.RGBtoHSL(Color, H, S, Result);
 end;
 
-class procedure TACLColors.MakeDisabled(Q: PRGBQuad; Count: Integer; IgnoreMask: Boolean = False);
+class procedure TACLColors.MakeDisabled(P: PACLPixel32; Count: Integer; IgnoreMask: Boolean = False);
 begin
   while Count > 0 do
   begin
-    MakeDisabled(Q^, IgnoreMask);
+    MakeDisabled(P^, IgnoreMask);
     Dec(Count);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.MakeDisabled(var Q: TRGBQuad; IgnoreMask: Boolean = False);
+class procedure TACLColors.MakeDisabled(var P: TACLPixel32; IgnoreMask: Boolean = False);
 var
   APixel: Byte;
 begin
-  if (Q.rgbReserved > 0) and (IgnoreMask or not IsMask(Q)) then
+  if (P.A > 0) and (IgnoreMask or not IsMask(P)) then
   begin
-    Unpremultiply(Q);
-    Q.rgbReserved := PremultiplyTable[Q.rgbReserved, 128];
-    APixel := PremultiplyTable[Q.rgbBlue, 77] + PremultiplyTable[Q.rgbGreen, 150] + PremultiplyTable[Q.rgbRed, 28];
-    APixel := PremultiplyTable[APixel, Q.rgbReserved];
-    Q.rgbBlue := APixel;
-    Q.rgbGreen := APixel;
-    Q.rgbRed := APixel;
+    Unpremultiply(P);
+    P.A := PremultiplyTable[P.A, 128];
+    APixel := PremultiplyTable[P.B, 77] + PremultiplyTable[P.G, 150] + PremultiplyTable[P.R, 28];
+    APixel := PremultiplyTable[APixel, P.A];
+    P.B := APixel;
+    P.G := APixel;
+    P.R := APixel;
   end;
 end;
 
-class procedure TACLColors.MakeTransparent(Q: PRGBQuad; ACount: Integer; const AColor: TRGBQuad);
+class procedure TACLColors.MakeTransparent(P: PACLPixel32; ACount: Integer; const AColor: TACLPixel32);
 begin
   while ACount > 0 do
   begin
-    if CompareRGB(Q^, AColor) then
-      PDWORD(Q)^ := 0
+    if CompareRGB(P^, AColor) then
+      PDWORD(P)^ := 0
     else
-      Q^.rgbReserved := MaxByte;
+      P^.A := MaxByte;
     Dec(ACount);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.Tint(Q: PRGBQuad; ACount: Integer; const ATintColor: TRGBQuad);
+class procedure TACLColors.Tint(P: PACLPixel32; ACount: Integer; const ATintColor: TACLPixel32);
 var
   AAlpha: Byte;
 begin
-  if ATintColor.rgbReserved = 0 then
+  if ATintColor.A = 0 then
     Exit;
-  if ATintColor.rgbReserved = MaxByte then
+  if ATintColor.A = MaxByte then
   begin
     while ACount > 0 do
     begin
-      Q.rgbBlue := ATintColor.rgbBlue;
-      Q.rgbGreen := ATintColor.rgbGreen;
-      Q.rgbRed := ATintColor.rgbRed;
+      P.B := ATintColor.B;
+      P.G := ATintColor.G;
+      P.R := ATintColor.R;
       Dec(ACount);
-      Inc(Q);
+      Inc(P);
     end;
   end
   else
   begin
-    AAlpha := MaxByte - ATintColor.rgbReserved;
+    AAlpha := MaxByte - ATintColor.A;
     while ACount > 0 do
     begin
-      Q.rgbBlue  := PremultiplyTable[Q.rgbBlue,  AAlpha] + PremultiplyTable[ATintColor.rgbBlue,  ATintColor.rgbReserved];
-      Q.rgbGreen := PremultiplyTable[Q.rgbGreen, AAlpha] + PremultiplyTable[ATintColor.rgbGreen, ATintColor.rgbReserved];
-      Q.rgbRed   := PremultiplyTable[Q.rgbRed,   AAlpha] + PremultiplyTable[ATintColor.rgbRed,   ATintColor.rgbReserved];
+      P.B := PremultiplyTable[P.B, AAlpha] + PremultiplyTable[ATintColor.B, ATintColor.A];
+      P.G := PremultiplyTable[P.G, AAlpha] + PremultiplyTable[ATintColor.G, ATintColor.A];
+      P.R := PremultiplyTable[P.R, AAlpha] + PremultiplyTable[ATintColor.R, ATintColor.A];
       Dec(ACount);
-      Inc(Q);
+      Inc(P);
     end;
   end;
 end;
 
-class procedure TACLColors.Premultiply(var Q: TRGBQuad);
+class procedure TACLColors.Premultiply(var P: TACLPixel32);
 begin
-  if Q.rgbReserved = 0 then
-    DWORD(Q) := 0
+  if P.A = 0 then
+    DWORD(P) := 0
   else
-    if Q.rgbReserved < 255 then
+    if P.A < 255 then
     begin
-      Q.rgbRed   := PremultiplyTable[Q.rgbRed,   Q.rgbReserved];
-      Q.rgbBlue  := PremultiplyTable[Q.rgbBlue,  Q.rgbReserved];
-      Q.rgbGreen := PremultiplyTable[Q.rgbGreen, Q.rgbReserved];
+      P.R := PremultiplyTable[P.R, P.A];
+      P.B := PremultiplyTable[P.B, P.A];
+      P.G := PremultiplyTable[P.G, P.A];
     end;
 end;
 
-class procedure TACLColors.Premultiply(Q: PRGBQuad; ACount: Integer);
+class procedure TACLColors.Premultiply(P: PACLPixel32; ACount: Integer);
 begin
   while ACount > 0 do
   begin
-    Premultiply(Q^);
+    Premultiply(P^);
     Dec(ACount);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
-class procedure TACLColors.Unpremultiply(var Q: TRGBQuad);
+class procedure TACLColors.Unpremultiply(var P: TACLPixel32);
 begin
-  if (Q.rgbReserved > 0) and (Q.rgbReserved < MaxByte) then
+  if (P.A > 0) and (P.A < MaxByte) then
   begin
-    Q.rgbGreen := UnpremultiplyTable[Q.rgbGreen, Q.rgbReserved];
-    Q.rgbBlue  := UnpremultiplyTable[Q.rgbBlue,  Q.rgbReserved];
-    Q.rgbRed   := UnpremultiplyTable[Q.rgbRed,   Q.rgbReserved];
+    P.G := UnpremultiplyTable[P.G, P.A];
+    P.B := UnpremultiplyTable[P.B, P.A];
+    P.R := UnpremultiplyTable[P.R, P.A];
   end;
 end;
 
-class procedure TACLColors.Unpremultiply(Q: PRGBQuad; ACount: Integer);
+class procedure TACLColors.Unpremultiply(P: PACLPixel32; ACount: Integer);
 begin
   while ACount > 0 do
   begin
-    Unpremultiply(Q^);
+    Unpremultiply(P^);
     Dec(ACount);
-    Inc(Q);
+    Inc(P);
   end;
 end;
 

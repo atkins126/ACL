@@ -4,7 +4,7 @@
 {*             Editors Controls              *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2024                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -29,7 +29,7 @@ uses
   // ACL
   ACL.Classes,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
+  ACL.Timers,
   ACL.Graphics.SkinImage,
   ACL.Graphics.SkinImageSet,
   ACL.MUI,
@@ -37,7 +37,8 @@ uses
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.Buttons,
   ACL.UI.Forms,
-  ACL.UI.Resources;
+  ACL.UI.Resources,
+  ACL.Utils.DPIAware;
 
 type
   TACLCustomSpinEdit = class;
@@ -304,7 +305,7 @@ var
   ASize: TSize;
 begin
   ASize := StyleButton.Texture.FrameSize;
-  ASize := acSizeScale(ASize, acRectHeight(R), ASize.cy);
+  ASize.Scale(R.Height, ASize.cy);
   FButtonLeft.IsEnabled := Enabled;
   FButtonLeft.Calculate(Bounds(0, 0, ASize.cx, ASize.cy));
   FButtonRight.IsEnabled := Enabled;
@@ -319,9 +320,13 @@ end;
 
 function TACLCustomSpinEdit.CalculateEditorPosition: TRect;
 begin
-  Result := acRectInflate(ClientRect, 0, -1);
+  Result := ClientRect;
   Result.Left := ButtonLeft.Bounds.Right;
   Result.Right := ButtonRight.Bounds.Left;
+  if IsWin11OrLater then
+    Result.Inflate(0, -dpiApply(acTextIndent, FCurrentPPI))
+  else
+    Result.Inflate(0, -1);
 end;
 
 function TACLCustomSpinEdit.CanOpenEditor: Boolean;

@@ -1112,7 +1112,11 @@ end;
 constructor TACLXMLDocument.CreateEx(const AFileName: UnicodeString);
 begin
   Create;
-  LoadFromFile(AFileName);
+  try
+    LoadFromFile(AFileName);
+  except
+    Clear;
+  end;
 end;
 
 constructor TACLXMLDocument.CreateEx(const AStream: TStream);
@@ -1573,8 +1577,8 @@ end;
 procedure TACLTextXMLBuilder.Build(ADocument: TACLXMLDocument);
 begin
   FWriter.WriteStartDocument;
-  if ADocument.Count > 0 then
-    WriteNode(ADocument[0]);
+  for var I := 0 to ADocument.Count - 1 do
+    WriteNode(ADocument[I]);
   FWriter.WriteEndDocument;
 end;
 

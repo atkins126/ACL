@@ -4,7 +4,7 @@
 {*             Editors Controls              *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2024                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -179,7 +179,8 @@ type
 
   TACLCustomEdit = class(TACLCustomControl,
     IACLButtonOwner,
-    IACLButtonEdit)
+    IACLButtonEdit,
+    IACLCursorProvider)
   protected const
     ButtonsIndent = 1;
   strict private
@@ -213,7 +214,6 @@ type
     FEditor: TWinControl;
 
     function CreateStyleButton: TACLStyleButton; virtual;
-    function GetCursor(const P: TPoint): TCursor; override;
     procedure AssignTextDrawParams(ACanvas: TCanvas); virtual;
     procedure Changed; virtual;
     procedure CreateHandle; override;
@@ -226,7 +226,6 @@ type
     procedure Paint; override;
     procedure Resize; override;
     procedure SetDefaultSize; override;
-    procedure SetFocusOnClick; override;
     procedure SetFocusToInnerEdit; virtual;
     procedure SetTargetDPI(AValue: Integer); override;
     procedure UpdateBordersColor;
@@ -271,14 +270,18 @@ type
     procedure IACLButtonEdit.ButtonOwnerRecalculate = FullRefresh;
     function ButtonsGetEnabled: Boolean;
     function ButtonsGetOwner: TComponent;
-    //
+
+    // IACLCursorProvider
+    function GetCursor(const P: TPoint): TCursor; virtual;
+
+    // Properties
     property AutoHeight: Boolean read FAutoHeight write SetAutoHeight default True;
     property Borders: Boolean read FBorders write SetBorders default True;
     property Buttons: TACLEditButtons read FButtons write SetButtons;
     property ButtonsImages: TCustomImageList read FButtonsImages write SetButtonsImages;
     property Style: TACLStyleEdit read FStyle write SetStyle;
     property StyleButton: TACLStyleButton read FStyleButton write SetStyleButton;
-    //
+    // Events
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
   public
     constructor Create(AOwner: TComponent); override;
@@ -446,7 +449,7 @@ begin
     acDrawFrame(ACanvas.Handle, R, ColorBorder.AsColor);
     if AFocused then
     begin
-      AFocusRect := acRectSetBottom(R, R.Bottom, Scale(acTextIndent));
+      AFocusRect := R.Split(srBottom, Scale(acTextIndent));
       acFillRect(ACanvas.Handle, AFocusRect, ColorBorderFocused.AsColor);
       acExcludeFromClipRegion(ACanvas.Handle, AFocusRect);
     end;
@@ -541,7 +544,7 @@ begin
   if ViewInfo <> nil then
   begin
     ViewInfo.IsEnabled := Enabled and ((Collection.ButtonEdit = nil) or Collection.ButtonEdit.ButtonsGetEnabled);
-    ViewInfo.Calculate(acRectSetLeft(R, IfThen(Visible, dpiApply(Width, ViewInfo.CurrentDpi))));
+    ViewInfo.Calculate(R.Split(srRight, IfThen(Visible, dpiApply(Width, ViewInfo.CurrentDpi))));
     R.Right := ViewInfo.Bounds.Left;
   end;
 end;
@@ -800,10 +803,10 @@ end;
 procedure TACLCustomEdit.Calculate(R: TRect);
 begin
   if Borders then
-    R := acRectInflate(R, -EditorOuterBorderSize);
+    R.Inflate(-EditorOuterBorderSize);
   CalculateButtons(R);
   if Borders then
-    R := acRectInflate(R, -EditorInnerBorderSize);
+    R.Inflate(-EditorInnerBorderSize);
   CalculateContent(R);
   EditorUpdateBounds;
 end;
@@ -820,7 +823,8 @@ var
   ARect: TRect;
 begin
   AIndent := dpiApply(ButtonsIndent, FCurrentPPI);
-  ARect := acRectInflate(R, -AIndent);
+  ARect := R;
+  ARect.Inflate(-AIndent);
   for AIndex := Buttons.Count - 1 downto 0 do
   begin
     Buttons.Items[AIndex].Calculate(ARect);
@@ -836,7 +840,8 @@ end;
 
 function TACLCustomEdit.CalculateEditorPosition: TRect;
 begin
-  Result := acRectInflate(ClientRect, -EditorBorderSize);
+  Result := ClientRect;
+  Result.Inflate(-EditorBorderSize);
 end;
 
 function TACLCustomEdit.CalculateTextHeight: Integer;
@@ -846,7 +851,7 @@ end;
 
 procedure TACLCustomEdit.Changed;
 begin
-  if not IsLoading then
+  if not (csLoading in ComponentState) then
     DoChange;
   Invalidate;
 end;
@@ -903,7 +908,7 @@ end;
 
 function TACLCustomEdit.CanOpenEditor: Boolean;
 begin
-  Result := not IsDesigning;
+  Result := not (csDesigning in ComponentState);
 end;
 
 function TACLCustomEdit.CreateEditor: TWinControl;
@@ -921,12 +926,6 @@ begin
   SetBounds(Left, Top, 121, 21);
 end;
 
-procedure TACLCustomEdit.SetFocusOnClick;
-begin
-  if not IsChild(Handle, GetFocus) then
-    inherited;
-end;
-
 procedure TACLCustomEdit.SetFocusToInnerEdit;
 begin
   if FEditor <> nil then
@@ -937,7 +936,7 @@ procedure TACLCustomEdit.DrawEditorBackground(ACanvas: TCanvas; const R: TRect);
 begin
   acFillRect(ACanvas.Handle, R, Style.ColorsContent[Enabled]);
   if Borders then
-    Style.DrawBorders(ACanvas, R, not IsDesigning and Focused);
+    Style.DrawBorders(ACanvas, R, Focused and not (csDesigning in ComponentState));
 end;
 
 procedure TACLCustomEdit.DrawContent(ACanvas: TCanvas);
@@ -976,17 +975,17 @@ end;
 
 procedure TACLCustomEdit.EditorUpdateBounds;
 var
-  R: TRect;
+  LTemp: TRect;
 begin
   if HasEditor then
   begin
-    R := CalculateEditorPosition;
-    FEditor.BoundsRect := R;
-    if FEditor.Height > acRectHeight(R) then
+    LTemp := CalculateEditorPosition;
+    FEditor.BoundsRect := LTemp;
+    if FEditor.Height > LTemp.Height then
     begin
-      FEditor.BoundsRect := acRectCenterVertically(R, FEditor.Height);
+      FEditor.BoundsRect := LTemp.CenterTo(LTemp.Width, FEditor.Height);
       if HandleAllocated then
-        SetWindowRgn(FEditor.Handle, CreateRectRgnIndirect(acMapRect(Handle, FEditor.Handle, R)), False);
+        SetWindowRgn(FEditor.Handle, CreateRectRgnIndirect(acMapRect(Handle, FEditor.Handle, LTemp)), False);
     end
     else
       if HandleAllocated then
@@ -1050,7 +1049,7 @@ end;
 
 procedure TACLCustomEdit.Recalculate;
 begin
-  if not IsDestroying then
+  if not (csDestroying in ComponentState) then
     Calculate(ClientRect);
 end;
 
@@ -1115,7 +1114,7 @@ begin
   if Buttons.Find(P, AItem) and AItem.Enabled then
     Result := crHandPoint
   else
-    Result := inherited GetCursor(P);
+    Result := Cursor;
 end;
 
 procedure TACLCustomEdit.GetTabOrderList(List: TList);
@@ -1192,7 +1191,7 @@ end;
 
 procedure TACLCustomEdit.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
 begin
-  if AutoHeight and not IsLoading then
+  if AutoHeight and not (csLoading in ComponentState) then
     CalculateAutoHeight(AHeight);
   inherited SetBounds(ALeft, ATop, AWidth, AHeight);
 end;
@@ -1392,7 +1391,7 @@ end;
 
 procedure TACLInnerEdit.WMNCHitTest(var Message: TWMNCHitTest);
 begin
-  if Container.IsDesigning then
+  if csDesigning in Container.ComponentState then
     Message.Result := HTTRANSPARENT
   else
     inherited;

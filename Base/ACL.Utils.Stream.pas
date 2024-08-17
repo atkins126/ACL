@@ -218,6 +218,13 @@ type
     procedure EndWriteChunk(var AMarkerPosition: Int64);
   end;
 
+  { TACLMemoryStream }
+
+  TACLMemoryStream = class(TMemoryStream)
+  public
+    property Capacity;
+  end;
+
   { TACLMemoryStreamHelper }
 
   TACLMemoryStreamHelper = class helper for TMemoryStream
@@ -228,7 +235,7 @@ type
 
   { TACLAnsiStringStream }
 
-  TACLAnsiStringStream = class(TMemoryStream)
+  TACLAnsiStringStream = class(TACLMemoryStream)
   strict private const
     MemoryDelta = $2000; { Must be a power of 2 }
   strict private
@@ -241,27 +248,9 @@ type
   {$ENDIF}
   public
     constructor Create(const AData: AnsiString);
-    //
+    //# Properties
     property Data: AnsiString read FData;
   end;
-
-{$IFDEF MSWINDOWS}
-
-  { TACLHGlobalReadOnlyStream }
-
-  TACLHGlobalReadOnlyStream = class(TCustomMemoryStream)
-  strict private
-    FData: THandle;
-    FDataOwnership: TStreamOwnership;
-  protected
-    procedure SetSize(const NewSize: Int64); override;
-  public
-    constructor Create(AData: THandle; ADataOwnership: TStreamOwnership = soReference);
-    destructor Destroy; override;
-    function Write(const Buffer; Count: LongInt): LongInt; override;
-  end;
-
-{$ENDIF}
 
 // Equals
 function StreamEquals(const AStream1, AStream2: TStream): Boolean;
@@ -282,19 +271,10 @@ function StreamLoadFromFile(AStream: TStream; const AFileName: UnicodeString): B
 function StreamResourceExists(AInstance: HINST; const AResourceName: UnicodeString; AResourceType: PWideChar): Boolean;
 function StreamSaveToFile(const AStream: IACLStreamContainer; const AFileName: UnicodeString): Boolean; overload;
 function StreamSaveToFile(const AStream: TStream; const AFileName: UnicodeString): Boolean; overload;
-
-// Load/Save String
-function acLoadString(AStream: TStream; ADefaultEncoding: TEncoding; out AEncoding: TEncoding): UnicodeString; overload;
-function acLoadString(AStream: TStream; AEncoding: TEncoding = nil): UnicodeString; overload;
-function acLoadString(const AFileName: UnicodeString; AEncoding: TEncoding = nil): UnicodeString; overload;
-function acSaveString(AStream: TStream; const AString: UnicodeString; AEncoding: TEncoding = nil; AWriteBOM: Boolean = True): Boolean; overload;
-function acSaveString(const AFileName, AString: UnicodeString; AEncoding: TEncoding = nil; AWriteBOM: Boolean = True): Boolean; overload;
-function acSaveString(const AFileName: UnicodeString; const AString: AnsiString): Boolean; overload;
 implementation
 
 uses
   System.Math,
-  System.RTLConsts,
   // ACL
   ACL.Math,
   ACL.FastCode,
@@ -505,96 +485,6 @@ begin
     StreamCopy(AFileStream, AStream, 0, AStream.Size);
   finally
     AFileStream.Free;
-  end;
-end;
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Load/Save String
-// ---------------------------------------------------------------------------------------------------------------------
-
-function acSaveString(const AFileName: UnicodeString; const AString: AnsiString): Boolean;
-var
-  AStream: TStream;
-begin
-  Result := StreamCreateWriter(AFileName, AStream);
-  if Result then
-  try
-    AStream.WriteStringA(AString);
-  finally
-    AStream.Free;
-  end;
-end;
-
-function acLoadString(AStream: TStream; ADefaultEncoding: TEncoding; out AEncoding: TEncoding): UnicodeString;
-var
-  ABytes: TBytes;
-  ASize: Cardinal;
-begin
-  AEncoding := acDetectEncoding(AStream, ADefaultEncoding);
-  ASize := AStream.Size - AStream.Position;
-  if ASize <= 0 then
-    Result := ''
-  else
-    if AEncoding = TEncoding.Unicode then
-    begin
-      ASize := ASize div SizeOf(WideChar);
-      SetLength(Result, ASize);
-      AStream.ReadBuffer(Result[1], ASize * SizeOf(WideChar));
-    end
-    else
-    begin
-      SetLength(ABytes, ASize);
-      AStream.ReadBuffer(ABytes[0], ASize);
-      try
-        Result := AEncoding.GetString(ABytes);
-      except
-        Result := TACLEncodings.Default.GetString(ABytes);
-      end;
-    end;
-end;
-
-function acLoadString(AStream: TStream; AEncoding: TEncoding = nil): UnicodeString;
-var
-  X: TEncoding;
-begin
-  Result := acLoadString(AStream, AEncoding, X);
-end;
-
-function acLoadString(const AFileName: UnicodeString; AEncoding: TEncoding = nil): UnicodeString;
-var
-  AStream: TStream;
-begin
-  AStream := StreamCreateReader(AFileName);
-  if AStream <> nil then
-  try
-    Result := acLoadString(AStream, AEncoding);
-  finally
-    AStream.Free;
-  end
-  else
-    Result := '';
-end;
-
-function acSaveString(AStream: TStream; const AString: UnicodeString;
-  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True): Boolean;
-begin
-  Result := True;
-  if AWriteBOM then
-    AStream.WriteBOM(AEncoding);
-  AStream.WriteString(AString, AEncoding);
-end;
-
-function acSaveString(const AFileName, AString: UnicodeString;
-  AEncoding: TEncoding = nil; AWriteBOM: Boolean = True): Boolean;
-var
-  AStream: TStream;
-begin
-  Result := StreamCreateWriter(AFileName, AStream);
-  if Result then
-  try
-    Result := acSaveString(AStream, AString, AEncoding, AWriteBOM);
-  finally
-    AStream.Free;
   end;
 end;
 
@@ -1606,36 +1496,5 @@ begin
     SetLength(FData, ANewCapacity);
   Result := PAnsiChar(FData);
 end;
-
-{$IFDEF MSWINDOWS}
-
-{ TACLHGlobalReadOnlyStream }
-
-constructor TACLHGlobalReadOnlyStream.Create(AData: THandle; ADataOwnership: TStreamOwnership);
-begin
-  FData := AData;
-  FDataOwnership := ADataOwnership;
-  SetPointer(GlobalLock(AData), GlobalSize(AData));
-end;
-
-destructor TACLHGlobalReadOnlyStream.Destroy;
-begin
-  GlobalUnlock(FData);
-  if FDataOwnership = soOwned then
-    GlobalFree(FData);
-  inherited;
-end;
-
-procedure TACLHGlobalReadOnlyStream.SetSize(const NewSize: Int64);
-begin
-  raise EACLCannotModifyReadOnlyStream.Create;
-end;
-
-function TACLHGlobalReadOnlyStream.Write(const Buffer; Count: Integer): Integer;
-begin
-  raise EACLCannotModifyReadOnlyStream.Create;
-end;
-
-{$ENDIF}
 
 end.

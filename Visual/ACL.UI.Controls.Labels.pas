@@ -38,7 +38,6 @@ uses
   ACL.Graphics.SkinImageSet,
   ACL.Math,
   ACL.UI.Controls.BaseControls,
-  ACL.UI.Forms,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
@@ -101,8 +100,8 @@ type
     FTransparent: Boolean;
     FURL: UnicodeString;
 
-    function GetIsURLMode: Boolean;
     function GetTextColor: TColor;
+    function IsCursorStored: Boolean;
     procedure SetAlignment(AValue: TAlignment);
     procedure SetAlignmentVert(AValue: TVerticalAlignment);
     procedure SetStyle(AValue: TACLStyleLabel);
@@ -118,7 +117,6 @@ type
     function CanAutoSize(var ANewWidth, ANewHeight: Integer): Boolean; override;
     function CreateStyle: TACLStyleLabel; virtual;
     function CreateSubControlOptions: TACLLabelSubControlOptions; virtual;
-    function GetCursor(const P: TPoint): TCursor; override;
     function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     function MeasureSize(AWidth: Integer = 0): TSize; virtual;
     //
@@ -132,14 +130,15 @@ type
     procedure Resize; override;
     procedure SetDefaultSize; override;
     procedure SetTargetDPI(AValue: Integer); override;
-    //
+
+    //# Drawing
     procedure DrawBackground(ACanvas: TCanvas); virtual;
     procedure DrawLabelLine(ACanvas: TCanvas); virtual;
     procedure DrawText(ACanvas: TCanvas; const R: TRect; AColor: TColor); virtual;
     procedure DrawTextEffects(ACanvas: TCanvas; var R: TRect); virtual;
     procedure Paint; override;
-    //
-    property IsURLMode: Boolean read GetIsURLMode;
+
+    //# Properties
     property TextColor: TColor read GetTextColor;
   public
     constructor Create(AOwner: TComponent); override;
@@ -153,19 +152,19 @@ type
     property SubControl: TACLLabelSubControlOptions read FSubControl write SetSubControl;
     property Transparent: Boolean read FTransparent write SetTransparent default True;
     property URL: UnicodeString read FURL write SetUrl; // before Font and Cursor
-    //
+    //# Inherited
     property Align;
     property Anchors;
     property AutoSize;
     property Caption;
-    property Cursor;
+    property Cursor stored IsCursorStored;
     property Enabled;
     property Font;
     property Height;
     property ParentFont;
     property Visible;
     property Width;
-    //
+    //# Events
     property OnClick;
     property OnDblClick;
     property OnMouseDown;
@@ -220,7 +219,7 @@ var
 begin
   ASaveIndex := SaveDC(ACanvas.Handle);
   try
-    acExcludeFromClipRegion(ACanvas.Handle, acRectInflate(ATextRect, 4, 0));
+    acExcludeFromClipRegion(ACanvas.Handle, ATextRect.InflateTo(4, 0));
     acDrawComplexFrame(ACanvas.Handle, ALineRect, AColor1, AColor2, [mTop]);
   finally
     RestoreDC(ACanvas.Handle, ASaveIndex);
@@ -331,7 +330,7 @@ begin
     SubControl.BeforeAutoSize(ANewWidth, ANewHeight);
 
     if Style.ShowLine then
-      ASize := acSize(ANewWidth, MeasureSize.cy)
+      ASize := TSize.Create(ANewWidth, MeasureSize.cy)
     else if Style.WordWrap then
       ASize := MeasureSize(ANewWidth)
     else
@@ -355,47 +354,45 @@ end;
 
 procedure TACLLabel.Calculate(const R: TRect);
 var
-  ATextSize: TSize;
+  LTextSize: TSize;
 begin
   FTextRect := R;
   MeasureCanvas.Font := Font;
   if Style.WordWrap then
-    ATextSize := acTextSizeMultiline(MeasureCanvas, Caption, FTextRect.Width)
+    LTextSize := acTextSizeMultiline(MeasureCanvas, Caption, FTextRect.Width)
   else
-    ATextSize := acTextSize(MeasureCanvas, Caption);
+    LTextSize := acTextSize(MeasureCanvas, Caption);
 
   if Style.Effect <> sleNone then
   begin
-    Inc(ATextSize.cx, 2 * Abs(Style.EffectSize));
-    Inc(ATextSize.cy, 2 * Abs(Style.EffectSize));
+    Inc(LTextSize.cx, 2 * Abs(Style.EffectSize));
+    Inc(LTextSize.cy, 2 * Abs(Style.EffectSize));
   end;
 
+  FTextRect := R;
   case AlignmentVert of
     taAlignTop:
-      FTextRect := acRectSetHeight(R, ATextSize.cy);
+      FTextRect.Height := LTextSize.cy;
     taAlignBottom:
-      FTextRect := acRectSetBottom(R, R.Bottom, ATextSize.cy);
+      FTextRect.Top := FTextRect.Bottom - LTextSize.cy;
   else
-    FTextRect := acRectCenterVertically(R, ATextSize.cy);
+    FTextRect.CenterVert(LTextSize.cy);
   end;
 
   case Alignment of
     taLeftJustify:
-      FTextRect.Right := FTextRect.Left + ATextSize.cx;
+      FTextRect.Right := FTextRect.Left + LTextSize.cx;
     taRightJustify:
-      FTextRect.Left := FTextRect.Right - ATextSize.cx;
+      FTextRect.Left := FTextRect.Right - LTextSize.cx;
     taCenter:
-      begin
-        FTextRect.Left := (FTextRect.Left + FTextRect.Right - ATextSize.cx) div 2;
-        FTextRect.Right := FTextRect.Left + ATextSize.cx;
-      end;
+      FTextRect.CenterHorz(LTextSize.cx);
   end;
 
   IntersectRect(FTextRect, FTextRect, ClientRect);
   FLineRect := FTextRect;
   if Odd(FLineRect.Height) then
     Inc(FLineRect.Bottom);
-  FLineRect := acRectCenterVertically(FLineRect, 2);
+  FLineRect.CenterVert(2);
   FLineRect.Left := R.Left;
   FLineRect.Right := R.Right;
 end;
@@ -416,7 +413,7 @@ begin
   if (Action <> nil) or Assigned(OnClick) then
     inherited Click
   else
-    if IsURLMode then
+    if URL <> '' then
       ShellExecute(URL)
     else
       if not SubControl.TrySetFocus then
@@ -431,13 +428,6 @@ end;
 function TACLLabel.CreateSubControlOptions: TACLLabelSubControlOptions;
 begin
   Result := TACLLabelSubControlOptions.Create(Self);
-end;
-
-function TACLLabel.GetCursor(const P: TPoint): TCursor;
-begin
-  Result := inherited GetCursor(P);
-  if (Result = crDefault) and IsURLMode then
-    Result := crHandPoint;
 end;
 
 function TACLLabel.GetBackgroundStyle: TACLControlBackgroundStyle;
@@ -476,21 +466,15 @@ end;
 procedure TACLLabel.MouseEnter;
 begin
   inherited MouseEnter;
-  if IsURLMode then
-  begin
-    UpdateCursor;
+  if URL <> '' then
     Invalidate;
-  end;
 end;
 
 procedure TACLLabel.MouseLeave;
 begin
   inherited MouseLeave;
-  if IsURLMode then
-  begin
-    UpdateCursor;
+  if URL <> '' then
     Invalidate;
-  end;
 end;
 
 procedure TACLLabel.Notification(AComponent: TComponent; AOperation: TOperation);
@@ -524,6 +508,8 @@ begin
     ACanvas.Font := Font;
     ACanvas.Font.Color := AColor;
     ACanvas.Brush.Style := bsClear;
+    if URL <> '' then
+      ACanvas.Font.Style := ACanvas.Font.Style + [fsUnderline];
     if Style.WordWrap then
       acTextDraw(ACanvas, Caption, R, taLeftJustify, taAlignTop, False, False, True)
     else
@@ -537,7 +523,7 @@ procedure TACLLabel.DrawTextEffects(ACanvas: TCanvas; var R: TRect);
   begin
     case Style.Effect of
       sleContour:
-        R := acRectInflate(R, -FastAbs(Style.EffectSize));
+        R.Inflate(-FastAbs(Style.EffectSize));
       sleShadow:
         if Style.EffectSize < 0 then
         begin
@@ -553,12 +539,14 @@ procedure TACLLabel.DrawTextEffects(ACanvas: TCanvas; var R: TRect);
   end;
 
   procedure DrawLabelText(dX, dY: Integer);
+  var
+    LRect: TRect;
   begin
-    DrawText(ACanvas, acRectOffset(R, dX, dY), Style.ColorShadow.AsColor);
+    LRect := R;
+    LRect.Offset(dX, dY);
+    DrawText(ACanvas, LRect, Style.ColorShadow.AsColor);
   end;
 
-var
-  I: Integer;
 begin
   if Style.EffectSize <> 0 then
   begin
@@ -568,7 +556,7 @@ begin
         DrawLabelText(Style.EffectSize, Style.EffectSize);
 
       sleContour:
-        for I := 1 to Abs(Style.EffectSize) do
+        for var I := 1 to Abs(Style.EffectSize) do
         begin
           DrawLabelText( I,  I);
           DrawLabelText( I, -I);
@@ -593,21 +581,24 @@ begin
     DrawLabelLine(Canvas);
 end;
 
-function TACLLabel.GetIsURLMode: Boolean;
-begin
-  Result := (URL <> '') and not IsDesigning;
-end;
-
 function TACLLabel.GetTextColor: TColor;
 begin
   Result := Font.Color;
   if (Result = clWindowText) or (Result = clDefault) then
   begin
-    if IsURLMode and MouseInControl then
+    if (URL <> '') and MouseInControl and not (csDesigning in ComponentState) then
       Result := Style.ColorTextHyperlink.AsColor
     else
       Result := Style.TextColor[Enabled];
   end;
+end;
+
+function TACLLabel.IsCursorStored: Boolean;
+begin
+  if URL <> '' then
+    Result := Cursor <> crHandPoint
+  else
+    Result := Cursor <> crDefault;
 end;
 
 procedure TACLLabel.SetAlignment(AValue: TAlignment);
@@ -660,13 +651,14 @@ procedure TACLLabel.SetUrl(const AValue: UnicodeString);
 begin
   if AValue <> FURL then
   begin
+    if not IsCursorStored then
+    begin
+      if AValue <> '' then
+        Cursor := crHandPoint
+      else
+        Cursor := crDefault;
+    end;
     FURL := AValue;
-
-    if URL <> '' then
-      Font.Style := Font.Style + [fsUnderline]
-    else
-      Font.Style := Font.Style - [fsUnderline];
-
     Calculate;
     Invalidate;
   end;
@@ -677,13 +669,13 @@ begin
   inherited;
   Calculate;
   if AutoSize then
-    AdjustSize
+    AdjustSize;
 end;
 
 procedure TACLLabel.CMHitTest(var Message: TCMHitTest);
 begin
   inherited;
-  if IsURLMode then
+  if URL <> '' then
     Message.Result := Ord(PtInRect(FTextRect, SmallPointToPoint(Message.Pos)));
 end;
 
@@ -734,12 +726,13 @@ end;
 
 procedure TACLValidationLabel.DrawBackground(ACanvas: TCanvas);
 var
-  AGlyphRect: TRect;
+  LGlyphRect: TRect;
 begin
   inherited DrawBackground(ACanvas);
-  AGlyphRect := acRectSetWidth(ClientRect, Style.Icons.FrameWidth);
-  AGlyphRect := acRectCenterVertically(AGlyphRect, Style.Icons.FrameHeight);
-  Style.Icons.Draw(ACanvas.Handle, AGlyphRect, Ord(Icon));
+  LGlyphRect := ClientRect;
+  LGlyphRect.CenterVert(Style.Icons.FrameHeight);
+  LGlyphRect.Width := Style.Icons.FrameWidth;
+  Style.Icons.Draw(ACanvas.Handle, LGlyphRect, Ord(Icon));
 end;
 
 function TACLValidationLabel.GetStyle: TACLStyleValidationLabel;

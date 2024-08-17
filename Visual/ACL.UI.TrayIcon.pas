@@ -33,7 +33,7 @@ uses
   // ACL
   ACL.Classes,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
+  ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
   ACL.ObjectLinks,
@@ -279,7 +279,7 @@ end;
 
 function TACLTrayIcon.IsMouseAtControl: Boolean;
 begin
-  Result := acPointIsEqual(FLastMousePos, MouseCursorPos);
+  Result := FLastMousePos = MouseCursorPos;
 end;
 
 procedure TACLTrayIcon.MouseEnter;

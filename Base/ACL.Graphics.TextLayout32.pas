@@ -4,7 +4,7 @@
 {* Formatted Text with alpha channel support *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -232,7 +232,7 @@ var
 
 function CheckCanDraw(DC: HDC; const R: TRect; AFont: TACLFont): Boolean; overload; inline;
 begin
-  Result := not acRectIsEmpty(R) and RectVisible(DC, R) and
+  Result := acRectVisible(DC, R) and
     ((AFont.ColorAlpha > 0) and (AFont.Color <> clNone) or AFont.Shadow.Assigned);
 end;
 
@@ -257,12 +257,12 @@ begin
   end;
 end;
 
-procedure Text32RecoverAlpha(ALayer: TACLBitmapLayer; const ATextColor: TRGBQuad);
+procedure Text32RecoverAlpha(ALayer: TACLBitmapLayer; const ATextColor: TACLPixel32);
 const
   K = 700; // [1..5000]
 var
   AAlpha: Integer;
-  Q: PRGBQuad;
+  P: PACLPixel32;
 begin
   if not FGammaTableInitialized then
   begin
@@ -271,25 +271,22 @@ begin
     FGammaTableInitialized := True;
   end;
 
-  Q := PRGBQuad(ALayer.Colors);
+  P := PACLPixel32(ALayer.Colors);
   for var I := 1 to ALayer.ColorCount do
   begin
-    if PDWORD(Q)^ and $00FFFFFF <> 0 then
+    if PDWORD(P)^ and TACLPixel32.EssenceMask <> 0 then
     begin
-      AAlpha := 128 +
-        FGammaTable[Q^.rgbRed] * 77 +
-        FGammaTable[Q^.rgbGreen] * 151 +
-        FGammaTable[Q^.rgbBlue] * 28;
-      AAlpha := AAlpha * ATextColor.rgbReserved shr 16;
-      Q^.rgbBlue := TACLColors.PremultiplyTable[ATextColor.rgbBlue, AAlpha];
-      Q^.rgbGreen := TACLColors.PremultiplyTable[ATextColor.rgbGreen, AAlpha];
-      Q^.rgbRed := TACLColors.PremultiplyTable[ATextColor.rgbRed, AAlpha];
-      Q^.rgbReserved := AAlpha;
+      AAlpha := 128 + FGammaTable[P^.R] * 77 + FGammaTable[P^.G] * 151 + FGammaTable[P^.B] * 28;
+      AAlpha := AAlpha * ATextColor.A shr 16;
+      P^.B := TACLColors.PremultiplyTable[ATextColor.B, AAlpha];
+      P^.G := TACLColors.PremultiplyTable[ATextColor.G, AAlpha];
+      P^.R := TACLColors.PremultiplyTable[ATextColor.R, AAlpha];
+      P^.A := AAlpha;
     end
     else
-      Q^.rgbReserved := 0;
+      P^.A := 0;
 
-    Inc(Q);
+    Inc(P);
   end;
 end;
 
@@ -317,8 +314,8 @@ var
   APoint: TPoint;
   I, J, W, H: Integer;
 begin
-  W := acRectWidth(R);
-  H := acRectHeight(R);
+  W := R.Width;
+  H := R.Height;
   if (W <= 0) or (H <= 0) then
     Exit;
 
@@ -353,19 +350,19 @@ begin
       for I := -AFont.Shadow.Size to AFont.Shadow.Size do
       for J := -AFont.Shadow.Size to AFont.Shadow.Size do
         if I <> J then
-          Text32Output(FTextBuffer.Handle, acPointOffset(ATextOffset, I, J));
+          Text32Output(FTextBuffer.Handle, ATextOffset + Point(I, J));
     end
     else
     begin
       APoint := ATextOffset;
       for I := 1 to AFont.Shadow.Size do
       begin
-        APoint := acPointOffset(APoint, MapTextOffsets[AFont.Shadow.Direction]);
+        APoint := APoint + MapTextOffsets[AFont.Shadow.Direction];
         Text32Output(FTextBuffer.Handle, APoint);
       end;
     end;
     Text32ApplyBlur(FTextBuffer, AFont.Shadow);
-    Text32RecoverAlpha(FTextBuffer, TACLColors.ToQuad(AFont.Shadow.Color));
+    Text32RecoverAlpha(FTextBuffer, TACLPixel32.Create(AFont.Shadow.Color));
     acAlphaBlend(DC, FTextBuffer.Handle, R, FTextBuffer.ClientRect);
   end;
 
@@ -376,7 +373,7 @@ begin
   begin
     FTextBuffer.Reset;
     Text32Output(FTextBuffer.Handle, ATextOffset);
-    Text32RecoverAlpha(FTextBuffer, TACLColors.ToQuad(ATextColor));
+    Text32RecoverAlpha(FTextBuffer, TACLPixel32.Create(ATextColor));
     acAlphaBlend(DC, FTextBuffer.Handle, R, FTextBuffer.ClientRect);
   end;
 end;
@@ -384,18 +381,22 @@ end;
 procedure DrawText32(DC: HDC; const R: TRect; AText: UnicodeString; AFont: TACLFont;
   AAlignment: TAlignment; AVertAlignment: TVerticalAlignment; AEndEllipsis: Boolean);
 var
-  ATextExtends: TRect;
-  ATextOffset: TPoint;
-  ATextSize: TSize;
+  LTextExtends: TRect;
+  LTextOffset: TPoint;
+  LTextSize: TSize;
 begin
   if CheckCanDraw(DC, R, AText, AFont) then
   begin
     MeasureCanvas.Font := AFont;
-    ATextExtends := AFont.TextExtends;
-    acTextPrepare(MeasureCanvas, R, AEndEllipsis,
-      AAlignment, AVertAlignment, AText, ATextSize, ATextOffset, ATextExtends);
+    LTextExtends := AFont.TextExtends;
+    LTextSize := acTextSize(MeasureCanvas, AText);
+    if AEndEllipsis then
+      acTextEllipsize(MeasureCanvas, AText, LTextSize, R.Width - LTextExtends.MarginsWidth);
+    Inc(LTextSize.cy, LTextExtends.MarginsHeight);
+    Inc(LTextSize.cx, LTextExtends.MarginsWidth);
+    LTextOffset := acTextAlign(R, LTextSize, AAlignment, AVertAlignment);
     DrawText32Core(DC, PWideChar(AText), Length(AText), nil, AFont,
-      Bounds(ATextOffset.X, ATextOffset.Y, ATextSize.cx, ATextSize.cy), ATextExtends.TopLeft, 0);
+      TRect.Create(LTextOffset, LTextSize), LTextExtends.TopLeft, 0);
   end;
 end;
 
@@ -405,7 +406,7 @@ begin
   if CheckCanDraw(DC, R, AText, AFont) then
   begin
     DrawText32Core(DC, PWideChar(AText), Length(AText), nil, AFont, R,
-      acPointOffset(ATextOffset, AFont.TextExtends.TopLeft), ADuplicateOffset);
+      ATextOffset + AFont.TextExtends.TopLeft, ADuplicateOffset);
   end;
 end;
 
@@ -459,11 +460,11 @@ var
   AExtends: TRect;
 begin
   Result := S;
-  if not acSizeIsEmpty(Result) then
+  if not Result.IsEmpty then
   begin
     AExtends := TextExtends;
-    Inc(Result.cx, acMarginWidth(AExtends));
-    Inc(Result.cy, acMarginHeight(AExtends));
+    Inc(Result.cx, AExtends.MarginsWidth);
+    Inc(Result.cy, AExtends.MarginsHeight);
   end;
 end;
 
@@ -678,8 +679,8 @@ var
   AExtends: TRect;
 begin
   AExtends := Font.TextExtends;
-  Dec(AMaxHeight, acMarginHeight(AExtends));
-  Dec(AMaxWidth, acMarginWidth(AExtends));
+  Dec(AMaxHeight, AExtends.MarginsHeight);
+  Dec(AMaxWidth, AExtends.MarginsWidth);
   inherited;
 end;
 
@@ -771,8 +772,8 @@ var
   ARect: TRect;
 begin
   ALayoutBox := AOwner.FLayout.BoundingRect;
-  Inc(ALayoutBox.Bottom, acMarginHeight(AOwner.Font.TextExtends));
-  Inc(ALayoutBox.Right, acMarginWidth(AOwner.Font.TextExtends));
+  Inc(ALayoutBox.Bottom, AOwner.Font.TextExtends.MarginsHeight);
+  Inc(ALayoutBox.Right, AOwner.Font.TextExtends.MarginsWidth);
   if GetClipBox(ACanvas.Handle, AClipBox) <> NULLREGION then
     IntersectRect(ARect, ALayoutBox, AClipBox);
 
@@ -781,7 +782,7 @@ begin
   FBufferOrigin := ARect.TopLeft;
   inherited Create(AOwner, FBuffer.Canvas);
   FShadow := FFont.Shadow;
-  FOrigin := acPointOffsetNegative(FOrigin, FBufferOrigin);
+  FOrigin := FOrigin - FBufferOrigin;
 end;
 
 destructor TACLTextLayoutShadowRender32.Destroy;
@@ -794,7 +795,7 @@ procedure TACLTextLayoutShadowRender32.BeforeDestruction;
 begin
   inherited;
   Text32ApplyBlur(FBuffer, Shadow);
-  Text32RecoverAlpha(FBuffer, TACLColors.ToQuad(Shadow.Color));
+  Text32RecoverAlpha(FBuffer, TACLPixel32.Create(Shadow.Color));
   FBuffer.DrawBlend(FTargetCanvas.Handle, FBufferOrigin);
 end;
 
@@ -807,9 +808,8 @@ function TACLTextLayoutShadowRender32.OnText(ABlock: TACLTextLayoutBlockText): B
 var
   APoint: TPoint;
   AWindowOrg: TPoint;
-  I, J: Integer;
 begin
-  if ABlock.TextSize.Width > 0 then
+  if ABlock.TextWidth > 0 then
   begin
     SetBkColor(Canvas.Handle, clBlack);
     SetBkMode(Canvas.Handle, TRANSPARENT);
@@ -817,11 +817,11 @@ begin
 
     GetWindowOrgEx(Canvas.Handle, AWindowOrg);
     try
-      APoint := acPointOffsetNegative(AWindowOrg, FOrigin);
+      APoint := AWindowOrg - FOrigin;
       if Shadow.Direction = mzClient then
       begin
-        for I := -Shadow.Size to Shadow.Size do
-        for J := -Shadow.Size to Shadow.Size do
+        for var I := -Shadow.Size to Shadow.Size do
+        for var J := -Shadow.Size to Shadow.Size do
           if I <> J then
           begin
             SetWindowOrgEx(Canvas.Handle, APoint.X - I, APoint.Y - J, nil);
@@ -829,9 +829,9 @@ begin
           end;
       end
       else
-        for I := 1 to Shadow.Size do
+        for var I := 1 to Shadow.Size do
         begin
-          APoint := acPointOffsetNegative(APoint, MapTextOffsets[Shadow.Direction]);
+          APoint := APoint - MapTextOffsets[Shadow.Direction];
           SetWindowOrgEx(Canvas.Handle, APoint.X, APoint.Y, nil);
           inherited;
         end;
@@ -872,7 +872,7 @@ begin
   Result := Size.cx > AMaxWidth;
   if Result then
   begin
-    Dec(AMaxWidth, acMarginWidth(Font.TextExtends));
+    Dec(AMaxWidth, Font.TextExtends.MarginsWidth);
     Dec(AMaxWidth, Font.MeasureSize(acEndEllipsis).cx);
     FTextViewInfo.AdjustToWidth(AMaxWidth, AReducedCharacters, AReducedWidth);
     FreeAndNil(FTextViewInfo);

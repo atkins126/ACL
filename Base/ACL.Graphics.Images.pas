@@ -4,7 +4,7 @@
 {*                  Images                   *}
 {*                                           *}
 {*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
+{*                 2006-2023                 *}
 {*                www.aimp.ru                *}
 {*                                           *}
 {*********************************************}
@@ -132,6 +132,7 @@ type
     procedure Scale(AScaleFactor: Single); overload;
 
     procedure LoadFromBitmap(ABitmap: HBITMAP; APalette: HPALETTE = 0); overload;
+    procedure LoadFromBitmap(ABitmap: TACLDib; AAlphaFormat: TAlphaFormat = afPremultiplied); overload;
     procedure LoadFromBitmap(ABitmap: TBitmap; AAlphaFormat: TAlphaFormat = afPremultiplied); overload;
     procedure LoadFromBits(ABits: PRGBQuad; AWidth, AHeight: Integer; AAlphaFormat: TAlphaFormat = afPremultiplied);
     procedure LoadFromFile(const AFileName: UnicodeString);
@@ -310,7 +311,6 @@ type
     class function GetSize(AStream: TStream; out ASize: TSize): Boolean; override;
   end;
 
-function acGraphicToBitmap(AGraphic: TGraphic): TACLBitmap;
 implementation
 
 uses
@@ -321,29 +321,6 @@ uses
   ACL.Math,
   ACL.Utils.FileSystem,
   ACL.Utils.Stream;
-
-function acGraphicToBitmap(AGraphic: TGraphic): TACLBitmap;
-begin
-  if AGraphic.SupportsPartialTransparency then
-  begin
-    Result := TACLBitmap.CreateEx(AGraphic.Width, AGraphic.Height, pf32bit, True);
-    Result.Canvas.Draw(0, 0, AGraphic);
-  end
-  else
-    if AGraphic.Transparent then
-    begin
-      Result := TACLBitmap.CreateEx(AGraphic.Width, AGraphic.Height);
-      Result.Canvas.Brush.Color := clFuchsia;
-      Result.Canvas.FillRect(Result.ClientRect);
-      Result.Canvas.Draw(0, 0, AGraphic);
-      Result.MakeTransparent(clFuchsia);
-    end
-    else
-    begin
-      Result := TACLBitmap.CreateEx(AGraphic.Width, AGraphic.Height, pf24bit);
-      Result.Canvas.Draw(0, 0, AGraphic);
-    end;
-end;
 
 { EACLImageUnsupportedFormat }
 
@@ -596,24 +573,26 @@ begin
   GdipDeleteGraphics(AGraphics);
 end;
 
-procedure TACLImage.Draw(Graphics: GpGraphics; const R, ASource, AMargins: TRect; AAlpha: Byte = $FF; ATile: Boolean = False);
+procedure TACLImage.Draw(Graphics: GpGraphics;
+  const R, ASource, AMargins: TRect; AAlpha: Byte = $FF; ATile: Boolean = False);
 var
   ADestParts: TACLMarginPartBounds;
   ASourceParts: TACLMarginPartBounds;
   APart: TACLMarginPart;
 begin
-  if acMarginIsEmpty(AMargins) then
+  if AMargins.IsZero then
     Draw(Graphics, R, ASource, AAlpha, ATile)
   else
   begin
-    acMarginCalculateRects(R, AMargins, ASource, ADestParts);
-    acMarginCalculateRects(ASource, AMargins, ASource, ASourceParts);
+    acCalcPartBounds(ADestParts, AMargins, R, ASource);
+    acCalcPartBounds(ASourceParts, AMargins, ASource, ASource);
     for APart := Low(APart) to High(APart) do
       Draw(Graphics, ADestParts[APart], ASourceParts[APart], AAlpha, ATile);
   end;
 end;
 
-procedure TACLImage.Draw(Graphics: GpGraphics; const R, ASource: TRect; AAlpha: Byte = $FF; ATile: Boolean = False);
+procedure TACLImage.Draw(Graphics: GpGraphics;
+  const R, ASource: TRect; AAlpha: Byte = $FF; ATile: Boolean = False);
 const
   PixelOffsetModeMap: array[TACLImagePixelOffsetMode] of TPixelOffsetMode = (
     PixelOffsetModeDefault, PixelOffsetModeHalf, PixelOffsetModeNone
@@ -684,7 +663,7 @@ end;
 
 procedure TACLImage.Crop(const ACropMargins: TRect);
 begin
-  CropAndResize(ACropMargins, Width - acMarginWidth(ACropMargins), Height - acMarginHeight(ACropMargins));
+  CropAndResize(ACropMargins, Width - ACropMargins.MarginsWidth, Height - ACropMargins.MarginsHeight);
 end;
 
 procedure TACLImage.CropAndResize(const ACropMargins: TRect; AWidth, AHeight: Integer);
@@ -702,7 +681,7 @@ begin
     begin
       GdipGetImageGraphicsContext(AHandle, AGraphics);
       GdipSetPixelOffsetMode(AGraphics, PixelOffsetModeHalf);
-      Draw(AGraphics, Rect(0, 0, AWidth, AHeight), acRectContent(ClientRect, ACropMargins));
+      Draw(AGraphics, Rect(0, 0, AWidth, AHeight), ClientRect.Split(ACropMargins));
       GdipDeleteGraphics(AGraphics);
       SetHandle(AHandle);
     end;
@@ -740,6 +719,11 @@ begin
     LoadFromBitmap(ABitmap.Handle, ABitmap.Palette)
   else
     LoadFromBits(@acGetBitmapBits(ABitmap)[0], ABitmap.Width, ABitmap.Height, AAlphaFormat);
+end;
+
+procedure TACLImage.LoadFromBitmap(ABitmap: TACLDib; AAlphaFormat: TAlphaFormat);
+begin
+  LoadFromBits(@ABitmap.Colors[0], ABitmap.Width, ABitmap.Height, AAlphaFormat);
 end;
 
 procedure TACLImage.LoadFromBits(ABits: PRGBQuad; AWidth, AHeight: Integer; AAlphaFormat: TAlphaFormat);
@@ -781,13 +765,14 @@ end;
 
 procedure TACLImage.LoadFromGraphic(AGraphic: TGraphic);
 var
-  ABitmap: TACLBitmap;
+  LDib: TACLDib;
 begin
-  ABitmap := acGraphicToBitmap(AGraphic);
+  LDib := TACLDib.Create;
   try
-    LoadFromBitmap(ABitmap);
+    LDib.Assign(AGraphic);
+    LoadFromBitmap(LDib);
   finally
-    ABitmap.Free;
+    LDib.Free;
   end;
 end;
 

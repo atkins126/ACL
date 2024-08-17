@@ -312,7 +312,7 @@ type
     procedure DoActivateView(AView: TACLCalendarCustomViewViewInfo; const AInitialDate: TDate);
     procedure DoCalculate(AChanges: TIntegerSet); override;
     procedure DoDraw(ACanvas: TCanvas); override;
-    procedure PrepareAnimationFrame(AFrame: TACLBitmap; const P: TPoint);
+    procedure PrepareAnimationFrame(AFrame: TACLDib; const P: TPoint);
   public
     constructor Create(ASubClass: TACLCompoundControlSubClass); override;
     destructor Destroy; override;
@@ -659,7 +659,7 @@ begin
 
   FCellsArea := FCells[Low(FCells)].Bounds;
   for X := Low(FCells) + 1 to High(FCells) do
-    acRectUnion(FCellsArea, FCells[X].Bounds);
+    FCellsArea.Add(FCells[X].Bounds);
 end;
 
 procedure TACLCalendarCustomViewViewInfo.DoCalculateTitleArea(var ARect: TRect; AChanges: TIntegerSet);
@@ -671,10 +671,10 @@ begin
   R.Bottom := FTitle.Bounds.Bottom;
   R.Left := R.Right - R.Height;
   FScrollUp.Calculate(R, AChanges);
-  R := acRectOffset(R, -R.Height, 0);
+  R.Offset(-R.Height, 0);
   FScrollDown.Calculate(R, AChanges);
   ARect.Top := R.Bottom;
-  FToday.Calculate(acRectSetBottom(ARect, ARect.Bottom, FTitle.Bounds.Height), AChanges);
+  FToday.Calculate(ARect.Split(srBottom, FTitle.Bounds.Height), AChanges);
   ARect.Bottom := FToday.Bounds.Top;
 end;
 
@@ -970,7 +970,9 @@ begin
 
   PrepareCanvas(MeasureCanvas);
   ATextSize := MeasureCanvas.TextExtent(DisplayValue);
-  inherited Calculate(acRectSetSize(R, ATextSize.cx + 2 * AIndent, ATextSize.cy + 2 * Min(AIndent, acIndentBetweenElements)), AChanges);
+  inherited Calculate(TRect.Create(R.TopLeft,
+    ATextSize.cx + 2 * AIndent,
+    ATextSize.cy + 2 * Min(AIndent, acIndentBetweenElements)), AChanges);
 end;
 
 function TACLCalendarTitleCell.GetDisplayValue: string;
@@ -1104,7 +1106,7 @@ begin
     begin
       ASaveIndex := SaveDC(ACanvas.Handle);
       try
-        AAnimation.Draw(ACanvas.Handle, ActiveView.CellsArea);
+        AAnimation.Draw(ACanvas, ActiveView.CellsArea);
         acExcludeFromClipRegion(ACanvas.Handle, ActiveView.CellsArea);
         ActiveView.Draw(ACanvas);
       finally
@@ -1112,13 +1114,13 @@ begin
       end;
     end
     else
-      AAnimation.Draw(ACanvas.Handle, Bounds);
+      AAnimation.Draw(ACanvas, Bounds);
   end
   else
     ActiveView.Draw(ACanvas);
 end;
 
-procedure TACLCalendarViewInfo.PrepareAnimationFrame(AFrame: TACLBitmap; const P: TPoint);
+procedure TACLCalendarViewInfo.PrepareAnimationFrame(AFrame: TACLDib; const P: TPoint);
 begin
   DrawTo(AFrame.Canvas, Bounds.Left - P.X, Bounds.Top - P.Y);
   AFrame.MakeOpaque;

@@ -33,7 +33,7 @@ uses
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Classes.StringList,
-  ACL.Classes.Timer,
+  ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Math,
@@ -142,7 +142,7 @@ end;
 procedure TACLSearchEdit.Changed;
 begin
   Buttons[0].Visible := Text <> '';
-  if not IsLoading then
+  if not (csLoading in ComponentState) then
     FWaitTimer.Restart;
   Invalidate;
 end;
