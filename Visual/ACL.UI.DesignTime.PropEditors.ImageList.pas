@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*         ImageList Property Editor         *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Design Time Routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.DesignTime.PropEditors.ImageList;
 
 {$I ACL.Config.inc}
@@ -16,42 +18,47 @@ unit ACL.UI.DesignTime.PropEditors.ImageList;
 interface
 
 uses
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
   Winapi.Messages,
   Winapi.Windows,
+{$ENDIF}
   // System
-  System.Actions,
-  System.Classes,
-  System.Generics.Collections,
-  System.Generics.Defaults,
-  System.ImageList,
-  System.SysUtils,
-  System.Types,
-  System.Variants,
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
+  {System.}Variants,
   // VCL
-  Vcl.ActnList,
-  Vcl.ComCtrls,
-  Vcl.Controls,
-  Vcl.Dialogs,
-  Vcl.ExtCtrls,
-  Vcl.ExtDlgs,
-  Vcl.Forms,
-  Vcl.Graphics,
-  Vcl.ImgList,
-  Vcl.Menus,
-  Vcl.StdCtrls,
-  Vcl.ToolWin,
+  {Vcl.}ActnList,
+  {Vcl.}ComCtrls,
+  {Vcl.}Controls,
+  {Vcl.}Dialogs,
+  {Vcl.}ExtCtrls,
+  {Vcl.}Forms,
+  {Vcl.}Graphics,
+  {Vcl.}ImgList,
+  {Vcl.}Menus,
   // ACL
   ACL.Classes.Collections,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Images,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
+  ACL.UI.Controls.Buttons,
+  ACL.UI.Controls.GroupBox,
+  ACL.UI.Controls.Panel,
   ACL.UI.Dialogs,
   ACL.UI.Forms,
   ACL.UI.ImageList,
   ACL.Utils.FileSystem;
 
 type
+
   { TfrmImageListEditor }
 
   TfrmImageListEditor = class(TACLForm)
@@ -62,12 +69,17 @@ type
     acExportAsPNG: TAction;
     acReplace: TAction;
     alActions: TActionList;
-    btnCancel: TButton;
-    btnOK: TButton;
+    btnAdd: TACLButton;
+    btnCancel: TACLButton;
+    btnDelete: TACLButton;
+    btnDeleteAll: TACLButton;
+    btnOK: TACLButton;
+    btnReplace: TACLButton;
+    btnSave: TACLButton;
     EditingImageList: TACLImageList;
     FileDialog: TACLFileDialog;
-    gbImages: TGroupBox;
-    gbPreview: TGroupBox;
+    gbImages: TACLGroupBox;
+    gbPreview: TACLGroupBox;
     ilImages: TACLImageList;
     lvImages: TListView;
     miAdd: TMenuItem;
@@ -82,16 +94,9 @@ type
     pbPreview: TPaintBox;
     pmExport: TPopupMenu;
     pmImages: TPopupMenu;
-    pnlBottom: TPanel;
-    pnlRight: TPanel;
-    tbAdd: TToolButton;
-    tbDelete: TToolButton;
-    tbDeleteAll: TToolButton;
-    tbExport: TToolButton;
-    tbReplace: TToolButton;
-    ToolBar: TToolBar;
-    ToolButton5: TToolButton;
-    ToolButton6: TToolButton;
+    pnlBottom: TACLPanel;
+    pnlRight: TACLPanel;
+    pnlToolbar: TACLPanel;
 
     procedure acAddExecute(Sender: TObject);
     procedure acDeleteAllExecute(Sender: TObject);
@@ -103,44 +108,39 @@ type
     procedure acReplaceExecute(Sender: TObject);
     procedure acReplaceUpdate(Sender: TObject);
     procedure EditingImageListChange(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
     procedure lvImagesSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
     procedure pbPreviewPaint(Sender: TObject);
   strict private
     function GetSelectedItem: TListItem;
-    function GetSelection: TACLList<Integer>;
-    procedure SetSelection(AValue: TACLList<Integer>);
+    function GetSelection: TACLListOfInteger;
+    procedure SetSelection(AValue: TACLListOfInteger);
   protected
-    procedure Add;
-    function Export(AIndexes: TACLList<Integer>): TACLBitmap;
+    function Export(AIndexes: TACLListOfInteger): TACLBitmap;
     function ExportSelected: TACLBitmap;
     function LoadImage(const AFileName: string): TACLBitmap;
-    procedure DrawPreview(ACanvas: TCanvas; const R: TRect; AImageIndex: Integer);
     procedure PopulateImages;
     procedure Replace;
     procedure SaveAs(AAsPNG: Boolean);
-    //
+    //# Properties
     property SelectedItem: TListItem read GetSelectedItem;
   public
-    class function Execute(AOwnerWndHandle: THandle; AImageList: TCustomImageList): Boolean;
+    class procedure Execute(AImageList: TCustomImageList);
   end;
 
 implementation
-
-uses
-  System.Math;
 
 {$R *.dfm}
 
 { TfrmImageListEditor }
 
-class function TfrmImageListEditor.Execute(AOwnerWndHandle: THandle; AImageList: TCustomImageList): Boolean;
+class procedure TfrmImageListEditor.Execute(AImageList: TCustomImageList);
 begin
-  with TfrmImageListEditor.CreateDialog(AOwnerWndHandle) do
+  with TfrmImageListEditor.Create(nil) do
   try
     EditingImageList.Assign(AImageList);
     PopulateImages;
-    Result := ShowModal = mrOk;
-    if Result then
+    if ShowModal = mrOk then
     begin
       AImageList.Assign(EditingImageList);
       acDesignerSetModified(AImageList);
@@ -158,11 +158,11 @@ begin
     Result := lvImages.Selected;
 end;
 
-function TfrmImageListEditor.GetSelection: TACLList<Integer>;
+function TfrmImageListEditor.GetSelection: TACLListOfInteger;
 var
   I: Integer;
 begin
-  Result := TACLList<Integer>.Create;
+  Result := TACLListOfInteger.Create;
   Result.Capacity := lvImages.SelCount;
   for I := 0 to lvImages.Items.Count - 1 do
   begin
@@ -171,7 +171,7 @@ begin
   end;
 end;
 
-procedure TfrmImageListEditor.SetSelection(AValue: TACLList<Integer>);
+procedure TfrmImageListEditor.SetSelection(AValue: TACLListOfInteger);
 var
   I: Integer;
 begin
@@ -180,17 +180,13 @@ begin
     lvImages.Items[AValue[I]].Selected := True;
 end;
 
-procedure TfrmImageListEditor.Add;
-begin
-  lvImages.ClearSelection;
-  Replace;
-end;
-
-function TfrmImageListEditor.Export(AIndexes: TACLList<Integer>): TACLBitmap;
+function TfrmImageListEditor.Export(AIndexes: TACLListOfInteger): TACLBitmap;
 var
   I: Integer;
 begin
-  Result := TACLBitmap.CreateEx(EditingImageList.Width * AIndexes.Count, EditingImageList.Height, pf32bit, True);
+  Result := TACLBitmap.CreateEx(
+    EditingImageList.Width * AIndexes.Count,
+    EditingImageList.Height, pf32bit, True);
   if AIndexes.Count > 0 then
   begin
     Result.Canvas.Lock;
@@ -205,11 +201,11 @@ end;
 
 function TfrmImageListEditor.ExportSelected: TACLBitmap;
 var
-  AIndexes: TACLList<Integer>;
+  AIndexes: TACLListOfInteger;
   AHasSelection: Boolean;
   I: Integer;
 begin
-  AIndexes := TACLList<Integer>.Create;
+  AIndexes := TACLListOfInteger.Create;
   try
     AIndexes.Capacity := lvImages.Items.Count;
     AHasSelection := SelectedItem <> nil;
@@ -225,47 +221,21 @@ begin
 end;
 
 function TfrmImageListEditor.LoadImage(const AFileName: string): TACLBitmap;
-var
-  P: TACLImage;
 begin
   if acIsOurFile('*.bmp;', AFileName) then
   begin
     Result := TACLBitmap.Create;
     Result.LoadFromFile(AFileName);
-    if Result.PixelFormat <> pf32bit then
-    begin
-      Result.PixelFormat := pf32bit;
+    if not acIs32BitBitmap(Result) then
       Result.MakeTransparent(clFuchsia);
-    end;
   end
   else
-  begin
-    P := TACLImage.Create(AFileName);
+    with TACLImage.Create(AFileName) do
     try
-      Result := P.ToBitmap;
-      Result.PixelFormat := pf32bit;
+      Result := ToBitmap;
     finally
-      P.Free;
+      Free;
     end;
-  end;
-end;
-
-procedure TfrmImageListEditor.DrawPreview(ACanvas: TCanvas; const R: TRect; AImageIndex: Integer);
-var
-  B: TACLBitmap;
-begin
-  acDrawHatch(ACanvas.Handle, R);
-  if AImageIndex >= 0 then
-  begin
-    B := TACLBitmap.CreateEx(EditingImageList.Width, EditingImageList.Height, pf32bit, True);
-    try
-      EditingImageList.Draw(B.Canvas, 0, 0, AImageIndex);
-      acAlphaBlend(ACanvas.Handle, B, acFitRect(R, B.Width, B.Height, afmProportionalStretch));
-    finally
-      B.Free;
-    end;
-  end;
-  acDrawFrame(ACanvas.Handle, R, clBlack);
 end;
 
 procedure TfrmImageListEditor.PopulateImages;
@@ -302,7 +272,7 @@ procedure TfrmImageListEditor.Replace;
     Result := EditingImageList.Count - APrevCount;
   end;
 
-  function ReplacePicture(AIndex: Integer; const AFileName: UnicodeString): Integer; overload;
+  function ReplacePicture(AIndex: Integer; const AFileName: string): Integer; overload;
   var
     ABitmap: TACLBitmap;
   begin
@@ -316,8 +286,8 @@ procedure TfrmImageListEditor.Replace;
 
 var
   AFileIndex: Integer;
-  AIndexesToReplace: TACLList<Integer>;
-  AIndexesToSelect: TACLList<Integer>;
+  AIndexesToReplace: TACLListOfInteger;
+  AIndexesToSelect: TACLListOfInteger;
   AIndexToReplace: Integer;
   ASelectedCount: Integer;
 begin
@@ -325,7 +295,7 @@ begin
   if FileDialog.Execute(False, Handle) then
   begin
     AIndexesToReplace := GetSelection;
-    AIndexesToSelect := TACLList<Integer>.Create;
+    AIndexesToSelect := TACLListOfInteger.Create;
     try
       AIndexesToSelect.Capacity := lvImages.SelCount;
 
@@ -393,7 +363,8 @@ end;
 
 procedure TfrmImageListEditor.acAddExecute(Sender: TObject);
 begin
-  Add;
+  lvImages.ClearSelection;
+  Replace;
 end;
 
 procedure TfrmImageListEditor.acDeleteAllExecute(Sender: TObject);
@@ -459,21 +430,37 @@ begin
   acReplace.Enabled := SelectedItem <> nil;
 end;
 
-procedure TfrmImageListEditor.lvImagesSelectItem(Sender: TObject; Item: TListItem; Selected: Boolean);
+procedure TfrmImageListEditor.FormCreate(Sender: TObject);
+begin
+{$IFDEF FPC}
+  lvImages.ViewStyle := vsIcon;
+{$ELSE}
+//  ToolBar.GradientStartColor := gbPreview.Style.ColorContent1.AsColor;
+//  ToolBar.GradientEndColor := gbPreview.Style.ColorContent2.AsColor;
+//  ToolBar.DrawingStyle := TTBDrawingStyle.dsGradient;
+{$ENDIF}
+end;
+
+procedure TfrmImageListEditor.lvImagesSelectItem(
+  Sender: TObject; Item: TListItem; Selected: Boolean);
 begin
   pbPreview.Invalidate;
 end;
 
 procedure TfrmImageListEditor.pbPreviewPaint(Sender: TObject);
 var
-  AImageIndex: Integer;
+  LImageIndex: Integer;
 begin
   if SelectedItem <> nil then
-    AImageIndex := SelectedItem.ImageIndex
+    LImageIndex := SelectedItem.ImageIndex
   else
-    AImageIndex := -1;
+    LImageIndex := -1;
 
-  DrawPreview(pbPreview.Canvas, pbPreview.ClientRect, AImageIndex);
+  acDrawHatch(pbPreview.Canvas.Handle, pbPreview.ClientRect);
+  acDrawImage(pbPreview.Canvas, acFitRect(pbPreview.ClientRect,
+    EditingImageList.Width, EditingImageList.Height, afmProportionalStretch),
+    EditingImageList, LImageIndex, True, False);
+  acDrawFrame(pbPreview.Canvas, pbPreview.ClientRect, clWindowFrame);
 end;
 
 procedure TfrmImageListEditor.EditingImageListChange(Sender: TObject);

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*           Thread Pool Routines            *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Thread Pool
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Threading.Pool;
 
 {$I ACL.Config.inc}
@@ -16,19 +18,23 @@ unit ACL.Threading.Pool;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF MSWINDOWS}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Collections,
-  System.Generics.Defaults,
-  System.SyncObjs,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SyncObjs,
+  {System.}SysUtils,
+  {System.}Types,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Timers,
   ACL.Threading,
+  ACL.Utils.Common,
   ACL.Utils.Strings;
 
 type
@@ -59,7 +65,7 @@ type
     FOnComplete: TThreadMethod;
     FOnCompleteMode: TACLThreadMethodCallMode;
 
-    function GetHandle: THandle;
+    function GetHandle: TObjHandle;
   protected
     procedure Complete; virtual;
     procedure Execute; virtual; abstract;
@@ -70,7 +76,7 @@ type
     function IsCanceled: Boolean; virtual;
     //# Properties
     property Caption: string read GetCaption;
-    property Handle: THandle read GetHandle;
+    property Handle: TObjHandle read GetHandle;
   end;
 
   { TACLTaskGroup }
@@ -79,7 +85,7 @@ type
   strict private
     FActiveTasks: Integer;
     FEvent: TACLEvent;
-    FTasks: TACLList<THandle>;
+    FTasks: TACLListOf<TObjHandle>;
 
     FOnAsyncFinished: TNotifyEvent;
 
@@ -88,7 +94,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Add(ATask: TACLTask);
-    procedure Cancel;
+    procedure Cancel(AWaitFor: Boolean = True);
     procedure Initialize;
     function IsActive: Boolean;
     procedure Run(AWaitFor: Boolean);
@@ -104,7 +110,7 @@ type
     FCurrentTask: TACLTask;
     FLock: TACLCriticalSection;
     FPendingTasks: TACLObjectList;
-    FTaskHandle: THandle;
+    FTaskHandle: TObjHandle;
 
     FOnAsyncFinished: TNotifyEvent;
 
@@ -132,7 +138,7 @@ type
     CpuUsageMonitorUpdateInterval = 1000;
     SuccessfulWaitResults = [wrSignaled, wrAbandoned];
   strict private
-    FActiveTasks: TACLList<TACLTask>;
+    FActiveTasks: TACLListOf<TACLTask>;
     FActualMaxActiveTasks: Integer;
     FCpuUsageLog: array [0..CpuUsageMonitorLogSize - 1] of Integer;
     FCpuUsageMonitor: TObject;
@@ -140,7 +146,7 @@ type
     FLock: TACLCriticalSection;
     FMaxActiveTasks: Integer;
     FPrevSystemTimes: TThread.TSystemTimes;
-    FTasks: TACLObjectList<TACLTask>;
+    FTasks: TACLObjectListOf<TACLTask>;
 
     procedure AsyncRun(ATask: TACLTask);
     procedure CheckActiveTasks;
@@ -158,24 +164,24 @@ type
     destructor Destroy; override;
     procedure BeforeDestruction; override;
 
-    function Run(AProc: TACLTaskProc): THandle; overload;
+    function Run(AProc: TACLTaskProc): TObjHandle; overload;
     function Run(AProc: TThreadMethod; ACompleteEvent: TThreadMethod;
-      ACompleteEventCallMode: TACLThreadMethodCallMode): THandle; overload;
+      ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle; overload;
     function Run(AProc: TACLTaskProc; ACompleteEvent: TThreadMethod;
-      ACompleteEventCallMode: TACLThreadMethodCallMode): THandle; overload;
-    function Run(ATask: TACLTask): THandle; overload;
+      ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle; overload;
+    function Run(ATask: TACLTask): TObjHandle; overload;
     function Run(ATask: TACLTask; ACompleteEvent: TThreadMethod;
-      ACompleteEventCallMode: TACLThreadMethodCallMode): THandle; overload;
-    function RunInCurrentThread(ATask: TACLTask): THandle;
+      ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle; overload;
+    function RunInCurrentThread(ATask: TACLTask): TObjHandle;
 
-    function Cancel(ATaskHandle: THandle; AWaitFor: Boolean = False): Boolean; overload;
-    function Cancel(ATaskHandle: THandle; AWaitTimeOut: Cardinal): TWaitResult; overload;
+    function Cancel(ATaskHandle: TObjHandle; AWaitFor: Boolean = False): Boolean; overload;
+    function Cancel(ATaskHandle: TObjHandle; AWaitTimeOut: Cardinal): TWaitResult; overload;
     procedure CancelAll(AWaitFor: Boolean);
     function CurrentTask: TACLTask;
     function ToString: string; override;
 
-    function WaitFor(ATaskHandle: THandle): Boolean; overload;
-    function WaitFor(ATaskHandle: THandle; AWaitTimeOut: Cardinal): TWaitResult; overload;
+    function WaitFor(ATaskHandle: TObjHandle): Boolean; overload;
+    function WaitFor(ATaskHandle: TObjHandle; AWaitTimeOut: Cardinal): TWaitResult; overload;
 
     property MaxActiveTasks: Integer read FMaxActiveTasks write SetMaxActiveTasks;
     property UseCpuUsageMonitor: Boolean read GetUseCpuUsageMonitor write SetUseCpuUsageMonitor;
@@ -184,15 +190,12 @@ type
 function TaskDispatcher: TACLTaskDispatcher;
 implementation
 
-uses
-  System.Math;
-
 type
 
   { TACLTaskComparer }
 
   TACLTaskComparer = class(TComparer<TACLTask>)
-  protected
+  public
     function Compare(const Left, Right: TACLTask): Integer; override;
   end;
 
@@ -200,7 +203,11 @@ type
 
   TACLTaskEvent = class(TInterfacedObject, IACLTaskEvent)
   strict private
-    FHandle: THandle;
+  {$IFDEF FPC}
+    FEvent: TEvent;
+  {$ELSE}
+    FHandle: TObjHandle;
+  {$ENDIF}
   public
     constructor Create;
     destructor Destroy; override;
@@ -253,9 +260,9 @@ begin
   Result := '';
 end;
 
-function TACLTask.GetHandle: THandle;
+function TACLTask.GetHandle: TObjHandle;
 begin
-  Result := THandle(Self);
+  Result := TObjHandle(Self);
 end;
 
 function TACLTask.IsCanceled: Boolean;
@@ -268,7 +275,7 @@ end;
 constructor TACLTaskGroup.Create;
 begin
   FEvent := TACLEvent.Create(True, True);
-  FTasks := TACLList<THandle>.Create;
+  FTasks := TACLListOf<TObjHandle>.Create;
 end;
 
 destructor TACLTaskGroup.Destroy;
@@ -296,11 +303,14 @@ begin
   end;
 end;
 
-procedure TACLTaskGroup.Cancel;
+procedure TACLTaskGroup.Cancel(AWaitFor: Boolean = True);
+var
+  I: Integer;
 begin
-  for var I := FTasks.Count - 1 downto 0 do
+  for I := FTasks.Count - 1 downto 0 do
     TaskDispatcher.Cancel(FTasks.List[I], False);
-  FEvent.WaitFor;
+  if AWaitFor then
+    FEvent.WaitFor;
 end;
 
 procedure TACLTaskGroup.Initialize;
@@ -443,23 +453,40 @@ end;
 
 constructor TACLTaskEvent.Create;
 begin
+{$IFDEF FPC}
+  FEvent := TEvent.Create(nil, True, False, ClassName);
+{$ELSE}
   FHandle := CreateEvent(nil, True, False, nil);
+{$ENDIF}
 end;
 
 destructor TACLTaskEvent.Destroy;
 begin
+{$IFDEF FPC}
+  FreeAndNil(FEvent);
+{$ELSE}
   CloseHandle(FHandle);
+{$ENDIF}
   inherited Destroy;
 end;
 
 function TACLTaskEvent.Signal: Boolean;
 begin
+{$IFDEF FPC}
+  FEvent.SetEvent;
+  Result := True;
+{$ELSE}
   Result := SetEvent(FHandle);
+{$ENDIF}
 end;
 
 function TACLTaskEvent.WaitFor(ATimeOut: Cardinal): TWaitResult;
 begin
+{$IFDEF FPC}
+  Result := FEvent.WaitFor(ATimeOut);
+{$ELSE}
   Result := WaitForSyncObject(FHandle, ATimeOut);
+{$ENDIF}
 end;
 
 { TACLTaskDispatcher }
@@ -468,8 +495,8 @@ constructor TACLTaskDispatcher.Create;
 begin
   inherited Create;
   IsMultiThread := True;
-  FTasks := TACLObjectList<TACLTask>.Create;
-  FActiveTasks := TACLList<TACLTask>.Create;
+  FTasks := TACLObjectListOf<TACLTask>.Create;
+  FActiveTasks := TACLListOf<TACLTask>.Create;
   FLock := TACLCriticalSection.Create(Self, 'TaskLock');
   FCpuUsageMonitor := TACLTimer.CreateEx(HandlerCpuUsageMonitor, CpuUsageMonitorUpdateInterval, True);
   MaxActiveTasks := 4 * CPUCount;
@@ -484,24 +511,24 @@ begin
   inherited Destroy;
 end;
 
-function TACLTaskDispatcher.Run(AProc: TACLTaskProc): THandle;
+function TACLTaskDispatcher.Run(AProc: TACLTaskProc): TObjHandle;
 begin
   Result := Run(TACLSimpleTask.Create(AProc));
 end;
 
 function TACLTaskDispatcher.Run(AProc: TACLTaskProc;
-  ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): THandle;
+  ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle;
 begin
   Result := Run(TACLSimpleTask.Create(AProc), ACompleteEvent, ACompleteEventCallMode);
 end;
 
-function TACLTaskDispatcher.Run(ATask: TACLTask): THandle;
+function TACLTaskDispatcher.Run(ATask: TACLTask): TObjHandle;
 begin
   Result := Run(ATask, TThreadMethod(nil), tmcmAsync);
 end;
 
 function TACLTaskDispatcher.Run(ATask: TACLTask;
-  ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): THandle;
+  ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle;
 var
   AComparer: IComparer<TACLTask>;
 begin
@@ -523,12 +550,12 @@ begin
   CheckActiveTasks;
 end;
 
-function TACLTaskDispatcher.Run(AProc, ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): THandle;
+function TACLTaskDispatcher.Run(AProc, ACompleteEvent: TThreadMethod; ACompleteEventCallMode: TACLThreadMethodCallMode): TObjHandle;
 begin
   Result := Run(TACLSimpleTask.Create(AProc), ACompleteEvent, ACompleteEventCallMode);
 end;
 
-function TACLTaskDispatcher.RunInCurrentThread(ATask: TACLTask): THandle;
+function TACLTaskDispatcher.RunInCurrentThread(ATask: TACLTask): TObjHandle;
 begin
   Result := 0;
   try
@@ -551,12 +578,12 @@ begin
   CancelAll(True);
 end;
 
-function TACLTaskDispatcher.Cancel(ATaskHandle: THandle; AWaitFor: Boolean = False): Boolean;
+function TACLTaskDispatcher.Cancel(ATaskHandle: TObjHandle; AWaitFor: Boolean = False): Boolean;
 begin
   Result := Cancel(ATaskHandle, IfThen(AWaitFor, INFINITE)) <> wrError;
 end;
 
-function TACLTaskDispatcher.Cancel(ATaskHandle: THandle; AWaitTimeOut: Cardinal): TWaitResult;
+function TACLTaskDispatcher.Cancel(ATaskHandle: TObjHandle; AWaitTimeOut: Cardinal): TWaitResult;
 var
   AIndex: Integer;
   ATask: TACLTask;
@@ -622,12 +649,12 @@ begin
   end;
 end;
 
-function TACLTaskDispatcher.WaitFor(ATaskHandle: THandle): Boolean;
+function TACLTaskDispatcher.WaitFor(ATaskHandle: TObjHandle): Boolean;
 begin
   Result := WaitFor(ATaskHandle, INFINITE) in SuccessfulWaitResults;
 end;
 
-function TACLTaskDispatcher.WaitFor(ATaskHandle: THandle; AWaitTimeOut: Cardinal): TWaitResult;
+function TACLTaskDispatcher.WaitFor(ATaskHandle: TObjHandle; AWaitTimeOut: Cardinal): TWaitResult;
 var
   AIndex: Integer;
   AWaitEvent: IACLTaskEvent;
@@ -664,11 +691,11 @@ end;
 
 class function TACLTaskDispatcher.ThreadProc(ATask: TACLTask): Integer;
 begin
-{$IFDEF DEBUG}
+{$IFDEF ACL_THREADING_DEBUG}
   TThread.NameThreadForDebugging('ThreadPool - ' + ATask.ClassName);
 {$ENDIF}
   ATask.FOwner.AsyncRun(ATask);
-{$IFDEF DEBUG}
+{$IFDEF ACL_THREADING_DEBUG}
   TThread.NameThreadForDebugging('ThreadPool - Idle');
 {$ENDIF}
   Result := 0;
@@ -708,14 +735,17 @@ begin
 end;
 
 procedure TACLTaskDispatcher.AsyncRun(ATask: TACLTask);
+{$IFDEF MSWINDOWS}
 const
   PriorityMap: array[TACLTaskPriority] of Integer = (
-    THREAD_PRIORITY_IDLE, THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_HIGHEST
-  );
+    THREAD_PRIORITY_IDLE, THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_HIGHEST);
+{$ENDIF}
 begin
   try
     ATask.FThreadID := GetCurrentThreadId;
+  {$IFDEF MSWINDOWS}
     SetThreadPriority(GetCurrentThread, PriorityMap[ATask.GetPriority]);
+  {$ENDIF}
     try
       try
         ATask.Execute;
@@ -743,14 +773,15 @@ end;
 
 procedure TACLTaskDispatcher.CancelAll(AWaitFor: Boolean);
 var
-  ATaskHandle: THandle;
+  ATaskHandle: TObjHandle;
+  I: Integer;
 begin
   // Mark all as canceled
   FLock.Enter;
   try
-    for var I := FTasks.Count - 1 downto 0 do
+    for I := FTasks.Count - 1 downto 0 do
       Cancel(FTasks[I].Handle, False);
-    for var I := FActiveTasks.Count - 1 downto 0 do
+    for I := FActiveTasks.Count - 1 downto 0 do
       Cancel(FActiveTasks[I].Handle, False);
   finally
     FLock.Leave;
@@ -841,7 +872,6 @@ procedure TACLTaskDispatcher.SetUseCpuUsageMonitor(AValue: Boolean);
 begin
   if not IsMainThread then
     raise EInvalidArgument.Create('');
-
   TACLTimer(FCpuUsageMonitor).Enabled := AValue;
 end;
 

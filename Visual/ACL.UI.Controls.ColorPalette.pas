@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*               Color Palette               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Color Palette
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.ColorPalette;
 
 {$I ACL.Config.inc}
@@ -16,20 +18,28 @@ unit ACL.UI.Controls.ColorPalette;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Types,
-  System.Classes,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // Vcl
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes.Collections,
   ACL.Classes,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Ex.Gdip,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
   ACL.Utils.DPIAware;
 
@@ -103,7 +113,7 @@ type
   strict private const
     BorderSize = 2;
   strict private
-    FCells: TACLObjectList<TACLColorPaletteItemViewInfo>;
+    FCells: TACLObjectListOf<TACLColorPaletteItemViewInfo>;
     FHeight: Integer;
     FOwner: TACLColorPalette;
     FWidth: Integer;
@@ -187,25 +197,30 @@ type
 
     FOnColorChanged: TNotifyEvent;
 
-    procedure SetColor(AValue: TAlphaColor);
+    procedure SetColor(AValue: TAlphaColor); reintroduce;
     procedure SetHoveredColor(AValue: TACLColorPaletteItemViewInfo);
     procedure SetItems(AValue: TACLColorPaletteItems);
     procedure SetOptionsView(AValue: TACLColorPaletteOptionsView);
     procedure SetStyle(AValue: TACLStyleColorPalette);
   protected
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
+    function CanAutoSize(var NewWidth, NewHeight: Integer): Boolean; override;
     procedure InitializeDefaultPalette;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X: Integer; Y: Integer); override;
     procedure Paint; override;
     procedure SetTargetDPI(AValue: Integer); override;
-    //
+    procedure UpdateTransparency; override;
+    //# Properties
     property HoveredColor: TACLColorPaletteItemViewInfo read FHoveredColor write SetHoveredColor;
     property ViewInfo: TACLColorPaletteViewInfo read FViewInfo;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+  {$IFDEF FPC}
+    procedure SetBoundsKeepBase(aLeft, aTop, aWidth, aHeight: Integer); override;
+  {$ELSE}
     procedure SetBounds(ALeft, ATop, AWidth, AHeight: Integer); override;
+  {$ENDIF}
   published
     property DoubleBuffered default True;
     property FocusOnClick;
@@ -214,7 +229,7 @@ type
     property Color: TAlphaColor read FColor write SetColor default 0;
     property ResourceCollection;
     property Style: TACLStyleColorPalette read FStyle write SetStyle;
-    //
+    //# Events
     property OnColorChanged: TNotifyEvent read FOnColorChanged write FOnColorChanged;
   end;
 
@@ -230,11 +245,6 @@ const
 implementation
 
 uses
-  System.SysUtils,
-  System.Math,
-  // Vcl
-  Vcl.Forms,
-  // ACl
   ACL.Math;
 
 { TACLColorPaletteItem }
@@ -303,7 +313,7 @@ var
   AIndex: Integer;
   APaletteEntries: array[0..NumPaletteEntries - 1] of TPaletteEntry;
 begin
-  ACount := GetPaletteEntries(GetStockObject(DEFAULT_PALETTE), 0, NumPaletteEntries, APaletteEntries);
+  ACount := GetPaletteEntries(GetStockObject(DEFAULT_PALETTE), 0, NumPaletteEntries, APaletteEntries{%H-});
   for AIndex := 0 to ACount - 1 do
   begin
     Add(TAlphaColor.FromARGB(MaxByte,
@@ -348,7 +358,7 @@ end;
 procedure TACLColorPaletteItemViewInfo.Draw(ACanvas: TCanvas);
 begin
   Palette.Style.DrawHatch(ACanvas, Bounds);
-  acFillRect(ACanvas.Handle, Bounds, Color);
+  acFillRect(ACanvas, Bounds, Color);
   Palette.Style.DrawFrame(ACanvas, Bounds, Selected, Borders);
   if Selected then
     acExcludeFromClipRegion(ACanvas.Handle, Bounds);
@@ -370,7 +380,7 @@ constructor TACLColorPaletteViewInfo.Create(AOwner: TACLColorPalette);
 begin
   inherited Create;
   FOwner := AOwner;
-  FCells := TACLObjectList<TACLColorPaletteItemViewInfo>.Create;
+  FCells := TACLObjectListOf<TACLColorPaletteItemViewInfo>.Create;
 end;
 
 destructor TACLColorPaletteViewInfo.Destroy;
@@ -547,11 +557,12 @@ end;
 
 { TACLStyleColorPalette }
 
-procedure TACLStyleColorPalette.DrawFrame(ACanvas: TCanvas; const R: TRect; ASelected: Boolean; ABorders: TACLBorders);
+procedure TACLStyleColorPalette.DrawFrame(ACanvas: TCanvas;
+  const R: TRect; ASelected: Boolean; ABorders: TACLBorders);
 begin
-  acDrawComplexFrame(ACanvas.Handle, R, ColorBorder1.Value, ColorBorder2.Value, ABorders);
+  acDrawComplexFrame(ACanvas, R, ColorBorder1.Value, ColorBorder2.Value, ABorders);
   if ASelected then
-    acDrawComplexFrame(ACanvas.Handle, R, ColorSelectedBorder1.Value, ColorSelectedBorder2.Value, acAllBorders);
+    acDrawComplexFrame(ACanvas, R, ColorSelectedBorder1.Value, ColorSelectedBorder2.Value, acAllBorders);
 end;
 
 procedure TACLStyleColorPalette.DrawHatch(ACanvas: TCanvas; const R: TRect);
@@ -642,9 +653,12 @@ begin
   inherited;
 end;
 
-function TACLColorPalette.GetBackgroundStyle: TACLControlBackgroundStyle;
+function TACLColorPalette.CanAutoSize(var NewWidth, NewHeight: Integer): Boolean;
 begin
-  Result := cbsTransparent;
+  ViewInfo.Calculate(Rect(0, 0, NewWidth, NewHeight));
+  NewHeight := ViewInfo.Height;
+  NewWidth := ViewInfo.Width;
+  Result := True;
 end;
 
 procedure TACLColorPalette.InitializeDefaultPalette;
@@ -652,10 +666,14 @@ begin
   Items.Populate(OptionsView.Style);
 end;
 
-procedure TACLColorPalette.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
+{$IFDEF FPC}
+procedure TACLColorPalette.SetBoundsKeepBase(aLeft, aTop, aWidth, aHeight: Integer);
+{$ELSE}
+procedure TACLColorPalette.SetBounds(aLeft, aTop, aWidth, aHeight: Integer);
+{$ENDIF}
 begin
-  ViewInfo.Calculate(Rect(0, 0, AWidth, AHeight));
-  inherited SetBounds(ALeft, ATop, ViewInfo.Width, ViewInfo.Height);
+  CanAutoSize(AWidth, AHeight);
+  inherited;
 end;
 
 procedure TACLColorPalette.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -722,6 +740,11 @@ end;
 procedure TACLColorPalette.SetStyle(AValue: TACLStyleColorPalette);
 begin
   FStyle.Assign(AValue);
+end;
+
+procedure TACLColorPalette.UpdateTransparency;
+begin
+  ControlStyle := ControlStyle - [csOpaque]
 end;
 
 end.

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*            ProgressBar Control            *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   ProgressBar
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.ProgressBar;
 
 {$I ACL.Config.inc}
@@ -16,22 +18,25 @@ unit ACL.UI.Controls.ProgressBar;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLType,
+{$ELSE}
+  {Winapi.}Messages,
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Types,
-  System.Classes,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
   ACL.Timers,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Controls.Buttons,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
   ACL.Utils.DPIAware;
 
@@ -43,8 +48,8 @@ type
   protected
     procedure InitializeResources; override;
   public
-    procedure DrawBackground(DC: HDC; const R: TRect; AEnabled: Boolean);
-    procedure DrawProgress(DC: HDC; const R: TRect);
+    procedure DrawBackground(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean);
+    procedure DrawProgress(ACanvas: TCanvas; const R: TRect);
   published
     property Texture: TACLResourceTexture index 0 read GetTexture write SetTexture stored IsTextureStored;
   end;
@@ -69,12 +74,12 @@ type
     procedure SetStyle(const Value: TACLStyleProgress);
     procedure SetWaitingMode(AValue: Boolean);
   protected
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
-    procedure CalculateProgressRect(var R1, R2: TRect);
+    procedure CalculateProgressRect(out R1, R2: TRect);
     procedure SetTargetDPI(AValue: Integer); override;
     procedure DoTimer(Sender: TObject);
     procedure Paint; override;
-    //
+    procedure UpdateTransparency; override;
+    //# Properties
     property AnimPosition: Integer read FAnimPosition;
     property ProgressAnimSize: Integer read GetProgressAnimSize;
     property ProgressAreaRect: TRect read GetProgressAreaRect;
@@ -95,7 +100,7 @@ type
     property Progress: Single index 2 read FProgress write SetIndex stored IsIndexStored;
     property Visible;
     property WaitingMode: Boolean read FWaitingMode write SetWaitingMode default False;
-
+	//# Events
     property OnClick;
     property OnDblClick;
     property OnMouseDown;
@@ -106,26 +111,24 @@ type
 implementation
 
 uses
-  System.Math,
-  System.SysUtils,
-  // ACL
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Ex.Gdip,
-  ACL.UI.Forms,
-  ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+{$IFNDEF FPC}
+  ACL.Graphics.SkinImageSet, // inlining
+{$ENDIF}
+  ACL.Utils.Common;
 
 { TACLStyleProgress }
 
-procedure TACLStyleProgress.DrawBackground(DC: HDC; const R: TRect; AEnabled: Boolean);
+procedure TACLStyleProgress.DrawBackground(
+  ACanvas: TCanvas; const R: TRect; AEnabled: Boolean);
 begin
-  Texture.Draw(DC, R, 2 * Ord(not AEnabled));
+  Texture.Draw(ACanvas, R, 2 * Ord(not AEnabled));
 end;
 
-procedure TACLStyleProgress.DrawProgress(DC: HDC; const R: TRect);
+procedure TACLStyleProgress.DrawProgress(ACanvas: TCanvas; const R: TRect);
 begin
-  Texture.Draw(DC, R, 1);
+  Texture.Draw(ACanvas, R, 1);
 end;
 
 procedure TACLStyleProgress.InitializeResources;
@@ -149,7 +152,7 @@ begin
   inherited Destroy;
 end;
 
-procedure TACLProgressBar.CalculateProgressRect(var R1, R2: TRect);
+procedure TACLProgressBar.CalculateProgressRect(out R1, R2: TRect);
 var
   AHalfSize: Integer;
 begin
@@ -198,32 +201,24 @@ begin
   Invalidate;
 end;
 
-function TACLProgressBar.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  if Style.Texture.HasAlpha then
-    Result := cbsTransparent
-  else
-    Result := cbsOpaque;
-end;
-
 procedure TACLProgressBar.Paint;
 var
-  ASaveIndex: Integer;
+  LClipRgn: TRegionHandle;
   R1, R2: TRect;
 begin
-  Style.DrawBackground(Canvas.Handle, ClientRect, Enabled);
+  Style.DrawBackground(Canvas, ClientRect, Enabled);
   if Enabled then
   begin
-    ASaveIndex := SaveDC(Canvas.Handle);
+    LClipRgn := acSaveClipRegion(Canvas.Handle);
     try
       if acIntersectClipRegion(Canvas.Handle, ProgressAreaRect) then
       begin
         CalculateProgressRect(R1, R2);
-        Style.DrawProgress(Canvas.Handle, R1);
-        Style.DrawProgress(Canvas.Handle, R2);
+        Style.DrawProgress(Canvas, R1);
+        Style.DrawProgress(Canvas, R2);
       end;
     finally
-      RestoreDC(Canvas.Handle, ASaveIndex);
+      acRestoreClipRegion(Canvas.Handle, LClipRgn);
     end;
   end;
 end;
@@ -273,12 +268,12 @@ begin
       0: begin
            ANeedRedraw := not SameValue(FMax, AValue);
            FMax := AValue;
-           FMin := System.Math.Min(FMin, FMax);
+           FMin := {System.}Math.Min(FMin, FMax);
          end;
       1: begin
            ANeedRedraw := not SameValue(FMin, AValue);
            FMin := AValue;
-           FMax := System.Math.Max(FMin, FMax);
+           FMax := {System.}Math.Max(FMin, FMax);
          end;
       2: begin
            ANeedRedraw := not SameValue(FProgress, AValue);
@@ -306,6 +301,14 @@ begin
     Invalidate;
     Update;
   end;
+end;
+
+procedure TACLProgressBar.UpdateTransparency;
+begin
+  if Style.Texture.HasAlpha then
+    ControlStyle := ControlStyle - [csOpaque]
+  else
+    ControlStyle := ControlStyle + [csOpaque];
 end;
 
 end.

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*               Panel Control               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Panel
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Panel;
 
 {$I ACL.Config.inc}
@@ -16,17 +18,14 @@ unit ACL.UI.Controls.Panel;
 interface
 
 uses
-  System.Types,
-  System.SysUtils,
-  System.Classes,
-  System.Math,
+  {System.}Classes,
+  {System.}SysUtils,
   // VCL
-  Vcl.Controls,
-  Vcl.Consts,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.Utils.Common;
 
 type

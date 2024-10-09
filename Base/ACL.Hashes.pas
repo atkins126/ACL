@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*            Hashing Algorithms             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Hashing Algorithms
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Hashes;
 
 {$I ACL.Config.inc}
@@ -16,11 +18,13 @@ unit ACL.Hashes;
 interface
 
 uses
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}SysUtils,
   System.AnsiStrings,
-  System.Classes,
-  System.Generics.Defaults,
+{$IFDEF MSWINDOWS}
   System.Hash,
-  System.SysUtils,
+{$ENDIF}
   // ACL
   ACL.Classes,
   ACL.Utils.Strings;
@@ -40,7 +44,7 @@ type
     class function Calculate(const AText: AnsiString): Variant; overload; inline;
     class function Calculate(const AText: UnicodeString): Variant; overload; inline;
     class function Calculate(const AText: UnicodeString; AEncoding: TEncoding): Variant; overload; inline;
-    class function CalculateFromFile(const AFileName: UnicodeString; AProgressEvent: TACLProgressEvent = nil): Variant; inline;
+    class function CalculateFromFile(const AFileName: string; AProgressEvent: TACLProgressEvent = nil): Variant; inline;
 
     class function Finalize(var AState: Pointer): Variant; virtual; abstract;
     class procedure Initialize(out AState: Pointer); virtual; abstract;
@@ -51,7 +55,7 @@ type
     class procedure Update(var AState: Pointer; const AText: AnsiString); overload;
     class procedure Update(var AState: Pointer; const AText: UnicodeString); overload;
     class procedure Update(var AState: Pointer; const AText: UnicodeString; AEncoding: TEncoding); overload;
-    class procedure UpdateFromFile(var AState: Pointer; const AFileName: UnicodeString; AProgressEvent: TACLProgressEvent = nil);
+    class procedure UpdateFromFile(var AState: Pointer; const AFileName: string; AProgressEvent: TACLProgressEvent = nil);
   end;
 
   { TACLHash32Bit }
@@ -66,6 +70,10 @@ type
   { TACLHashBobJenkins }
 
   TACLHashBobJenkins = class(TACLHash32Bit)
+  strict private
+  {$IFDEF FPC}
+    class function GetHashValue(const Data; Len, InitVal: Integer): Integer; static;
+  {$ENDIF}
   public
     class procedure Update(var AState: Pointer; AData: PByte; ASize: Cardinal); override;
   end;
@@ -214,29 +222,49 @@ type
     class function GetAlgorithmId: Cardinal; override;
   end;
 
+{$ELSE}
+
+  { TACLHashMD5 }
+
+  TACLHashMD5 = class(TACLHash)
+  public
+    class function Finalize(var AState: Pointer): Variant; override; overload;
+    class procedure Finalize(var AState: Pointer; var AHash: TMD5Byte16); reintroduce; overload;
+    class procedure Initialize(out AState: Pointer); override;
+    class procedure Reset(var AState: Pointer); override;
+    class procedure Update(var AState: Pointer; AData: PByte; ASize: Cardinal); override;
+  end;
+
 {$ENDIF}
 
 // Elf
-function ElfHash(S: PWideChar; ACount: Integer; AIgnoryCase: Boolean): Integer; overload;
-function ElfHash(const S: UnicodeString; AIgnoryCase: Boolean = True): Integer; overload; inline;
+function ElfHash(S: PChar; ACount: Integer; AIgnoryCase: Boolean): Integer; overload;
+function ElfHash(const S: string; AIgnoryCase: Boolean = True): Integer; overload; inline;
 
-function acFileNameHash(const S: UnicodeString): Cardinal; //inline;
+function acFileNameHash(const S: string): Cardinal; inline;
 implementation
 
 {$R-} { Range-Checking }
 {$Q-} { Overflow checking }
 
+{$IFDEF FPC}
+  {$WARN 4056 off : Conversion between ordinals and pointers is not portable}
+{$ENDIF}
+
 uses
 {$IFDEF MSWINDOWS}
   Winapi.Windows,
+{$ELSE}
+  md5,
 {$ENDIF}
   // ACL
+{$IFDEF MSWINDOWS}
   ACL.FastCode,
+{$ENDIF}
   ACL.Utils.Common,
   ACL.Utils.FileSystem;
 
 {$IFDEF MSWINDOWS}
-
 {$REGION 'CryptoAPI Implemenation'}
 type
   HCRYPTHASH = ULONG_PTR;
@@ -254,56 +282,32 @@ type
 
 const
   PROV_RSA_FULL      = 1;
-  {$EXTERNALSYM PROV_RSA_FULL}
   PROV_RSA_SIG       = 2;
-  {$EXTERNALSYM PROV_RSA_SIG}
   PROV_RSA_AES       = 24;
-  {$EXTERNALSYM PROV_RSA_AES}
 
 const
   HP_ALGID         = $0001; // Hash algorithm
-  {$EXTERNALSYM HP_ALGID}
   HP_HASHVAL       = $0002; // Hash value
-  {$EXTERNALSYM HP_HASHVAL}
   HP_HASHSIZE      = $0004; // Hash value size
-  {$EXTERNALSYM HP_HASHSIZE}
   HP_HMAC_INFO     = $0005; // information for creating an HMAC
-  {$EXTERNALSYM HP_HMAC_INFO}
   HP_TLS1PRF_LABEL = $0006; // label for TLS1 PRF
-  {$EXTERNALSYM HP_TLS1PRF_LABEL}
   HP_TLS1PRF_SEED  = $0007; // seed for TLS1 PRF
-  {$EXTERNALSYM HP_TLS1PRF_SEED}
 
-  CALG_MD2	          = $00008001; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_MD2}
-  CALG_MD4          	= $00008002;
-  {$EXTERNALSYM CALG_MD4}
-  CALG_MD5	          = $00008003; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_MD5}
-  CALG_HMAC           = $00008009; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_HMAC}
-  CALG_NO_SIGN	      = $00002000;
-  {$EXTERNALSYM CALG_NO_SIGN}
-  CALG_RC2	          = $00006602; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_RC2}
-  CALG_RC4	          = $00006801; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_RC4}
-  CALG_RC5	          = $0000660d;
-  {$EXTERNALSYM CALG_RC5}
-  CALG_RSA_KEYX	      = $0000a400; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_RSA_KEYX}
-  CALG_RSA_SIGN	      = $00002400; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_RSA_SIGN}
-  CALG_SHA	          = $00008004; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_SHA}
-  CALG_SHA1         	= $00008004; //# Microsoft Base Cryptographic Provider.
-  {$EXTERNALSYM CALG_SHA1}
-  CALG_SHA_256	      = $0000800c; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
-  {$EXTERNALSYM CALG_SHA_256}
-  CALG_SHA_384	      = $0000800d; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
-  {$EXTERNALSYM CALG_SHA_384}
-  CALG_SHA_512	      = $0000800e; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
-  {$EXTERNALSYM CALG_SHA_512}
+  CALG_MD2	   = $00008001; //# Microsoft Base Cryptographic Provider.
+  CALG_MD4         = $00008002;
+  CALG_MD5	   = $00008003; //# Microsoft Base Cryptographic Provider.
+  CALG_HMAC        = $00008009; //# Microsoft Base Cryptographic Provider.
+  CALG_NO_SIGN	   = $00002000;
+  CALG_RC2	   = $00006602; //# Microsoft Base Cryptographic Provider.
+  CALG_RC4	   = $00006801; //# Microsoft Base Cryptographic Provider.
+  CALG_RC5	   = $0000660d;
+  CALG_RSA_KEYX	   = $0000a400; //# Microsoft Base Cryptographic Provider.
+  CALG_RSA_SIGN	   = $00002400; //# Microsoft Base Cryptographic Provider.
+  CALG_SHA	   = $00008004; //# Microsoft Base Cryptographic Provider.
+  CALG_SHA1        = $00008004; //# Microsoft Base Cryptographic Provider.
+  CALG_SHA_256	   = $0000800c; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
+  CALG_SHA_384	   = $0000800d; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
+  CALG_SHA_512	   = $0000800e; //# Microsoft Enhanced RSA and AES Cryptographic Provider, Windows XP with SP3 and newer
 
 function CryptCreateHash(hProv: HCRYPTPROV; Algid: Cardinal; hKey: HCRYPTKEY; dwFlags: DWORD; var phHash: HCRYPTHASH): BOOL; stdcall; external advapi32;
 {$EXTERNALSYM CryptCreateHash}
@@ -326,27 +330,30 @@ function CryptDestroyKey(hKey: HCRYPTKEY): BOOL; stdcall; external advapi32;
 {$ENDREGION}
 {$ENDIF}
 
-function acFileNameHash(const S: UnicodeString): Cardinal;
+function acFileNameHash(const S: string): Cardinal;
+{$IFDEF MSWINDOWS}
 var
   LCount: Integer;
   LPath: TFileLongPath;
+{$ENDIF}
 begin
   // тоже самое, но просто с меньшим числом вызовов
-//  Result := TACLHashBobJenkins.Calculate(acLowerCase(S), nil);
+{$IFDEF MSWINDOWS}
   LCount := LCMapString(LOCALE_INVARIANT, LCMAP_LOWERCASE, PChar(S), Length(S), @LPath[0], Length(LPath));
-  Result := THashBobJenkins.GetHashValue(LPath[0], LCount * SizeOf(WideChar), 0);
+  Result := THashBobJenkins.GetHashValue(LPath[0], LCount * SizeOf(Char), 0);
+{$ELSE}
+  Result := TACLHashBobJenkins.Calculate(acLowerCase(S));
+{$ENDIF}
 end;
 
 //==============================================================================
 // ELF Hash
 //==============================================================================
 
-function ElfHash(S: PWideChar; ACount: Integer; AIgnoryCase: Boolean): Integer;
-const
-  ElfHashUpCaseBufferSize = 64;
+function ElfHash(S: PChar; ACount: Integer; AIgnoryCase: Boolean): Integer;
 var
 {$IFDEF MSWINDOWS}
-  ABuffer: array[0..ElfHashUpCaseBufferSize - 1] of WideChar;
+  ABuffer: array[0..63] of WideChar;
 {$ENDIF}
   AIndex: Integer;
 begin
@@ -374,9 +381,13 @@ begin
   end;
 end;
 
-function ElfHash(const S: UnicodeString; AIgnoryCase: Boolean = True): Integer;
+function ElfHash(const S: string; AIgnoryCase: Boolean = True): Integer;
 begin
-  Result := ElfHash(PWideChar(S), Length(S), AIgnoryCase);
+{$IFNDEF MSWINDOWS}
+  if AIgnoryCase then
+    Exit(ElfHash(acUpperCase(S), False));
+{$ENDIF}
+  Result := ElfHash(PChar(S), Length(S), AIgnoryCase);
 end;
 
 { TACLHash }
@@ -436,7 +447,8 @@ begin
   Result := Calculate(AStream.Memory, AStream.Size);
 end;
 
-class function TACLHash.CalculateFromFile(const AFileName: UnicodeString; AProgressEvent: TACLProgressEvent): Variant;
+class function TACLHash.CalculateFromFile(
+  const AFileName: string; AProgressEvent: TACLProgressEvent): Variant;
 var
   AState: Pointer;
 begin
@@ -454,7 +466,7 @@ end;
 class procedure TACLHash.Update(var AState: Pointer; const AText: AnsiString);
 begin
   if AText <> '' then
-    Update(AState, @AText[1], Length(AText));
+    Update(AState, PByte(PAnsiChar(AText)), Length(AText));
 end;
 
 class procedure TACLHash.Update(var AState: Pointer; const AText: UnicodeString);
@@ -469,7 +481,7 @@ begin
     if AEncoding <> nil then
       Update(AState, AEncoding.GetBytes(AText))
     else
-      Update(AState, PByte(PWideChar(AText)), Length(AText) * SizeOf(Char));
+      Update(AState, PByte(PWideChar(AText)), Length(AText) * SizeOf(WideChar));
   end;
 end;
 
@@ -493,14 +505,15 @@ begin
   end
   else
     repeat
-      ALength := AStream.Read(AData, SizeOf(AData));
+      ALength := AStream.Read(AData{%H-}, SizeOf(AData));
       APosition := AStream.Position;
       Update(AState, @AData[0], ALength);
       CallProgressEvent(AProgressEvent, APosition, ASize);
     until APosition = ASize;
 end;
 
-class procedure TACLHash.UpdateFromFile(var AState: Pointer; const AFileName: UnicodeString; AProgressEvent: TACLProgressEvent);
+class procedure TACLHash.UpdateFromFile(var AState: Pointer;
+  const AFileName: string; AProgressEvent: TACLProgressEvent);
 var
   AStream: TACLFileStream;
 begin
@@ -536,13 +549,184 @@ begin
 {$REGION ' Overflow workaround '}
   while ASize >= SIZE_ONE_GIGABYTE do
   begin
-    AState := Pointer(THashBobJenkins.GetHashValue(AData^, SIZE_ONE_GIGABYTE, Integer(AState)));
+    AState := Pointer({$IFNDEF FPC}THashBobJenkins.{$ENDIF}GetHashValue(AData^, SIZE_ONE_GIGABYTE, Integer(AState)));
     Inc(AData, SIZE_ONE_GIGABYTE);
     Dec(ASize, SIZE_ONE_GIGABYTE);
   end;
 {$ENDREGION}
-  AState := Pointer(THashBobJenkins.GetHashValue(AData^, ASize, Integer(AState)));
+  AState := Pointer({$IFNDEF FPC}THashBobJenkins.{$ENDIF}GetHashValue(AData^, ASize, Integer(AState)));
 end;
+
+{$IFDEF FPC}
+{$REGION 'HashLittle'}
+class function TACLHashBobJenkins.GetHashValue(const Data; Len, InitVal: Integer): Integer;
+
+  function Rot(x, k: Cardinal): Cardinal; inline;
+  begin
+    Result := (x shl k) or (x shr (32 - k));
+  end;
+
+  procedure Mix(var a, b, c: Cardinal); inline;
+  begin
+    Dec(a, c); a := a xor Rot(c, 4); Inc(c, b);
+    Dec(b, a); b := b xor Rot(a, 6); Inc(a, c);
+    Dec(c, b); c := c xor Rot(b, 8); Inc(b, a);
+    Dec(a, c); a := a xor Rot(c,16); Inc(c, b);
+    Dec(b, a); b := b xor Rot(a,19); Inc(a, c);
+    Dec(c, b); c := c xor Rot(b, 4); Inc(b, a);
+  end;
+
+  procedure Final(var a, b, c: Cardinal); inline;
+  begin
+    c := c xor b; Dec(c, Rot(b,14));
+    a := a xor c; Dec(a, Rot(c,11));
+    b := b xor a; Dec(b, Rot(a,25));
+    c := c xor b; Dec(c, Rot(b,16));
+    a := a xor c; Dec(a, Rot(c, 4));
+    b := b xor a; Dec(b, Rot(a,14));
+    c := c xor b; Dec(c, Rot(b,24));
+  end;
+
+{$POINTERMATH ON}
+var
+  pb: PByte;
+  pd: PCardinal absolute pb;
+  a, b, c: Cardinal;
+label
+  case_1, case_2, case_3, case_4, case_5, case_6,
+  case_7, case_8, case_9, case_10, case_11, case_12;
+begin
+  a := Cardinal($DEADBEEF) + Cardinal(Len) + Cardinal(InitVal);
+  b := a;
+  c := a;
+
+  pb := @Data;
+
+  // 4-byte aligned data
+  if (Cardinal(pb) and 3) = 0 then
+  begin
+    while Len > 12 do
+    begin
+      Inc(a, pd[0]);
+      Inc(b, pd[1]);
+      Inc(c, pd[2]);
+      Mix(a, b, c);
+      Dec(Len, 12);
+      Inc(pd, 3);
+    end;
+
+    case Len of
+      0: Exit(Integer(c));
+      1: Inc(a, pd[0] and $FF);
+      2: Inc(a, pd[0] and $FFFF);
+      3: Inc(a, pd[0] and $FFFFFF);
+      4: Inc(a, pd[0]);
+      5:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1] and $FF);
+      end;
+      6:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1] and $FFFF);
+      end;
+      7:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1] and $FFFFFF);
+      end;
+      8:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1]);
+      end;
+      9:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1]);
+        Inc(c, pd[2] and $FF);
+      end;
+      10:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1]);
+        Inc(c, pd[2] and $FFFF);
+      end;
+      11:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1]);
+        Inc(c, pd[2] and $FFFFFF);
+      end;
+      12:
+      begin
+        Inc(a, pd[0]);
+        Inc(b, pd[1]);
+        Inc(c, pd[2]);
+      end;
+    end;
+  end
+  else
+  begin
+    // Ignoring rare case of 2-byte aligned data. This handles all other cases.
+    while Len > 12 do
+    begin
+      Inc(a, pb[0] + pb[1] shl 8 + pb[2] shl 16 + pb[3] shl 24);
+      Inc(b, pb[4] + pb[5] shl 8 + pb[6] shl 16 + pb[7] shl 24);
+      Inc(c, pb[8] + pb[9] shl 8 + pb[10] shl 16 + pb[11] shl 24);
+      Mix(a, b, c);
+      Dec(Len, 12);
+      Inc(pb, 12);
+    end;
+
+    case Len of
+      0: Exit(Integer(c));
+      1: goto case_1;
+      2: goto case_2;
+      3: goto case_3;
+      4: goto case_4;
+      5: goto case_5;
+      6: goto case_6;
+      7: goto case_7;
+      8: goto case_8;
+      9: goto case_9;
+      10: goto case_10;
+      11: goto case_11;
+      12: goto case_12;
+    end;
+
+case_12:
+    Inc(c, pb[11] shl 24);
+case_11:
+    Inc(c, pb[10] shl 16);
+case_10:
+    Inc(c, pb[9] shl 8);
+case_9:
+    Inc(c, pb[8]);
+case_8:
+    Inc(b, pb[7] shl 24);
+case_7:
+    Inc(b, pb[6] shl 16);
+case_6:
+    Inc(b, pb[5] shl 8);
+case_5:
+    Inc(b, pb[4]);
+case_4:
+    Inc(a, pb[3] shl 24);
+case_3:
+    Inc(a, pb[2] shl 16);
+case_2:
+    Inc(a, pb[1] shl 8);
+case_1:
+    Inc(a, pb[0]);
+  end;
+
+  Final(a, b, c);
+  Result := Integer(c);
+end;
+{$ENDREGION}
+{$ENDIF}
 
 { TACLHashCRC32 }
 
@@ -756,6 +940,45 @@ end;
 class function TACLHashSHA512.GetAlgorithmId: Cardinal;
 begin
   Result := CALG_SHA_512;
+end;
+
+{$ELSE}
+
+{ TACLHashMD5 }
+
+class function TACLHashMD5.Finalize(var AState: Pointer): Variant;
+var
+  LHash: TMD5Digest;
+begin
+  MD5Final(PMD5Context(AState)^, LHash);
+  FreeMemAndNil(AState);
+  Result := MD5Print(LHash);
+end;
+
+class procedure TACLHashMD5.Finalize(var AState: Pointer; var AHash: TMD5Byte16);
+begin
+  MD5Final(PMD5Context(AState)^, PMD5Digset(@AHash)^);
+  FreeMemAndNil(AState);
+end;
+
+class procedure TACLHashMD5.Initialize(out AState: Pointer);
+var
+  LContext: PMD5Context;
+begin
+  New(LContext);
+  MD5Init(LContext^);
+  AState := LContext;
+end;
+
+class procedure TACLHashMD5.Reset(var AState: Pointer);
+begin
+  FreeMemAndNil(AState);
+  Initialize(AState);
+end;
+
+class procedure TACLHashMD5.Update(var AState: Pointer; AData: PByte; ASize: Cardinal);
+begin
+  MD5Update(PMD5Context(AState)^, AData^, ASize);
 end;
 
 {$ENDIF}

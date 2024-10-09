@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*               Math Routines               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Mathematics routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Math;
 
 {$I ACL.Config.inc}
@@ -16,7 +18,14 @@ unit ACL.Math;
 interface
 
 uses
-  System.Math;
+  {System.}Math;
+
+{$IFDEF FPC}
+const
+  exAllArithmeticExceptions = [
+    exInvalidOp, exDenormalized, exZeroDivide,
+    exOverflow, exUnderflow, exPrecision];
+{$ENDIF}
 
 type
   TACLMath = class
@@ -40,15 +49,15 @@ function Swap16(const AValue: Word): Word;
 function Swap32(const AValue: Integer): Integer;
 function Swap64(const AValue: Int64): Int64;
 
+// 64-bit int utils
 function HiInteger(const A: UInt64): Integer;
 function LoInteger(const A: UInt64): Integer;
 function MakeInt64(const A, B: Integer): UInt64;
+function MulDiv(const AValue, ANumerator, ADenominator: Integer): Integer;
 function MulDiv64(const AValue, ANumerator, ADenominator: Int64): Int64;
 implementation
 
-//==============================================================================
-// MaxMin
-//==============================================================================
+{ MinMax / MaxMin }
 
 function MaxMin(const AValue, AMinValue, AMaxValue: Double): Double; overload;
 begin
@@ -90,12 +99,10 @@ begin
   Result := Min(Max(AValue, AMinValue), AMaxValue);
 end;
 
-//==============================================================================
-// Swapping
-//==============================================================================
+{ Swapping }
 
 function Swap16(const AValue: Word): Word;
-{$IFDEF CPUX64}
+{$IFDEF ACL_PUREPASCAL}
 var
   B: array [0..1] of Byte absolute AValue;
 begin
@@ -109,7 +116,7 @@ end;
 {$ENDIF}
 
 function Swap32(const AValue: Integer): Integer;
-{$IFDEF CPUX64}
+{$IFDEF ACL_PUREPASCAL}
 var
   B: array [0..3] of Byte absolute AValue;
 begin
@@ -144,6 +151,11 @@ end;
 function MakeInt64(const A, B: Integer): UInt64;
 begin
   Result := UInt64(A) or (UInt64(B) shl 32);
+end;
+
+function MulDiv(const AValue, ANumerator, ADenominator: Integer): Integer;
+begin
+  Result := (AValue * ANumerator) div ADenominator;
 end;
 
 function MulDiv64(const AValue, ANumerator, ADenominator: Int64): Int64;

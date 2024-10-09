@@ -1,44 +1,48 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             TreeList Control              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2024                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   TreeList
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.TreeList;
 
-{$I ACL.Config.INC}
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
+  {System.}Classes,
   System.UITypes,
-  System.Types,
-  System.Classes,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.StdCtrls,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}StdCtrls,
   // ACL
   ACL.Classes,
   ACL.FileFormats.INI,
   ACL.Graphics,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
-  ACL.UI.Controls.Buttons,
   ACL.UI.Controls.CompoundControl,
   ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Controls.TreeList.Options,
   ACL.UI.Controls.TreeList.SubClass,
   ACL.UI.Controls.TreeList.Types,
-  ACL.UI.HintWindow,
   ACL.UI.Menus,
   ACL.UI.Resources;
 
@@ -66,7 +70,7 @@ type
     function GetOnCustomDrawColumnBar: TACLCustomDrawEvent;
     function GetOnCustomDrawNode: TACLTreeListCustomDrawNodeEvent;
     function GetOnCustomDrawNodeCell: TACLTreeListCustomDrawNodeCellEvent;
-    function GetOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellValueEvent;
+    function GetOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellEvent;
     function GetOnDragSorting: TNotifyEvent;
     function GetOnDragSortingNodeDrop: TACLTreeListDragSortingNodeDrop;
     function GetOnDragSortingNodeOver: TACLTreeListDragSortingNodeOver;
@@ -120,7 +124,7 @@ type
     procedure SetOnCustomDrawColumnBar(const AValue: TACLCustomDrawEvent);
     procedure SetOnCustomDrawNode(const AValue: TACLTreeListCustomDrawNodeEvent);
     procedure SetOnCustomDrawNodeCell(const AValue: TACLTreeListCustomDrawNodeCellEvent);
-    procedure SetOnCustomDrawNodeCellValue(const Value: TACLTreeListCustomDrawNodeCellValueEvent);
+    procedure SetOnCustomDrawNodeCellValue(const Value: TACLTreeListCustomDrawNodeCellEvent);
     procedure SetOnDragSorting(const Value: TNotifyEvent);
     procedure SetOnDragSortingNodeDrop(const Value: TACLTreeListDragSortingNodeDrop);
     procedure SetOnDragSortingNodeOver(const Value: TACLTreeListDragSortingNodeOver);
@@ -157,14 +161,14 @@ type
     procedure SetStyle(const AValue: TACLStyleTreeList);
     procedure SetViewportX(const Value: Integer);
     procedure SetViewportY(const Value: Integer);
-    //
+    //# Messages
     procedure WMGetDlgCode(var AMessage: TWMGetDlgCode); message WM_GETDLGCODE;
   protected
     function CreateSubClass: TACLCompoundControlSubClass; override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
+    procedure UpdateTransparency; override;
     // IACLFocusableControl2
     procedure SetFocusOnSearchResult;
-    //
+    //# Properties
     property Columns: TACLTreeListColumns read GetColumns write SetColumns;
     property OptionsBehavior: TACLTreeListOptionsBehavior read GetOptionsBehavior write SetOptionsBehavior;
     property OptionsCustomizing: TACLTreeListOptionsCustomizing read GetOptionsCustomizing write SetOptionsCustomizing;
@@ -174,20 +178,20 @@ type
     property StyleInplaceEditButton: TACLStyleEditButton read GetStyleInplaceEditButton write SetStyleInplaceEditButton;
     property StyleMenu: TACLStylePopupMenu read GetStyleMenu write SetStyleMenu;
     property Style: TACLStyleTreeList read GetStyle write SetStyle;
-    //
+    //# Events
     property OnCanDeleteSelected: TACLTreeListConfirmationEvent read GetOnCanDeleteSelected write SetOnCanDeleteSelected;
     property OnColumnClick: TACLTreeListColumnClickEvent read GetOnColumnClick write SetOnColumnClick;
     property OnCompare: TACLTreeListNodeCompareEvent read GetOnCompare write SetOnCompare;
     property OnCustomDrawColumnBar: TACLCustomDrawEvent read GetOnCustomDrawColumnBar write SetOnCustomDrawColumnBar;
     property OnCustomDrawNode: TACLTreeListCustomDrawNodeEvent read GetOnCustomDrawNode write SetOnCustomDrawNode;
     property OnCustomDrawNodeCell: TACLTreeListCustomDrawNodeCellEvent read GetOnCustomDrawNodeCell write SetOnCustomDrawNodeCell;
-    property OnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellValueEvent read GetOnCustomDrawNodeCellValue write SetOnCustomDrawNodeCellValue;
+    property OnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellEvent read GetOnCustomDrawNodeCellValue write SetOnCustomDrawNodeCellValue;
     property OnDragSorting: TNotifyEvent read GetOnDragSorting write SetOnDragSorting;
     property OnDragSortingNodeDrop: TACLTreeListDragSortingNodeDrop read GetOnDragSortingNodeDrop write SetOnDragSortingNodeDrop;
     property OnDragSortingNodeOver: TACLTreeListDragSortingNodeOver read GetOnDragSortingNodeOver write SetOnDragSortingNodeOver;
     property OnDrop: TACLTreeListDropEvent read GetOnDrop write SetOnDrop;
     property OnDropOver: TACLTreeListDropOverEvent read GetOnDropOver write SetOnDropOver;
-    property OnEditApply: TACLTreeListEditingEvent read GetOnEditing write SetOnEditing;
+    property OnEditApply: TACLTreeListEditingEvent read GetOnEditing write SetOnEditing stored False; // legacy
     property OnEditing: TACLTreeListEditingEvent read GetOnEditing write SetOnEditing;
     property OnEdited: TACLTreeListEditedEvent read GetOnEdited write SetOnEdited;
     property OnEditCreate: TACLTreeListEditCreateEvent read GetOnEditCreate write SetOnEditCreate;
@@ -219,8 +223,8 @@ type
     procedure StartEditing(AColumn: TACLTreeListColumn = nil); inline;
 
     // Customized Settings
-    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString); inline;
-    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString); inline;
+    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string); inline;
+    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string); inline;
 
     // Make Top/Visible
     procedure MakeFirstVisibleFocused;
@@ -240,9 +244,9 @@ type
     procedure SortBy(AColumn: TACLTreeListColumn; AResetPrevSortingParams: Boolean = False); overload; inline;
 
     // Paths
-    function GetPath: UnicodeString; overload; inline;
-    function GetPath(ANode: TACLTreeListNode): UnicodeString; overload; inline;
-    procedure SetPath(const APath: UnicodeString); inline;
+    function GetPath: string; overload; inline;
+    function GetPath(ANode: TACLTreeListNode): string; overload; inline;
+    procedure SetPath(const APath: string); inline;
 
     // Selection
     procedure SelectAll; inline;
@@ -274,8 +278,9 @@ type
   TACLTreeList = class(TACLCustomTreeList)
   published
     property OnGetNodeClass; // must be first!
-    //
+    //# Properties
     property Columns;
+    property FocusOnClick default True;
     property OptionsBehavior;
     property OptionsCustomizing;
     property OptionsSelection;
@@ -286,12 +291,12 @@ type
     property StyleInplaceEdit;
     property StyleInplaceEditButton;
     property StyleScrollBox;
-    //
+    //# CustomDraw Events
     property OnCustomDrawColumnBar;
     property OnCustomDrawNode;
     property OnCustomDrawNodeCell;
     property OnCustomDrawNodeCellValue;
-    //
+    //# Events
     property OnCalculated;
     property OnCanDeleteSelected;
     property OnClick;
@@ -344,8 +349,10 @@ implementation
 constructor TACLCustomTreeList.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+{$IFNDEF FPC}
   Touch.InteractiveGestures := [igPan];
   Touch.InteractiveGestureOptions := [igoPanSingleFingerVertical, igoPanSingleFingerHorizontal, igoPanInertia];
+{$ENDIF}
   FocusOnClick := True;
   TabStop := True;
 end;
@@ -384,12 +391,20 @@ begin
     SubClass.StartEditing(FocusedNode, AColumn);
 end;
 
-procedure TACLCustomTreeList.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLCustomTreeList.UpdateTransparency;
+begin
+  if Style.BackgroundColor.HasAlpha then
+    ControlStyle := ControlStyle - [csOpaque]
+  else
+    ControlStyle := ControlStyle + [csOpaque];
+end;
+
+procedure TACLCustomTreeList.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   SubClass.ConfigLoad(AConfig, ASection, AItem);
 end;
 
-procedure TACLCustomTreeList.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLCustomTreeList.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   SubClass.ConfigSave(AConfig, ASection, AItem);
 end;
@@ -450,17 +465,17 @@ begin
   SubClass.SortBy(AColumn, AResetPrevSortingParams);
 end;
 
-function TACLCustomTreeList.GetPath: UnicodeString;
+function TACLCustomTreeList.GetPath: string;
 begin
   Result := GetPath(FocusedNode);
 end;
 
-function TACLCustomTreeList.GetPath(ANode: TACLTreeListNode): UnicodeString;
+function TACLCustomTreeList.GetPath(ANode: TACLTreeListNode): string;
 begin
   Result := SubClass.GetPath(ANode);
 end;
 
-procedure TACLCustomTreeList.SetPath(const APath: UnicodeString);
+procedure TACLCustomTreeList.SetPath(const APath: string);
 begin
   SubClass.SetPath(APath);
 end;
@@ -478,14 +493,6 @@ end;
 function TACLCustomTreeList.CreateSubClass: TACLCompoundControlSubClass;
 begin
   Result := TACLTreeListSubClass.Create(Self);
-end;
-
-function TACLCustomTreeList.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  if Style.BackgroundColor.HasAlpha then
-    Result := cbsSemitransparent
-  else
-    Result := cbsOpaque;
 end;
 
 procedure TACLCustomTreeList.SetFocusOnSearchResult;
@@ -585,7 +592,7 @@ begin
   Result := SubClass.OnCustomDrawNodeCell;
 end;
 
-function TACLCustomTreeList.GetOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellValueEvent;
+function TACLCustomTreeList.GetOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellEvent;
 begin
   Result := SubClass.OnCustomDrawNodeCellValue;
 end;
@@ -850,7 +857,7 @@ begin
   SubClass.OnCustomDrawNodeCell := AValue;
 end;
 
-procedure TACLCustomTreeList.SetOnCustomDrawNodeCellValue(const Value: TACLTreeListCustomDrawNodeCellValueEvent);
+procedure TACLCustomTreeList.SetOnCustomDrawNodeCellValue(const Value: TACLTreeListCustomDrawNodeCellEvent);
 begin
   SubClass.OnCustomDrawNodeCellValue := Value;
 end;

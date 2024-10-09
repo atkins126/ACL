@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*          Magnifier Glass Control          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Magnifier Glass
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.MagnifierGlass;
 
 {$I ACL.Config.inc}
@@ -16,21 +18,25 @@ unit ACL.UI.Controls.MagnifierGlass;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+  Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  Windows,
+{$ENDIF}
   // System
-  System.Types,
-  System.SysUtils,
-  System.Classes,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // VCL
-  Vcl.Graphics,
+  {Vcl.}Graphics,
   // ACL
-  ACL.Math,
-  ACL.Classes,
-  ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
-  ACL.UI.Controls.BaseControls,
+  ACL.Timers,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
   ACL.Utils.DPIAware;
 
@@ -49,7 +55,7 @@ type
 
   TACLMagnifierGlass = class(TACLContainer)
   strict private
-    FBuffer: TACLBitmapLayer;
+    FBuffer: TACLDib;
     FColorAtPoint: TColor;
     FShowGridLines: Boolean;
     FZoom: Integer;
@@ -63,25 +69,25 @@ type
     procedure SetShowGridLines(AValue: Boolean);
     procedure SetStyle(const Value: TACLStyleMagnifierGlass);
     procedure SetZoom(AZoom: Integer);
-    procedure WMTimer(var Message: TWMTimer); message WM_TIMER;
+    procedure WMTimer(var Message: TMessage); message WM_TIMER;
   protected
     procedure DoUpdate;
 
+    procedure BoundsChanged; override;
     function CreateStyle: TACLStyleBackground; override;
     procedure CreateWnd; override;
     procedure DestroyWnd; override;
     procedure Loaded; override;
     procedure Paint; override;
     procedure PrepareBuffer(const ACursorPos: TPoint);
-    procedure Resize; override;
     procedure SetTargetDPI(AValue: Integer); override;
     procedure UpdateSizes;
-
+    //# Properties
     property ZoomActual: Integer read GetZoomActual;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    //
+    //# Properties
     property ColorAtPoint: TColor read FColorAtPoint;
   published
     property Align;
@@ -89,14 +95,13 @@ type
     property ShowGridLines: Boolean read FShowGridLines write SetShowGridLines default True;
     property Style: TACLStyleMagnifierGlass read GetStyle write SetStyle;
     property Zoom: Integer read FZoom write SetZoom default 2;
-    //
+    //# Events
     property OnUpdate: TNotifyEvent read FOnUpdate write FOnUpdate;
   end;
 
 implementation
 
 uses
-  System.Math,
   // ACL
   ACL.Utils.Common,
   ACL.Utils.Desktop;
@@ -149,9 +154,9 @@ begin
   if Assigned(OnUpdate) then OnUpdate(Self);
 end;
 
-procedure TACLMagnifierGlass.Resize;
+procedure TACLMagnifierGlass.BoundsChanged;
 begin
-  inherited Resize;
+  inherited;
   UpdateSizes;
 end;
 
@@ -164,20 +169,19 @@ end;
 procedure TACLMagnifierGlass.Paint;
 begin
   PrepareBuffer(MouseCursorPos);
-  FBuffer.DrawCopy(Canvas.Handle, NullPoint);
-  inherited Paint;
+  FBuffer.DrawCopy(Canvas, NullPoint);
 end;
 
 procedure TACLMagnifierGlass.PrepareBuffer(const ACursorPos: TPoint);
 
-  procedure DrawBackground(DC: HDC; const R: TRect);
+  procedure DrawBackground(ACanvas: TCanvas; const R: TRect);
   begin
     if csDesigning in ComponentState then
-      acFillRect(DC, R, Style.ColorContent1.AsColor)
+      acFillRect(ACanvas, R, Style.ColorContent1.AsColor)
     else
     begin
-      acFillRect(DC, R, clBlack);
-      acStretchBlt(DC, ScreenCanvas.Handle, R, Bounds(
+      acFillRect(ACanvas, R, clBlack);
+      acStretchBlt(ACanvas.Handle, ScreenCanvas.Handle, R, Bounds(
         ACursorPos.X - FZoomedSize.cx div 2 + 1,
         ACursorPos.Y - FZoomedSize.cy div 2 + 1,
         FZoomedSize.cx, FZoomedSize.cy));
@@ -187,7 +191,7 @@ procedure TACLMagnifierGlass.PrepareBuffer(const ACursorPos: TPoint);
 
   procedure DrawGridLines(DC: HDC; const R: TRect);
   var
-    ABrush: THandle;
+    ABrush: HBRUSH;
     I, W, S: Integer;
   begin
     S := Ord(ZoomActual >= 20) + Ord(ZoomActual >= 5);
@@ -210,7 +214,7 @@ var
 begin
   if not FBuffer.Empty then
   begin
-    DrawBackground(FBuffer.Canvas.Handle, FBuffer.ClientRect);
+    DrawBackground(FBuffer.Canvas, FBuffer.ClientRect);
     if (Zoom > 2) and ShowGridLines then
       DrawGridLines(FBuffer.Canvas.Handle, FBuffer.ClientRect);
 
@@ -230,13 +234,13 @@ end;
 
 procedure TACLMagnifierGlass.UpdateSizes;
 var
-  AOldBuffer: TACLBitmapLayer;
+  AOldBuffer: TACLDib;
 begin
   FZoomedSize.cx := Trunc(Width / ZoomActual);
   FZoomedSize.cy := Trunc(Height / ZoomActual);
 
   AOldBuffer := FBuffer;
-  FBuffer := TACLBitmapLayer.Create(Width - Width mod ZoomActual, Height - Height mod ZoomActual);
+  FBuffer := TACLDib.Create(Width - Width mod ZoomActual, Height - Height mod ZoomActual);
   FreeAndNil(AOldBuffer);
 end;
 
@@ -280,7 +284,7 @@ end;
 
 procedure TACLMagnifierGlass.SetZoom(AZoom: Integer);
 begin
-  AZoom := MinMax(AZoom, 2, 50);
+  AZoom := EnsureRange(AZoom, 2, 50);
   if AZoom <> FZoom then
   begin
     FZoom := AZoom;
@@ -289,7 +293,7 @@ begin
   end;
 end;
 
-procedure TACLMagnifierGlass.WMTimer(var Message: TWMTimer);
+procedure TACLMagnifierGlass.WMTimer(var Message: TMessage);
 begin
   DoUpdate;
   Invalidate;

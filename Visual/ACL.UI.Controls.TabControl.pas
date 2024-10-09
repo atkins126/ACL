@@ -1,50 +1,54 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*         TabControl & PageControl          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   TabControl/PageControl
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.TabControl;
 
-{$I ACL.Config.INC}
+{$I ACL.Config.inc}
 
 interface
 
 uses
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
   Winapi.Windows,
-  Winapi.Messages,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Classes,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
-  Vcl.Forms,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
   ACL.Math,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Forms,
+  ACL.MUI,
+  ACL.UI.Controls.Base,
   ACL.UI.Insight,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
   ACL.Utils.Desktop,
-  ACL.Utils.FileSystem,
   ACL.Utils.Strings;
 
 type
@@ -53,7 +57,7 @@ type
 
   { TACLStyleTabControl }
 
-  TACLTabsStyle = (tsTab, tsHeader);
+  TACLTabsStyle = (tsTab, tsHeader, tsHeaderAlt);
 
   TACLStyleTabControl = class(TACLStyle)
   public const
@@ -75,11 +79,11 @@ type
 
   TACLTab = class(TCollectionItem)
   strict private
-    FCaption: UnicodeString;
+    FCaption: string;
     FData: Pointer;
     FVisible: Boolean;
 
-    procedure SetCaption(const AValue: UnicodeString);
+    procedure SetCaption(const AValue: string);
     procedure SetVisible(AValue: Boolean);
   public
     constructor Create(Collection: TCollection); override;
@@ -87,7 +91,7 @@ type
     //# Properties
     property Data: Pointer read FData write FData;
   published
-    property Caption: UnicodeString read FCaption write SetCaption;
+    property Caption: string read FCaption write SetCaption;
     property Visible: Boolean read FVisible write SetVisible default True;
   end;
 
@@ -96,7 +100,6 @@ type
   TACLTabsList = class(TCollection)
   strict private
     FControl: TACLCustomTabControl;
-
     function GetItem(Index: Integer): TACLTab;
   protected
     function GetOwner: TPersistent; override;
@@ -104,8 +107,8 @@ type
   public
     constructor Create(AControl: TACLCustomTabControl); virtual;
     function Add: TACLTab; overload;
-    function Add(const ACaption: UnicodeString; AData: Pointer = nil): TACLTab; overload;
-    function FindByCaption(const ACaption: UnicodeString; out ATab: TACLTab): Boolean;
+    function Add(const ACaption: string; AData: Pointer = nil): TACLTab; overload;
+    function FindByCaption(const ACaption: string; out ATab: TACLTab): Boolean;
     //# Properties
     property Items[Index: Integer]: TACLTab read GetItem; default;
   end;
@@ -192,15 +195,13 @@ type
     FFrameRect: TRect;
     FTabAreaRect: TRect;
 
-    function CreatePadding: TACLPadding; override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
-    function HitTest(X, Y: Integer; var AViewItem: TACLTabViewItem): Boolean;
-    function IsTabVisible(AIndex: Integer): Boolean;
     procedure AdjustClientRect(var Rect: TRect); override;
     procedure BoundsChanged; override;
-    procedure SetDefaultSize; override;
-    procedure SetTargetDPI(AValue: Integer); override;
+    function CreatePadding: TACLPadding; override;
     procedure CreateWnd; override;
+    function IsTabVisible(AIndex: Integer): Boolean;
+    procedure SetTargetDPI(AValue: Integer); override;
+    procedure UpdateTransparency; override;
     procedure ValidateActiveTab;
     procedure ValidateFocus; virtual;
 
@@ -208,7 +209,7 @@ type
     function CalculateTabPlaceIndents(AItem: TACLTabViewItem): TRect; virtual;
     function CalculateTabTextOffsets(AItem: TACLTabViewItem): TRect; virtual;
     function CalculateTabWidth(AItem: TACLTabViewItem): Integer; virtual;
-    function CalculateTextSize(const ACaption: UnicodeString): TSize; virtual;
+    function CalculateTextSize(const ACaption: string): TSize; virtual;
     procedure Calculate;
     procedure CalculateCore; virtual;
     procedure CalculateTabPlaces(const R: TRect); virtual;
@@ -222,7 +223,6 @@ type
     procedure DrawItem(ACanvas: TCanvas; AViewItem: TACLTabViewItem); virtual;
     procedure DrawItems(ACanvas: TCanvas); virtual;
     procedure DrawItemText(ACanvas: TCanvas; AViewItem: TACLTabViewItem); virtual;
-    procedure DrawTransparentBackground(ACanvas: TCanvas; const R: TRect); override;
     procedure Paint; override;
 
     // Keyboard
@@ -249,6 +249,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    function HitTest(X, Y: Integer; out AViewItem: TACLTabViewItem): Boolean;
     procedure JumpToNextPage(AForward: Boolean);
     //# Properties
     property HoverTab: TACLTab read FHoverTab;
@@ -301,8 +302,7 @@ type
     procedure CMTextChanged(var Message: TMessage); message CM_TEXTCHANGED;
   protected
     FTab: TACLTab;
-
-    procedure DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect); override;
+    procedure Paint; override;
     procedure SetParent(AParent: TWinControl); override;
     procedure UpdateTab;
   public
@@ -311,16 +311,12 @@ type
     //# Properties
     property Active: Boolean read GetActive;
     property PageControl: TACLPageControl read GetPageControl write SetPageControl;
+    property Tab: TACLTab read FTab; {nullable}
   published
     property Caption;
     property Padding;
     property PageIndex: Integer read GetPageIndex write SetPageIndex stored False;
     property PageVisible: Boolean read FPageVisible write SetPageVisible default True;
-    //# Useless
-    property Height stored False;
-    property Left stored False;
-    property Top stored False;
-    property Width stored False;
   end;
 
   { TACLPageControl }
@@ -341,9 +337,9 @@ type
     procedure ValidateFocus; override;
     procedure ValidateInsert(AComponent: TComponent); override;
   public
-    function AddPage(const ACaption: UnicodeString): TACLPageControlPage;
+    function AddPage(const ACaption: string): TACLPageControlPage;
     procedure GetChildren(Proc: TGetChildProc; Root: TComponent); override;
-    procedure GetTabOrderList(List: TList); override;
+    procedure GetTabOrderList(List: TTabOrderList); override;
     procedure ShowControl(AControl: TControl); override;
     //# Properties
     property ActivePage: TACLPageControlPage read GetActivePage write SetActivePage;
@@ -370,8 +366,10 @@ var
 
 implementation
 
+{$IFNDEF FPC}
 uses
-  ACL.MUI;
+  ACL.Graphics.SkinImageSet;
+{$ENDIF}
 
 const
   sErrorWrongChild = 'Only %s can be placed on %s';
@@ -382,7 +380,14 @@ const
 procedure TACLStyleTabControl.DrawTab(ACanvas: TCanvas;
   const R: TRect; AActive, AFocused: Boolean; AStyle: TACLTabsStyle);
 begin
-  HeaderTexture.Draw(ACanvas.Handle, R, Ord(AStyle) * 2 + Ord(AActive));
+  case AStyle of
+    tsHeader:
+      HeaderTexture.Draw(ACanvas, R, IfThen(AActive, 3, 2));
+    tsHeaderAlt:
+      HeaderTexture.Draw(ACanvas, R, IfThen(AActive, 1, 2));
+  else
+    HeaderTexture.Draw(ACanvas, R, Ord(AActive));
+  end;
   if AActive and AFocused then
     acDrawFocusRect(ACanvas, R.Split(HeaderTexture.ContentOffsets));
 end;
@@ -416,7 +421,7 @@ begin
   end;
 end;
 
-procedure TACLTab.SetCaption(const AValue: UnicodeString);
+procedure TACLTab.SetCaption(const AValue: string);
 begin
   if AValue <> FCaption then
   begin
@@ -447,7 +452,7 @@ begin
   Result := TACLTab(inherited Add);
 end;
 
-function TACLTabsList.Add(const ACaption: UnicodeString; AData: Pointer = nil): TACLTab;
+function TACLTabsList.Add(const ACaption: string; AData: Pointer = nil): TACLTab;
 begin
   BeginUpdate;
   try
@@ -459,9 +464,11 @@ begin
   end;
 end;
 
-function TACLTabsList.FindByCaption(const ACaption: UnicodeString; out ATab: TACLTab): Boolean;
+function TACLTabsList.FindByCaption(const ACaption: string; out ATab: TACLTab): Boolean;
+var
+  I: Integer;
 begin
-  for var I := 0 to Count - 1 do
+  for I := 0 to Count - 1 do
     if acSameText(Items[I].Caption, ACaption) then
     begin
       ATab := Items[I];
@@ -490,14 +497,15 @@ end;
 constructor TACLCustomTabControl.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  ControlStyle := ControlStyle + [csAcceptsControls];
   FActiveIndex := -1;
   FBorders := acAllBorders;
   TabStop := True;
-  ControlStyle := ControlStyle + [csAcceptsControls];
   FStyle := TACLStyleTabControl.Create(Self);
   FTabs := TACLTabsList.Create(Self);
   FViewItems := TACLTabViewItemList.Create;
   FOptionsView := TACLTabsOptionsView.Create(Self);
+  FDefaultSize := TSize.Create(400, 300);
 end;
 
 destructor TACLCustomTabControl.Destroy;
@@ -592,6 +600,7 @@ var
   ATabOffset: Integer;
   ATextSize: TSize;
   AWidth: Integer;
+  I: Integer;
 begin
   AIndentBetweenTabs := dpiApply(OptionsView.TabIndent, FCurrentPPI);
   if OptionsView.Style = tsTab then
@@ -603,7 +612,7 @@ begin
   try
     ACalculator.Capacity := ViewItems.Count;
     ACalculator.AvailableSize := R.Width - 2 * ATabOffset;
-    for var I := 0 to ViewItems.Count - 1 do
+    for I := 0 to ViewItems.Count - 1 do
     begin
       if OptionsView.Style = tsTab then
         AWidth := CalculateTabWidth(ViewItems[I]) + IfThen(I + 1 < ViewItems.Count, AIndentBetweenTabs)
@@ -615,7 +624,7 @@ begin
     ACalculator.Calculate;
 
     Inc(ATabOffset, R.Left);
-    for var I := 0 to ViewItems.Count - 1 do
+    for I := 0 to ViewItems.Count - 1 do
     begin
       AItem := ViewItems[I];
       AItem.Bounds := Bounds(ATabOffset, R.Top, ACalculator[I].Size, R.Height);
@@ -645,6 +654,9 @@ begin
         AItem.TextTruncated := ATextSize.cx > AContentRect.Width;
         IntersectRect(AItem.TextRect, AItem.TextRect, AContentRect);
       end;
+
+      if AItem.Active and (OptionsView.Style = tsHeaderAlt) then
+        Inc(AItem.Bounds.Bottom, AIndentBetweenTabs + 1);
     end;
   finally
     ACalculator.Free;
@@ -662,8 +674,9 @@ end;
 procedure TACLCustomTabControl.CalculateTabStates;
 var
   AViewItem: TACLTabViewItem;
+  I: Integer;
 begin
-  for var I := 0 to ViewItems.Count - 1 do
+  for I := 0 to ViewItems.Count - 1 do
   begin
     AViewItem := ViewItems[I];
     AViewItem.Active := ActiveIndex = AViewItem.Tab.Index;
@@ -676,7 +689,7 @@ begin
   Result := GetTabMargins;
 end;
 
-function TACLCustomTabControl.CalculateTextSize(const ACaption: UnicodeString): TSize;
+function TACLCustomTabControl.CalculateTextSize(const ACaption: string): TSize;
 begin
   Result := NullSize;
   Canvas.Font.Assign(Style.HeaderFont);
@@ -718,8 +731,8 @@ end;
 
 procedure TACLCustomTabControl.DrawContentAreaBackground(ACanvas: TCanvas);
 begin
-  acFillRect(ACanvas.Handle, FFrameRect, Style.ColorContent.AsColor);
-  acDrawComplexFrame(ACanvas.Handle, FFrameRect,
+  acFillRect(ACanvas, FFrameRect, Style.ColorContent.AsColor);
+  acDrawComplexFrame(ACanvas, FFrameRect,
     Style.ColorBorder1.AsColor, Style.ColorBorder2.AsColor, Borders);
 end;
 
@@ -736,7 +749,7 @@ begin
         acBitBlt(ATemp.Handle, ACanvas.Handle, ATemp.ClientRect, AViewItem.Bounds.TopLeft);
         Style.DrawTab(ATemp.Canvas, ATemp.ClientRect, AViewItem.Active, Focused, OptionsView.Style);
         ATemp.Flip(False, True);
-        ATemp.DrawCopy(ACanvas.Handle, AViewItem.Bounds.TopLeft);
+        ATemp.DrawCopy(ACanvas, AViewItem.Bounds.TopLeft);
       finally
         ATemp.Free;
       end;
@@ -752,9 +765,10 @@ procedure TACLCustomTabControl.DrawItems(ACanvas: TCanvas);
 var
   AActiveViewItem: TACLTabViewItem;
   AViewItem: TACLTabViewItem;
+  I: Integer;
 begin
   AActiveViewItem := nil;
-  for var I := 0 to ViewItems.Count - 1 do
+  for I := 0 to ViewItems.Count - 1 do
   begin
     AViewItem := ViewItems.List[I];
     if AViewItem.Active then
@@ -781,19 +795,6 @@ begin
   end;
 end;
 
-procedure TACLCustomTabControl.DrawTransparentBackground(ACanvas: TCanvas; const R: TRect);
-var
-  LPrevRgn: HRGN;
-begin
-  LPrevRgn := acSaveClipRegion(ACanvas.Handle);
-  try
-    if acIntersectClipRegion(ACanvas.Handle, FTabAreaRect) then
-      inherited;
-  finally
-    acRestoreClipRegion(ACanvas.Handle, LPrevRgn);
-  end;
-end;
-
 procedure TACLCustomTabControl.JumpToNextPage(AForward: Boolean);
 var
   AIndex: Integer;
@@ -816,14 +817,11 @@ begin
     ActiveIndex := -1;
 end;
 
-function TACLCustomTabControl.GetBackgroundStyle: TACLControlBackgroundStyle;
+function TACLCustomTabControl.HitTest(X, Y: Integer; out AViewItem: TACLTabViewItem): Boolean;
+var
+  I: Integer;
 begin
-  Result := cbsTransparent;
-end;
-
-function TACLCustomTabControl.HitTest(X, Y: Integer; var AViewItem: TACLTabViewItem): Boolean;
-begin
-  for var I := 0 to ViewItems.Count - 1 do
+  for I := 0 to ViewItems.Count - 1 do
     if PtInRect(ViewItems[I].Bounds, Point(X, Y)) then
     begin
       AViewItem := ViewItems[I];
@@ -952,6 +950,11 @@ begin
   end;
 end;
 
+procedure TACLCustomTabControl.UpdateTransparency;
+begin
+  ControlStyle := ControlStyle - [csOpaque];
+end;
+
 procedure TACLCustomTabControl.CMChildKey(var Message: TCMChildKey);
 var
   AShiftState: TShiftState;
@@ -999,27 +1002,29 @@ begin
   if ViewItems.Count > 0 then
   begin
     Result := CalculateTextSize('Wg').cy + GetTabMargins.MarginsHeight;
-    if OptionsView.Style = tsHeader then
-      Inc(Result, dpiApply(OptionsView.TabIndent, FCurrentPPI))
+    if OptionsView.Style = tsTab then
+      Inc(Result, dpiApply(TACLStyleTabControl.Offset, FCurrentPPI))
     else
-      Inc(Result, dpiApply(TACLStyleTabControl.Offset, FCurrentPPI));
+      Inc(Result, dpiApply(OptionsView.TabIndent, FCurrentPPI));
   end;
 end;
 
 function TACLCustomTabControl.GetTabMargins: TRect;
 begin
-  if OptionsView.Style = tsHeader then
-    Result := Rect(6, 6, 6, 6)
+  if OptionsView.Style = tsTab then
+    Result := Rect(4, 4, 4, 4)
   else
-    Result := Rect(4, 4, 4, 4);
+    Result := Rect(6, 6, 6, 6);
 
   Result := dpiApply(Result, FCurrentPPI);
 end;
 
 procedure TACLCustomTabControl.PopulateViewItems;
+var
+  I: Integer;
 begin
   ViewItems.Clear;
-  for var I := 0 to Tabs.Count - 1 do
+  for I := 0 to Tabs.Count - 1 do
   begin
     if Tabs[I].Visible then
       ViewItems.Add(TACLTabViewItem.Create(Tabs[I]));
@@ -1053,11 +1058,6 @@ begin
     FBorders := AValue;
     FullRefresh;
   end;
-end;
-
-procedure TACLCustomTabControl.SetDefaultSize;
-begin
-  SetBounds(Left, Top, 400, 300);
 end;
 
 procedure TACLCustomTabControl.SetHoverTab(AValue: TACLTab);
@@ -1223,12 +1223,10 @@ begin
   inherited Destroy;
 end;
 
-procedure TACLPageControlPage.DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect);
+procedure TACLPageControlPage.Paint;
 begin
   if PageControl <> nil then
-    acFillRect(ACanvas.Handle, R, PageControl.Style.ColorContent.AsColor)
-  else
-    inherited DrawOpaqueBackground(ACanvas, R);
+    acFillRect(Canvas, ClientRect, PageControl.Style.ColorContent.AsColor);
 end;
 
 procedure TACLPageControlPage.SetParent(AParent: TWinControl);
@@ -1299,7 +1297,7 @@ end;
 
 { TACLPageControl }
 
-function TACLPageControl.AddPage(const ACaption: UnicodeString): TACLPageControlPage;
+function TACLPageControl.AddPage(const ACaption: string): TACLPageControlPage;
 begin
   Result := TACLPageControlPage.Create(Owner);
   Result.Name := CreateUniqueName(Result, '', '');
@@ -1385,7 +1383,7 @@ begin
     Proc(Pages[I]);
 end;
 
-procedure TACLPageControl.GetTabOrderList(List: TList);
+procedure TACLPageControl.GetTabOrderList(List: TTabOrderList);
 begin
   if ActivePage <> nil then
     ActivePage.GetTabOrderList(List);

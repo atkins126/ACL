@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*               Object Links                *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Object Links (aka WeakReferences)
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.ObjectLinks;
 
 {$I ACL.Config.inc}
@@ -20,10 +22,10 @@ uses
   Winapi.Windows, // inlining
 {$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Collections,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}SysUtils,
+  {System.}Types,
   // ACL
   ACL.Threading;
 
@@ -49,7 +51,7 @@ type
   TACLObjectLinks = class sealed
   strict private
     class var FFreeNotifier: TComponent;
-    class var FLinks: TDictionary<TObject, TObject>;
+    class var FLinks: TObjectDictionary<TObject, TObject>;
     class var FLock: TACLCriticalSection;
 
     class function SafeCreateLink(AObject: TObject): TObject;
@@ -91,7 +93,7 @@ type
 
     FBridges: TList;
     FExtensions: TACLInterfaceList;
-    FRemoveListeners: TACLList<IACLObjectRemoveNotify>;
+    FRemoveListeners: TACLInterfaceList;
     FWeakReferences: TList;
   public
     constructor Create(AObject: TObject);
@@ -139,6 +141,7 @@ class procedure TACLObjectLinks.Release(AObject: TObject);
 var
   APair: TPair<TObject, TObject>;
 begin
+  if FLinks = nil then Exit;
   FLock.Enter;
   try
     APair := FLinks.ExtractPair(AObject);
@@ -174,7 +177,8 @@ begin
   end;
 end;
 
-class procedure TACLObjectLinks.RegisterRemoveListener(AObject: TObject; ARemoveListener: IACLObjectRemoveNotify);
+class procedure TACLObjectLinks.RegisterRemoveListener(
+  AObject: TObject; ARemoveListener: IACLObjectRemoveNotify);
 begin
   FLock.Enter;
   try
@@ -224,7 +228,8 @@ begin
   end;
 end;
 
-class procedure TACLObjectLinks.UnregisterRemoveListener(ARemoveListener: IACLObjectRemoveNotify; AObject: TObject = nil);
+class procedure TACLObjectLinks.UnregisterRemoveListener(
+  ARemoveListener: IACLObjectRemoveNotify; AObject: TObject = nil);
 var
   ALink: TObject;
 begin
@@ -295,9 +300,9 @@ end;
 
 destructor TACLObjectLink.Destroy;
 var
+  LIntf: IACLObjectRemoveNotify;
   I: Integer;
 begin
-
   if FWeakReferences <> nil then
   try
     for I := 0 to FWeakReferences.Count - 1 do
@@ -318,7 +323,8 @@ begin
   try
     for I := FRemoveListeners.Count - 1 downto 0 do
     begin
-      FRemoveListeners.List[I].Removing(FObject);
+      LIntf := IACLObjectRemoveNotify(FRemoveListeners.List[I]);
+      LIntf.Removing(FObject);
       FRemoveListeners.List[I] := nil;
     end;
   finally
@@ -347,7 +353,7 @@ end;
 procedure TACLObjectLink.AddRemoveListener(const ARemoveListener: IACLObjectRemoveNotify);
 begin
   if FRemoveListeners = nil then
-    FRemoveListeners := TACLList<IACLObjectRemoveNotify>.Create;
+    FRemoveListeners := TACLInterfaceList.Create;
   FRemoveListeners.Add(ARemoveListener);
 end;
 
@@ -382,7 +388,11 @@ end;
 procedure TACLObjectLink.RemoveBridge(const ALink: TACLObjectLink);
 begin
   if FBridges <> nil then
+  {$IFDEF DELPHI}
     FBridges.RemoveItem(ALink, TDirection.FromEnd);
+  {$ELSE}
+    FBridges.Remove(ALink);
+  {$ENDIF}
 end;
 
 procedure TACLObjectLink.RemoveExtension(const AIntf: IInterface);
@@ -404,3 +414,4 @@ begin
 end;
 
 end.
+

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*          Binding Diagram Control          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Binding Diagram
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.BindingDiagram.SubClass;
 
 {$I ACL.Config.inc}
@@ -16,35 +18,36 @@ unit ACL.UI.Controls.BindingDiagram.SubClass;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // VCL
-  Vcl.Graphics,
-  Vcl.Controls,
-  Vcl.Forms,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
-  ACL.Graphics.Ex.Gdip,
-  ACL.Math,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Controls.CompoundControl,
-  ACL.UI.Controls.CompoundControl.SubClass,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BindingDiagram.Types,
+  ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Forms,
   ACL.UI.HintWindow,
   ACL.UI.Resources,
-  ACL.UI.Controls.ScrollBox,
   ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+  ACL.Utils.DPIAware,
+  ACL.Utils.Strings;
 
 const
   htObjectRemoveButton = -1;
@@ -141,7 +144,6 @@ type
 
   TACLBindingDiagramSubClass = class(TACLCompoundControlSubClass)
   strict private
-    FCaptionFont: TFont;
     FData: TACLBindingDiagramData;
     FOptionsBehavior: TACLBindingDiagramOptionsBehavior;
     FOptionsView: TACLBindingDiagramOptionsView;
@@ -161,7 +163,8 @@ type
     procedure SetSelectedObject(const Value: TObject);
   protected
     function CreateViewInfo: TACLCompoundControlCustomViewInfo; override;
-    function DoLinkChanging(ALink: TACLBindingDiagramLink; ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean; virtual;
+    function DoLinkChanging(ALink: TACLBindingDiagramLink;
+      ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean; virtual;
     procedure DoLinkChanged(ALink: TACLBindingDiagramLink); virtual;
     function DoLinkCreating(ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean; virtual;
     procedure DoLinkCreated(ALink: TACLBindingDiagramLink); virtual;
@@ -169,26 +172,25 @@ type
     procedure DoDragStarted; override;
     procedure DoHoveredObjectChanged; override;
     procedure ProcessChanges(AChanges: TIntegerSet); override;
-    procedure ProcessKeyUp(AKey: Word; AShift: TShiftState); override;
+    procedure ProcessKeyUp(var AKey: Word; AShift: TShiftState); override;
     procedure ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState); override;
     procedure ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState); override;
     procedure ResourceChanged; override;
-    procedure UpdateFonts;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure RemoveLink(ALink: TACLBindingDiagramLink);
     procedure RemoveObject(AObject: TACLBindingDiagramObject);
     procedure RemoveSelected;
-    //
-    property CaptionFont: TFont read FCaptionFont;
+    procedure SetTargetDPI(AValue: Integer); override;
+    //# Properties
     property Data: TACLBindingDiagramData read FData;
     property OptionsBehavior: TACLBindingDiagramOptionsBehavior read FOptionsBehavior;
     property OptionsView: TACLBindingDiagramOptionsView read FOptionsView;
     property SelectedObject: TObject read FSelectedObject write SetSelectedObject;
     property Style: TACLStyleBindingDiagram read FStyle;
     property ViewInfo: TACLBindingDiagramSubClassViewInfo read GetViewInfo;
-    //
+    //# Events
     property OnLinkChanged: TACLBindingDiagramLinkNotifyEvent read FOnLinkChanged write FOnLinkChanged;
     property OnLinkChanging: TACLBindingDiagramLinkChangingEvent read FOnLinkChanging write FOnLinkChanging;
     property OnLinkCreated: TACLBindingDiagramLinkNotifyEvent read FOnLinkCreated write FOnLinkCreated;
@@ -216,6 +218,7 @@ type
     IACLDraggableObject)
   protected const
     BorderWidth = 2;
+    CaptionFontStyle = [fsBold];
   strict private
     FCaptionRect: TRect;
     FCaptionSize: TSize;
@@ -241,10 +244,11 @@ type
     // IACLDraggableObject
     function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   public
-    constructor Create(AOwner: TACLBindingDiagramSubClassViewInfo; AObject: TACLBindingDiagramObject); reintroduce;
+    constructor Create(AOwner: TACLBindingDiagramSubClassViewInfo;
+      AObject: TACLBindingDiagramObject); reintroduce;
     function IsSelected: Boolean;
     function MeasureSize: TSize;
-    //
+    //# Properties
     property &Object: TACLBindingDiagramObject read FObject;
     property BorderBounds: TRect read GetBorderBounds;
     property CaptionRect: TRect read FCaptionRect;
@@ -307,9 +311,10 @@ type
 
   TACLBindingDiagramLinkCustomPathBuilder = class
   protected
-    procedure AddPoint(APoints: TACLList<TPoint>; const P: TPoint); inline;
+    procedure AddPoint(APoints: TACLListOf<TPoint>; const P: TPoint); inline;
   public
-    procedure Build(APoints: TACLList<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); virtual; abstract;
+    procedure Build(APoints: TACLListOf<TPoint>;
+      ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); virtual; abstract;
     procedure Initialize(AViewInfo: TACLBindingDiagramSubClassViewInfo); virtual; abstract;
   end;
 
@@ -320,9 +325,9 @@ type
     ID_EMPTY = 0;
     ID_OBJECT = -1;
   protected
-    Columns: TACLList<Integer>;
+    Columns: TACLListOfInteger;
     Matrix: array of array of Integer;
-    Rows: TACLList<Integer>;
+    Rows: TACLListOfInteger;
 
     procedure Add(AObjectViewInfo: TACLBindingDiagramObjectViewInfo); overload;
     procedure Add(const R: TRect); overload;
@@ -335,7 +340,8 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Build(APoints: TACLList<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); override;
+    procedure Build(APoints: TACLListOf<TPoint>;
+      ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); override;
     procedure Initialize(AViewInfo: TACLBindingDiagramSubClassViewInfo); override;
   end;
 
@@ -343,7 +349,8 @@ type
 
   TACLBindingDiagramSimplePathBuilder = class(TACLBindingDiagramComplexPathBuilder)
   public
-    procedure Build(APoints: TACLList<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); override;
+    procedure Build(APoints: TACLListOf<TPoint>;
+      ASource, ATarget: TACLBindingDiagramObjectPinViewInfo); override;
     procedure Initialize(AViewInfo: TACLBindingDiagramSubClassViewInfo); override;
   end;
 
@@ -354,7 +361,8 @@ type
     FLineFinish: TPoint;
     FLineStart: TPoint;
 
-    function GetPoint(APinViewInfo: TACLBindingDiagramObjectPinViewInfo; AMode: TACLBindingDiagramObjectPinMode): TPoint;
+    function GetPoint(APinViewInfo: TACLBindingDiagramObjectPinViewInfo;
+      AMode: TACLBindingDiagramObjectPinMode): TPoint;
     function GetStyle: TACLStyleBindingDiagram;
     function GetSubClass: TACLBindingDiagramSubClass;
     function GetViewOrigin: TPoint;
@@ -373,7 +381,7 @@ type
     procedure DragMove(const P: TPoint; var ADeltaX, ADeltaY: Integer); override;
     procedure DragFinished(ACanceled: Boolean); override;
     procedure Draw(ACanvas: TCanvas); override;
-    //
+    //# Properties
     property Style: TACLStyleBindingDiagram read GetStyle;
     property SubClass: TACLBindingDiagramSubClass read GetSubClass;
     property TargetPin: TACLBindingDiagramObjectPinViewInfo read FTargetPin write SetTargetPin;
@@ -396,7 +404,7 @@ type
     FIsEditing: Boolean;
     FLink: TACLBindingDiagramLink;
     FOwner: TACLBindingDiagramSubClassViewInfo;
-    FPoints: TACLList<TPoint>;
+    FPoints: TACLListOf<TPoint>;
     FSourcePin: TACLBindingDiagramObjectPinViewInfo;
     FTargetPin: TACLBindingDiagramObjectPinViewInfo;
 
@@ -412,7 +420,7 @@ type
     procedure Calculate(APathBuilder: TACLBindingDiagramLinkCustomPathBuilder); reintroduce;
     function CalculateHitTest(const AInfo: TACLHitTestInfo): Boolean; override;
     function IsHighlighted: Boolean;
-    //
+    //# Properties
     property Color: TColor read FColor;
     property Link: TACLBindingDiagramLink read FLink;
     property SourcePin: TACLBindingDiagramObjectPinViewInfo read FSourcePin;
@@ -450,7 +458,6 @@ type
     FOwner: TACLBindingDiagramSubClassViewInfo;
   public
     constructor Create(AOwner: TACLBindingDiagramSubClassViewInfo);
-    procedure DragFinished(ACanceled: Boolean); override;
     procedure DragMove(const P: TPoint; var ADeltaX: Integer; var ADeltaY: Integer); override;
     function DragStart: Boolean; override;
   end;
@@ -471,7 +478,7 @@ type
   protected
     FLineOffset: Integer;
     FLinkColors: TACLColorList;
-    FLinks: TACLObjectList<TACLBindingDiagramLinkViewInfo>;
+    FLinks: TACLObjectListOf<TACLBindingDiagramLinkViewInfo>;
     FMoving: TACLBindingDiagramObject;
     FTextLineHeight: Integer;
 
@@ -502,8 +509,11 @@ type
 implementation
 
 uses
-  ACL.Utils.DPIAware,
-  ACL.Utils.Strings;
+{$IFDEF FPC}
+  ACL.Graphics.Ex.Cairo;
+{$ELSE}
+  ACL.Graphics.Ex.Gdip;
+{$ENDIF}
 
 type
   TACLBindingDiagramLinkAccess = class(TACLBindingDiagramLink);
@@ -512,8 +522,8 @@ type
 
 procedure TACLStyleBindingDiagram.DrawObjectBorders(ACanvas: TCanvas; const R: TRect);
 begin
-  acDrawFrame(ACanvas.Handle, R, ColorObjectBorder.Value);
-  acFillRect(ACanvas.Handle, R.InflateTo(-1), ColorObjectContent.Value);
+  acDrawFrame(ACanvas, R, ColorObjectBorder.Value);
+  acFillRect(ACanvas, R.InflateTo(-1), ColorObjectContent.Value);
 end;
 
 procedure TACLStyleBindingDiagram.DrawSelection(ACanvas: TCanvas; const R: TRect);
@@ -521,7 +531,7 @@ var
   LSize: Integer;
 begin
   LSize := MulDiv(TargetDPI, SelectionSize, acDefaultDPI);
-  acDrawFrame(ACanvas.Handle, R.InflateTo(LSize), ColorObjectSelection.Value, LSize);
+  acDrawFrame(ACanvas, R.InflateTo(LSize), ColorObjectSelection.Value, LSize);
 end;
 
 procedure TACLStyleBindingDiagram.InitializeResources;
@@ -620,7 +630,6 @@ end;
 constructor TACLBindingDiagramSubClass.Create(AOwner: TComponent);
 begin
   inherited;
-  FCaptionFont := TFont.Create;
   FStyle := TACLStyleBindingDiagram.Create(Self);
   FData := TACLBindingDiagramData.Create(HandlerObjectsChanged);
   FOptionsBehavior := TACLBindingDiagramOptionsBehavior.Create(Self);
@@ -629,7 +638,6 @@ end;
 
 destructor TACLBindingDiagramSubClass.Destroy;
 begin
-  FreeAndNil(FCaptionFont);
   FreeAndNil(FOptionsBehavior);
   FreeAndNil(FOptionsView);
   FreeAndNil(FData);
@@ -676,6 +684,13 @@ begin
     RemoveLink(TACLBindingDiagramLink(ASelectedObject));
 end;
 
+procedure TACLBindingDiagramSubClass.SetTargetDPI(AValue: Integer);
+begin
+  Data.ChangeScale(AValue, Style.TargetDPI);
+  inherited SetTargetDPI(AValue);
+  Style.TargetDPI := AValue;
+end;
+
 function TACLBindingDiagramSubClass.DoLinkChanging(
   ALink: TACLBindingDiagramLink; ASourcePin, ATargetPin: TACLBindingDiagramObjectPin): Boolean;
 begin
@@ -710,15 +725,8 @@ end;
 
 procedure TACLBindingDiagramSubClass.ResourceChanged;
 begin
-  UpdateFonts;
   ViewInfo.UpdateLinkColors; // before inherited
   inherited ResourceChanged;
-end;
-
-procedure TACLBindingDiagramSubClass.UpdateFonts;
-begin
-  CaptionFont.Assign(Font);
-  CaptionFont.Style := [fsBold];
 end;
 
 function TACLBindingDiagramSubClass.CreateViewInfo: TACLCompoundControlCustomViewInfo;
@@ -726,9 +734,13 @@ begin
   Result := TACLBindingDiagramSubClassViewInfo.Create(Self);
 end;
 
-procedure TACLBindingDiagramSubClass.HandlerObjectsChanged(Sender: TObject; AChanges: TACLPersistentChanges);
+procedure TACLBindingDiagramSubClass.HandlerObjectsChanged(
+  Sender: TObject; AChanges: TACLPersistentChanges);
 const
-  Map: array[TACLPersistentChange] of TIntegerSet = ([cccnStruct, cccnLayout], [cccnLayout], [cccnContent]);
+  Map: array[TACLPersistentChange] of TIntegerSet = (
+    [cccnStruct, cccnLayout],
+    [cccnLayout], [cccnContent]
+  );
 var
   C: TIntegerSet;
   I: TACLPersistentChange;
@@ -766,7 +778,7 @@ begin
   inherited;
 end;
 
-procedure TACLBindingDiagramSubClass.ProcessKeyUp(AKey: Word; AShift: TShiftState);
+procedure TACLBindingDiagramSubClass.ProcessKeyUp(var AKey: Word; AShift: TShiftState);
 begin
   if AKey = VK_DELETE then
     RemoveSelected
@@ -850,9 +862,11 @@ begin
 end;
 
 function TACLBindingDiagramObjectViewInfo.MeasureSize: TSize;
+var
+  I: Integer;
 begin
   Result := CalculateCaptionSize;
-  for var I := 0 to ChildCount - 1 do
+  for I := 0 to ChildCount - 1 do
     Result.cx := Max(Result.cx, TACLBindingDiagramObjectPinViewInfo(Children[I]).MeasureSize.cx);
   Inc(Result.cx, 2 * BorderWidth + 4 * dpiApply(TACLBindingDiagramObjectPinViewInfo.ConnectorSize, CurrentDpi));
   Inc(Result.cy, 2 * BorderWidth + ChildCount * FOwner.FTextLineHeight);
@@ -862,7 +876,9 @@ function TACLBindingDiagramObjectViewInfo.CalculateCaptionSize: TSize;
 begin
   if (FCaptionSize = NullSize) and SubClass.OptionsView.ShowCaption then
   begin
-    FCaptionSize := acTextSize(SubClass.CaptionFont, &Object.Caption);
+    MeasureCanvas.Font := SubClass.Font;
+    MeasureCanvas.Font.Style := CaptionFontStyle;
+    FCaptionSize := acTextSize(MeasureCanvas, &Object.Caption);
     Inc(FCaptionSize.cx, 2 * dpiApply(acTextIndent, CurrentDpi));
     Inc(FCaptionSize.cy, 2 * dpiApply(acTextIndent, CurrentDpi));
     if HasRemoveButton then
@@ -886,7 +902,7 @@ begin
     begin
       FRemoveButtonRect := CaptionRect.Split(srRight, CaptionRect.Height);
       FRemoveButtonRect.CenterVert(FOwner.FTextLineHeight);
-      FRemoveButtonRect.Inflate(-2 * dpiApply(acTextIndent, CurrentDpi));
+      FRemoveButtonRect.Inflate(-3 * dpiApply(acTextIndent, CurrentDpi));
     end
     else
       FRemoveButtonRect := NullRect;
@@ -950,22 +966,23 @@ procedure TACLBindingDiagramObjectViewInfo.DoDrawCaption(ACanvas: TCanvas);
 begin
   if not IsRectEmpty(CaptionRect) then
   begin
-    acFillRect(ACanvas.Handle, CaptionRect, Style.ColorObjectCaption.Value);
+    acFillRect(ACanvas, CaptionRect, Style.ColorObjectCaption.Value);
 
-    ACanvas.Font := SubClass.CaptionFont;
+    ACanvas.Font := SubClass.Font;
     ACanvas.Font.Color := Style.ColorObjectCaptionText.AsColor;
+    ACanvas.Font.Style := CaptionFontStyle;
     acTextDraw(ACanvas, &Object.Caption, CaptionTextRect, taCenter, taVerticalCenter, True);
   end;
 
   if not IsRectEmpty(RemoveButtonRect) then
   begin
-    GpPaintCanvas.BeginPaint(ACanvas.Handle);
+    GpPaintCanvas.BeginPaint(ACanvas);
     try
-      GPPaintCanvas.Line(
-        RemoveButtonRect.Left, RemoveButtonRect.Top, RemoveButtonRect.Right, RemoveButtonRect.Bottom,
+      GPPaintCanvas.Line(RemoveButtonRect.Left, RemoveButtonRect.Top,
+        RemoveButtonRect.Right, RemoveButtonRect.Bottom,
         Style.ColorObjectCaptionText.Value, 2, ssSolid);
-      GPPaintCanvas.Line(
-        RemoveButtonRect.Right, RemoveButtonRect.Top, RemoveButtonRect.Left, RemoveButtonRect.Bottom,
+      GPPaintCanvas.Line(RemoveButtonRect.Right, RemoveButtonRect.Top,
+        RemoveButtonRect.Left, RemoveButtonRect.Bottom,
         Style.ColorObjectCaptionText.Value, 2, ssSolid);
     finally
       GPPaintCanvas.EndPaint;
@@ -986,7 +1003,8 @@ begin
     FChildren.Add(TACLBindingDiagramObjectPinViewInfo.Create(Self, &Object.Pins[I]));
 end;
 
-function TACLBindingDiagramObjectViewInfo.CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
+function TACLBindingDiagramObjectViewInfo.CreateDragObject(
+  const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
 begin
   if SubClass.OptionsBehavior.AllowMoveObjects then
     Result := TACLBindingDiagramObjectDragObject.Create(&Object)
@@ -996,7 +1014,9 @@ end;
 
 function TACLBindingDiagramObjectViewInfo.HasRemoveButton: Boolean;
 begin
-  Result := &Object.CanRemove and SubClass.OptionsBehavior.AllowDeleteObjects and SubClass.OptionsView.ShowCaption;
+  Result := &Object.CanRemove and
+    SubClass.OptionsBehavior.AllowDeleteObjects and
+    SubClass.OptionsView.ShowCaption;
 end;
 
 function TACLBindingDiagramObjectViewInfo.GetBorderBounds: TRect;
@@ -1048,7 +1068,8 @@ end;
 
 function TACLBindingDiagramObjectPinViewInfo.CalculateHitTest(const AInfo: TACLHitTestInfo): Boolean;
 begin
-  if PtInRect(InputConnectorHitTestRect, AInfo.HitPoint) or PtInRect(OutputConnectorHitTestRect, AInfo.HitPoint) then
+  if PtInRect(InputConnectorHitTestRect, AInfo.HitPoint) or
+     PtInRect(OutputConnectorHitTestRect, AInfo.HitPoint) then
   begin
     if Owner.SubClass.OptionsBehavior.AllowCreateLinks then
       AInfo.Cursor := crDragLink;
@@ -1134,19 +1155,20 @@ procedure TACLBindingDiagramObjectPinViewInfo.DoDrawBackground(ACanvas: TCanvas)
   end;
 
 var
+  I: Integer;
   LColorArea: TRect;
 begin
   if FLinks.Count > 0 then
   begin
     LColorArea := Bounds;
     LColorArea.Right := LColorArea.Left + LColorArea.Width div FLinks.Count;
-    for var I := 0 to FLinks.Count - 2 do
+    for I := 0 to FLinks.Count - 2 do
     begin
-      acFillRect(ACanvas.Handle, LColorArea, GetColor(FLinks.List[I]));
+      acFillRect(ACanvas, LColorArea, GetColor(FLinks.List[I]));
       LColorArea.Offset(LColorArea.Width, 0);
     end;
     LColorArea.Right := Bounds.Right;
-    acFillRect(ACanvas.Handle, LColorArea, GetColor(FLinks.Last));
+    acFillRect(ACanvas, LColorArea, GetColor(FLinks.Last));
   end;
 end;
 
@@ -1157,7 +1179,7 @@ begin
   begin
     FOwner.Style.DrawObjectBorders(ACanvas, R);
     if AMode in FHighlightedConnectors then
-      acFillRect(ACanvas.Handle, R, FOwner.Style.ColorObjectDragHighlight.AsColor);
+      acFillRect(ACanvas, R, FOwner.Style.ColorObjectDragHighlight.AsColor);
   end;
 end;
 
@@ -1206,7 +1228,7 @@ end;
 
 { TACLBindingDiagramLinkCustomPathBuilder }
 
-procedure TACLBindingDiagramLinkCustomPathBuilder.AddPoint(APoints: TACLList<TPoint>; const P: TPoint);
+procedure TACLBindingDiagramLinkCustomPathBuilder.AddPoint(APoints: TACLListOf<TPoint>; const P: TPoint);
 
   function IsMiddle(const P, P0, P1: TPoint): Boolean; inline;
   begin
@@ -1224,8 +1246,8 @@ end;
 
 constructor TACLBindingDiagramComplexPathBuilder.Create;
 begin
-  Rows := TACLList<Integer>.Create;
-  Columns := TACLList<Integer>.Create;
+  Rows := TACLListOfInteger.Create;
+  Columns := TACLListOfInteger.Create;
 end;
 
 destructor TACLBindingDiagramComplexPathBuilder.Destroy;
@@ -1235,7 +1257,7 @@ begin
   inherited;
 end;
 
-procedure TACLBindingDiagramComplexPathBuilder.Build(APoints: TACLList<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo);
+procedure TACLBindingDiagramComplexPathBuilder.Build(APoints: TACLListOf<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo);
 
   function BuildPath(X, Y, ALevel: Integer): Boolean;
   begin
@@ -1332,25 +1354,29 @@ begin
   Clean;
 end;
 
-procedure TACLBindingDiagramComplexPathBuilder.Initialize(AViewInfo: TACLBindingDiagramSubClassViewInfo);
+procedure TACLBindingDiagramComplexPathBuilder.Initialize(
+  AViewInfo: TACLBindingDiagramSubClassViewInfo);
+var
+  I: Integer;
 begin
   Columns.Capacity := 8 * AViewInfo.ChildCount;
   Rows.Capacity := Columns.Capacity;
-  for var I := 0 to AViewInfo.ChildCount - 1 do
+  for I := 0 to AViewInfo.ChildCount - 1 do
     Add(TACLBindingDiagramObjectViewInfo(AViewInfo.FChildren.List[I]));
 
   SetLength(Matrix, Rows.Count, Columns.Count);
-  for var I := 0 to AViewInfo.ChildCount - 1 do
+  for I := 0 to AViewInfo.ChildCount - 1 do
     MarkObject(AViewInfo.Children[I].Bounds);
 end;
 
 procedure TACLBindingDiagramComplexPathBuilder.Add(AObjectViewInfo: TACLBindingDiagramObjectViewInfo);
 var
   APinViewInfo: TACLBindingDiagramObjectPinViewInfo;
+  I: Integer;
 begin
   Add(AObjectViewInfo.Bounds);
   Add(AObjectViewInfo.BorderBounds.InflateTo(AObjectViewInfo.Owner.FLineOffset));
-  for var I := 0 to AObjectViewInfo.ChildCount - 1 do
+  for I := 0 to AObjectViewInfo.ChildCount - 1 do
   begin
     APinViewInfo := TACLBindingDiagramObjectPinViewInfo(AObjectViewInfo.FChildren.List[I]);
     if not APinViewInfo.InputConnectorRect.IsEmpty then
@@ -1362,7 +1388,7 @@ end;
 
 procedure TACLBindingDiagramComplexPathBuilder.Add(const R: TRect);
 
-  procedure AddToStortedList(L: TACLList<Integer>; V: Integer);
+  procedure AddToStortedList(L: TACLListOfInteger; V: Integer);
   var
     AIndex: Integer;
   begin
@@ -1419,7 +1445,7 @@ end;
 
 function TACLBindingDiagramComplexPathBuilder.RectToIndexes(const R: TRect): TRect;
 
-  function IndexOf(L: TACLList<Integer>; V: Integer): Integer; inline;
+  function IndexOf(L: TACLListOfInteger; V: Integer): Integer; inline;
   begin
     if not L.BinarySearch(V, Result) then
       raise EInvalidArgument.Create('Specified rect was not indexed');
@@ -1435,7 +1461,7 @@ end;
 { TACLBindingDiagramSimplePathBuilder }
 
 procedure TACLBindingDiagramSimplePathBuilder.Build(
-  APoints: TACLList<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo);
+  APoints: TACLListOf<TPoint>; ASource, ATarget: TACLBindingDiagramObjectPinViewInfo);
 begin
   Rows.Count := 0;
   Columns.Count := 0;
@@ -1464,17 +1490,11 @@ begin
   FOwner := AOwner;
 end;
 
-procedure TACLBindingDiagramScrollDragObject.DragFinished(ACanceled: Boolean);
-begin
-  inherited;
-  Cursor := crDefault;
-end;
-
 procedure TACLBindingDiagramScrollDragObject.DragMove(const P: TPoint; var ADeltaX, ADeltaY: Integer);
 var
   LOldViewport: TPoint;
 begin
-  Cursor := crSizeAll;
+  UpdateCursor(crSizeAll);
   LOldViewport := FOwner.Viewport;
   FOwner.Viewport := Point(LOldViewport.X - ADeltaX, LOldViewport.Y - ADeltaY);
   ADeltaX := LOldViewport.X - FOwner.ViewportX;
@@ -1492,7 +1512,7 @@ constructor TACLBindingDiagramSubClassViewInfo.Create(AOwner: TACLCompoundContro
 begin
   inherited;
   FLinkColors := TACLColorList.Create;
-  FLinks := TACLObjectList<TACLBindingDiagramLinkViewInfo>.Create;
+  FLinks := TACLObjectListOf<TACLBindingDiagramLinkViewInfo>.Create;
 end;
 
 destructor TACLBindingDiagramSubClassViewInfo.Destroy;
@@ -1564,13 +1584,14 @@ end;
 procedure TACLBindingDiagramSubClassViewInfo.CalculateContentLayout;
 var
   ABoundingRect: TRect;
+  I: Integer;
 begin
   if ChildCount > 0 then
   begin
     ABoundingRect := Children[0].Bounds;
-    for var I := 1 to ChildCount - 1 do
+    for I := 1 to ChildCount - 1 do
       ABoundingRect.Add(Children[I].Bounds);
-    for var I := 0 to FLinks.Count - 1 do
+    for I := 0 to FLinks.Count - 1 do
       ABoundingRect.Add(FLinks[I].Bounds);
     FContentSize := TSize.Create(ABoundingRect.Right, ABoundingRect.Bottom);
   end
@@ -1612,22 +1633,20 @@ end;
 procedure TACLBindingDiagramSubClassViewInfo.CalculateObjects;
 var
   ABasePosition: TPoint;
-  ACanvas: TCanvas;
   AObjectBounds: TRect;
   AObjectViewInfo: TACLBindingDiagramObjectViewInfo;
   ACardWidth: Integer;
   I: Integer;
 begin
-  ACanvas := MeasureCanvas;
-  ACanvas.Font := SubClass.Font;
   ABasePosition := Bounds.TopLeft;
   ABasePosition.Offset(FLineOffset, FLineOffset);
-  ACardWidth := SubClass.OptionsView.CardWidth;
-
+  ACardWidth := dpiApply(SubClass.OptionsView.CardWidth, CurrentDpi);
   for I := 0 to ChildCount - 1 do
   begin
     AObjectViewInfo := TACLBindingDiagramObjectViewInfo(Children[I]);
-    AObjectBounds := TRect.Create(AlignWithCells(AObjectViewInfo.&Object.Position), AObjectViewInfo.MeasureSize);
+    AObjectBounds := TRect.Create(
+      AlignWithCells(AObjectViewInfo.&Object.Position),
+      AObjectViewInfo.MeasureSize);
     if ACardWidth > 0 then
       AObjectBounds.Width := ACardWidth;
     AObjectBounds.Offset(ABasePosition);
@@ -1743,8 +1762,6 @@ begin
 end;
 
 procedure TACLBindingDiagramCustomLinkDragObject.DragMove(const P: TPoint; var ADeltaX, ADeltaY: Integer);
-const
-  CursorMap: array[Boolean] of TCursor = (crNoDrop, crDrag);
 begin
   if HitTest.HitObject is TACLBindingDiagramObjectPinViewInfo then
     TargetPin := TACLBindingDiagramObjectPinViewInfo(HitTest.HitObject)
@@ -1756,7 +1773,10 @@ begin
   else
     SetLine(GetPoint(FStartPin, FStartPinMode), P);
 
-  Cursor := CursorMap[TargetPin <> nil];
+  if TargetPin <> nil then
+    UpdateCursor(crDrag)
+  else
+    UpdateCursor(crNoDrop);
 end;
 
 procedure TACLBindingDiagramCustomLinkDragObject.DragFinished(ACanceled: Boolean);
@@ -1868,7 +1888,7 @@ begin
   FSourcePin.AddLink(Self);
   FTargetPin := ATargetPin;
   FTargetPin.AddLink(Self);
-  FPoints := TACLList<TPoint>.Create;
+  FPoints := TACLListOf<TPoint>.Create;
 end;
 
 destructor TACLBindingDiagramLinkViewInfo.Destroy;
@@ -1877,7 +1897,10 @@ begin
   inherited;
 end;
 
-procedure TACLBindingDiagramLinkViewInfo.Calculate(APathBuilder: TACLBindingDiagramLinkCustomPathBuilder);
+procedure TACLBindingDiagramLinkViewInfo.Calculate(
+  APathBuilder: TACLBindingDiagramLinkCustomPathBuilder);
+var
+  I: Integer;
 begin
   if (FOwner.FMoving = nil) or
      (FOwner.FMoving = FSourcePin.Owner.&Object) or
@@ -1887,7 +1910,7 @@ begin
     CalculateArrows;
 
     FBounds := TRect.Create(FPoints.First);
-    for var I := 1 to FPoints.Count - 1 do
+    for I := 1 to FPoints.Count - 1 do
       FBounds.Add(TRect.Create(FPoints.List[I]));
     FBounds.Inflate(dpiApply(HitTestSize, CurrentDpi));
   end;

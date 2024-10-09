@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*              CSV File Format              *}
-{*                                           *}
-{*           (c) Artem Izmaylov              *}
-{*                2021-2022                  *}
-{*               www.aimp.ru                 *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   CSV Reader/Writer
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.FileFormats.CSV;
 
 {$I ACL.Config.inc}
@@ -16,19 +18,19 @@ unit ACL.FileFormats.CSV;
 interface
 
 uses
-  System.Classes,
-  System.Math,
-  System.StrUtils,
-  System.SysUtils,
-  System.Variants,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Variants,
   // ACL
   ACL.Utils.Common,
   ACL.Utils.FileSystem,
+  ACL.Utils.Strings,
   ACL.Utils.Stream;
 
 type
   TACLCSVDocumentRowProc = reference to procedure (ARowIndex: Integer);
-  TACLCSVDocumentValueProc = reference to procedure (const AValue: string; AIsString: Boolean; AValueIndex: Integer);
+  TACLCSVDocumentValueProc = reference to procedure (
+    const AValue: string; AIsString: Boolean; AValueIndex: Integer);
 
   { TACLCSVDocumentSettings }
 
@@ -37,8 +39,10 @@ type
     Quote: Char;
     ValueSeparator: Char;
 
-    class function Create(const AValueSeparator: Char; AEncoding: TEncoding = nil): TACLCSVDocumentSettings; overload; static;
-    class function Create(const AValueSeparator, AQuote: Char; AEncoding: TEncoding = nil): TACLCSVDocumentSettings; overload; static;
+    class function Create(const AValueSeparator: Char;
+      AEncoding: TEncoding = nil): TACLCSVDocumentSettings; overload; static;
+    class function Create(const AValueSeparator, AQuote: Char;
+      AEncoding: TEncoding = nil): TACLCSVDocumentSettings; overload; static;
     class function Default: TACLCSVDocumentSettings; static;
   end;
 
@@ -58,7 +62,7 @@ type
       const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc); overload;
     class procedure ReadData(const S: string; const ASettings: TACLCSVDocumentSettings;
       const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc); overload;
-    class procedure ReadData(const C: PWideChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings;
+    class procedure ReadData(const C: PChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings;
       const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc); overload;
   end;
 
@@ -66,14 +70,14 @@ type
 
   TACLCSVDocumentParser = class
   strict private
-    FChars: PWideChar;
+    FChars: PChar;
     FCount: Integer;
     FSettings: TACLCSVDocumentSettings;
     FValueContainsQuote: Boolean;
-    FValueCursor: PWideChar;
+    FValueCursor: PChar;
 
     procedure GoToNext; inline;
-    function LookInNext: WideChar; inline;
+    function LookInNext: Char; inline;
     procedure ProcessQuotedValue;
   protected
     procedure DoRowBegin; virtual;
@@ -82,10 +86,10 @@ type
     procedure DoValueBegin; inline;
     procedure DoValueEnd; inline;
   public
-    constructor Create(AChars: PWideChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings);
+    constructor Create(AChars: PChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings);
     procedure Parse;
-    //
-    property Chars: PWideChar read FChars;
+    //# Properties
+    property Chars: PChar read FChars;
     property Count: Integer read FCount;
     property Settings: TACLCSVDocumentSettings read FSettings;
   end;
@@ -117,9 +121,6 @@ type
 
 implementation
 
-uses
-  ACL.Utils.Strings;
-
 type
 
   { TACLCSVDocumentWrappedParser }
@@ -135,7 +136,7 @@ type
     procedure DoRowBegin; override;
     procedure DoValue(const AValue: string; AIsQuotedValue: Boolean); override;
   public
-    constructor Create(AChars: PWideChar; ACount: Integer;
+    constructor Create(AChars: PChar; ACount: Integer;
       const ASettings: TACLCSVDocumentSettings;
       const AOnRow: TACLCSVDocumentRowProc;
       const AOnValue: TACLCSVDocumentValueProc);
@@ -143,12 +144,14 @@ type
 
 { TACLCSVDocumentSettings }
 
-class function TACLCSVDocumentSettings.Create(const AValueSeparator: Char; AEncoding: TEncoding): TACLCSVDocumentSettings;
+class function TACLCSVDocumentSettings.Create(
+  const AValueSeparator: Char; AEncoding: TEncoding): TACLCSVDocumentSettings;
 begin
   Result := Create(AValueSeparator, '"', AEncoding);
 end;
 
-class function TACLCSVDocumentSettings.Create(const AValueSeparator, AQuote: Char; AEncoding: TEncoding): TACLCSVDocumentSettings;
+class function TACLCSVDocumentSettings.Create(
+  const AValueSeparator, AQuote: Char; AEncoding: TEncoding): TACLCSVDocumentSettings;
 begin
   if AEncoding = nil then
     AEncoding := TEncoding.UTF8;
@@ -164,7 +167,8 @@ end;
 
 { TACLCSVDocumentParser }
 
-constructor TACLCSVDocumentParser.Create(AChars: PWideChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings);
+constructor TACLCSVDocumentParser.Create(
+  AChars: PChar; ACount: Integer; const ASettings: TACLCSVDocumentSettings);
 begin
   inherited Create;
   FSettings := ASettings;
@@ -174,7 +178,7 @@ end;
 
 procedure TACLCSVDocumentParser.Parse;
 var
-  AChar: WideChar;
+  AChar: Char;
 begin
   if FCount = 0 then
     Exit;
@@ -246,7 +250,7 @@ var
   AIsQuotedValue: Boolean;
   AValue: string;
 begin
-  ACount := (NativeUInt(FChars) - NativeUInt(FValueCursor)) div SizeOf(WideChar);
+  ACount := acStringLength(FValueCursor, FChars);
   if ACount > 0 then
   begin
     AIsQuotedValue := (FValueCursor^ = Settings.Quote) and ((FValueCursor + ACount - 1)^ = Settings.Quote);
@@ -277,7 +281,7 @@ begin
   Dec(FCount);
 end;
 
-function TACLCSVDocumentParser.LookInNext: WideChar;
+function TACLCSVDocumentParser.LookInNext: Char;
 begin
   if FCount > 1 then
     Result := (FChars + 1)^
@@ -314,7 +318,9 @@ end;
 { TACLCSVDocument }
 
 class procedure TACLCSVDocument.Read(const AFileName: string;
-  const ASettings: TACLCSVDocumentSettings; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+  const ASettings: TACLCSVDocumentSettings;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 var
   AStream: TACLFileStream;
 begin
@@ -326,35 +332,47 @@ begin
   end;
 end;
 
-class procedure TACLCSVDocument.Read(const AFileName: string; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+class procedure TACLCSVDocument.Read(const AFileName: string;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
   Read(AFileName, TACLCSVDocumentSettings.Default, OnRow, OnValue);
 end;
 
-class procedure TACLCSVDocument.Read(const AStream: TStream; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+class procedure TACLCSVDocument.Read(const AStream: TStream;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
   Read(AStream, TACLCSVDocumentSettings.Default, OnRow, OnValue);
 end;
 
 class procedure TACLCSVDocument.Read(const AStream: TStream;
-  const ASettings: TACLCSVDocumentSettings; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+  const ASettings: TACLCSVDocumentSettings;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
   ReadData(acLoadString(AStream, ASettings.Encoding), ASettings, OnRow, OnValue);
 end;
 
-class procedure TACLCSVDocument.ReadData(const S: string; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+class procedure TACLCSVDocument.ReadData(const S: string;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
   ReadData(S, TACLCSVDocumentSettings.Default, OnRow, OnValue);
 end;
 
 class procedure TACLCSVDocument.ReadData(const S: string;
-  const ASettings: TACLCSVDocumentSettings; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+  const ASettings: TACLCSVDocumentSettings;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
-  ReadData(PWideChar(S), Length(S), ASettings, OnRow, OnValue);
+  ReadData(PChar(S), Length(S), ASettings, OnRow, OnValue);
 end;
 
-class procedure TACLCSVDocument.ReadData(const C: PWideChar; ACount: Integer;
-  const ASettings: TACLCSVDocumentSettings; const OnRow: TACLCSVDocumentRowProc; const OnValue: TACLCSVDocumentValueProc);
+class procedure TACLCSVDocument.ReadData(const C: PChar; ACount: Integer;
+  const ASettings: TACLCSVDocumentSettings;
+  const OnRow: TACLCSVDocumentRowProc;
+  const OnValue: TACLCSVDocumentValueProc);
 begin
   with TACLCSVDocumentWrappedParser.Create(C, ACount, ASettings, OnRow, OnValue) do
   try
@@ -366,8 +384,10 @@ end;
 
 { TACLCSVDocumentWrappedParser }
 
-constructor TACLCSVDocumentWrappedParser.Create(AChars: PWideChar; ACount: Integer;
-  const ASettings: TACLCSVDocumentSettings; const AOnRow: TACLCSVDocumentRowProc; const AOnValue: TACLCSVDocumentValueProc);
+constructor TACLCSVDocumentWrappedParser.Create(AChars: PChar; ACount: Integer;
+  const ASettings: TACLCSVDocumentSettings;
+  const AOnRow: TACLCSVDocumentRowProc;
+  const AOnValue: TACLCSVDocumentValueProc);
 begin
   inherited Create(AChars, ACount, ASettings);
   FOnRow := AOnRow;

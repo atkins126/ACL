@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*        Windows 7 AeroPeek Wrapper         *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Windows 7 Aero Peek support
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.AeroPeek;
 
 {$I ACL.Config.inc}
@@ -16,30 +18,43 @@ unit ACL.UI.AeroPeek;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+  Messages,
+{$ELSE}
   Winapi.ActiveX,
-  Winapi.ShlObj,
+  Winapi.DwmApi,
+  Winapi.Messages,
   Winapi.ObjectArray,
+  Winapi.ShlObj,
+  Winapi.Windows,
+{$ENDIF}
   // System
-  System.Types,
-  System.SysUtils,
-  System.Classes,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Graphics,
-  Vcl.ImgList,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}ImgList,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
   ACL.FileFormats.INI,
   ACL.Geometry,
   ACL.Graphics,
+  ACL.Graphics.Images,
   ACL.Timers,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.ImageList,
-  ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+  ACL.Utils.Common;
+
+{$IFDEF FPC}
+type
+  TThumbButton = record end;
+  ITaskbarList3 = interface end;
+{$ENDIF}
 
 type
   TACLAeroPeek = class;
@@ -49,17 +64,17 @@ type
   TACLAeroPeekButton = class(TCollectionItem)
   strict private
     FEnabled: Boolean;
-    FHint: UnicodeString;
+    FHint: string;
     FImageIndex: Integer;
 
     procedure SetEnabled(AValue: Boolean);
-    procedure SetHint(const AValue: UnicodeString);
+    procedure SetHint(const AValue: string);
     procedure SetImageIndex(AIndex: Integer);
   public
     constructor Create(Collection: TCollection); override;
-    //
+    //# Properties
     property Enabled: Boolean read FEnabled write SetEnabled;
-    property Hint: UnicodeString read FHint write SetHint;
+    property Hint: string read FHint write SetHint;
     property ImageIndex: Integer read FImageIndex write SetImageIndex;
   end;
 
@@ -74,11 +89,11 @@ type
     procedure CheckForInitialization;
     procedure Update(Item: TCollectionItem); override;
   public
-    constructor Create(AOwner: TACLAeroPeek); virtual;
-    function Add(const AHint: UnicodeString; AImageIndex: Integer = -1): TACLAeroPeekButton;
+    constructor Create(AOwner: TACLAeroPeek);
+    function Add(const AHint: string; AImageIndex: Integer = -1): TACLAeroPeekButton;
     procedure Clear;
     procedure Delete(Index: Integer);
-    //
+    //# Properties
     property Items[Index: Integer]: TACLAeroPeekButton read GetItem; default;
   end;
 
@@ -96,7 +111,8 @@ type
     FImageList: TACLImageList;
     FInitialized: Boolean;
     FLivePreviewTimer: TACLTimer;
-    FOwnerWindow: HWND;
+    FOwnerWindow: TWinControl;
+    FPrevWndProc: TWndMethod;
     FProgress: Int64;
     FProgressState: TACLAeroPeekProgressState;
     FProgressTotal: Int64;
@@ -105,8 +121,6 @@ type
     FShowStatusAsColor: Boolean;
     FTaskBarList: ITaskbarList3;
     FThumbnailSize: TSize;
-    FWindowProcOld: Pointer;
-    FWindowProcPtr: Pointer;
 
     FOnButtonClick: TACLAeroPeekButtonClickEvent;
     FOnDrawPreview: TACLAeroPeekDrawPreviewEvent;
@@ -114,7 +128,6 @@ type
 
     function GetAvailable: Boolean;
     function GetProgressPresents: Boolean;
-    function SetWindowProc(AWindowProc: Pointer): Pointer;
     procedure ImageListChanged(Sender: TObject);
     procedure LivePreviewTimerHandler(Sender: TObject);
     procedure OwnerWindowWndProc(var AMessage: TMessage);
@@ -132,35 +145,31 @@ type
     procedure StopLivePreviewTimer;
     procedure SyncButtons;
     procedure SyncProgress;
+    procedure SyncState;
     procedure UpdateForceIconicRepresentation;
-    procedure UpdatePeekPreview;
-    procedure UpdateThumbnailPreview;
+    procedure UpdateLivePreviews;
   protected
     function CreatePeekPreview(out AHasFrame: Boolean): TACLBitmap;
     procedure DoButtonClick(AIndex: Integer); virtual;
-    procedure DoDrawPreview(ABitmap: TACLBitmap); virtual;
     procedure DoInitialize; virtual;
     procedure SetWindowAttribute(AAttr: Cardinal; AValue: LongBool);
-    //
-    procedure HookOwnerWindow; virtual;
-    procedure UnhookOwnerWindow; virtual;
-    //
+    //# Properties
     property Available: Boolean read GetAvailable;
     property Initialized: Boolean read FInitialized;
-    property OwnerWindow: HWND read FOwnerWindow;
+    property OwnerWindow: TWinControl read FOwnerWindow;
     property Progress: Int64 read FProgress;
     property ProgressPresents: Boolean read GetProgressPresents;
     property ProgressTotal: Int64 read FProgressTotal;
     property TaskBarList: ITaskbarList3 read FTaskBarList;
   public
-    constructor Create(AOwnerWindow: HWND); virtual;
+    constructor Create(AOwnerWindow: TWinControl);
     destructor Destroy; override;
-    procedure ConfigLoad(AConfig: TACLIniFile; const ASection: UnicodeString); virtual;
-    procedure ConfigSave(AConfig: TACLIniFile; const ASection: UnicodeString); virtual;
-    procedure UpdateOverlay(AIcon: HICON; const AHint: UnicodeString);
+    procedure ConfigLoad(AConfig: TACLIniFile; const ASection: string); virtual;
+    procedure ConfigSave(AConfig: TACLIniFile; const ASection: string); virtual;
+    procedure UpdateOverlay(AIcon: HICON; const AHint: string);
     procedure UpdatePreview;
     procedure UpdateProgress(const AProgress, AProgressTotal: Int64);
-    //
+    //# Properties
     property Buttons: TACLAeroPeekButtons read FButtons;
     property ForceCustomPreview: Boolean read FForceCustomPreview write SetForceCustomPreview;
     property ImageList: TACLImageList read FImageList;
@@ -168,7 +177,7 @@ type
     property ShowProgress: Boolean read FShowProgress write SetShowProgress;
     property ShowProgressCanBeIndeterminate: Boolean read FShowProgressCanBeIndeterminate write SetShowProgressCanBeIndeterminate;
     property ShowStatusAsColor: Boolean read FShowStatusAsColor write SetShowStatusAsColor;
-    //
+    //# Events
     property OnButtonClick: TACLAeroPeekButtonClickEvent read FOnButtonClick write FOnButtonClick;
     property OnDrawPreview: TACLAeroPeekDrawPreviewEvent read FOnDrawPreview write SetOnDrawPreview;
     property OnInitialize: TNotifyEvent read FOnInitialize write FOnInitialize;
@@ -177,29 +186,23 @@ type
 implementation
 
 uses
-  Winapi.DwmApi,
-  // System
-  System.Math,
-  // ACL
+{$IFNDEF FPC}
+  Math,
+{$ENDIF}
   ACL.Utils.Strings,
   ACL.Utils.Desktop;
 
 const
+  sThumbButtonsAlreadyCreated = 'You cannot add or remove thumb buttons after aero peek initialization';
+
+{$IFNDEF FPC}
+const
   CLSID_CustomDestinationList: TGUID = '{77f10cf0-3db5-4966-b520-b7c54fd35ed6}';
   CLSID_TaskbarList: TGUID = '{56fdf344-fd6d-11d0-958a-006097c9a090}';
 
-const
-  sThumbButtonsAlreadyCreated = 'You cannot add or remove thumb buttons after aero peek initialization';
-  StateMap: array[TACLAeroPeekProgressState] of Integer = (TBPF_NORMAL, TBPF_PAUSED, TBPF_ERROR);
-
 var
   WM_TASKBARBUTTONCREATED: Cardinal = 0;
-
-procedure CreateObj(const CLSID, IID: TCLSID; out AObj);
-begin
-  if Failed(CoCreateInstance(CLSID, nil, CLSCTX_INPROC_SERVER, IID, AObj)) then
-    Pointer(AObj) := nil;
-end;
+{$ENDIF}
 
 { TACLAeroPeekButton }
 
@@ -218,7 +221,7 @@ begin
   end;
 end;
 
-procedure TACLAeroPeekButton.SetHint(const AValue: UnicodeString);
+procedure TACLAeroPeekButton.SetHint(const AValue: string);
 begin
   if AValue <> FHint then
   begin
@@ -262,7 +265,7 @@ begin
   inherited Delete(Index);
 end;
 
-function TACLAeroPeekButtons.Add(const AHint: UnicodeString; AImageIndex: Integer = -1): TACLAeroPeekButton;
+function TACLAeroPeekButtons.Add(const AHint: string; AImageIndex: Integer = -1): TACLAeroPeekButton;
 begin
   CheckForInitialization;
   BeginUpdate;
@@ -288,7 +291,7 @@ end;
 
 { TACLAeroPeek }
 
-constructor TACLAeroPeek.Create(AOwnerWindow: HWND);
+constructor TACLAeroPeek.Create(AOwnerWindow: TWinControl);
 begin
   inherited Create;
   FShowProgress := True;
@@ -297,16 +300,24 @@ begin
   FProgressState := appsNormal;
   FOwnerWindow := AOwnerWindow;
   FImageList := TACLImageList.Create(nil);
-  FImageList.ColorDepth := cd32Bit;
   FImageList.OnChange := ImageListChanged;
   FButtons := TACLAeroPeekButtons.Create(Self);
-  CreateObj(CLSID_TaskbarList, IID_ITaskbarList3, FTaskBarList);
-  HookOwnerWindow;
+{$IFDEF MSWINDOWS}
+  FPrevWndProc := FOwnerWindow.WindowProc;
+  FOwnerWindow.WindowProc := OwnerWindowWndProc;
+  if Failed(CoCreateInstance(CLSID_TaskbarList, nil, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, FTaskBarList)) then
+    FTaskBarList := nil;
+{$ENDIF}
+  if OwnerWindow.HandleAllocated then
+    DoInitialize;
 end;
 
 destructor TACLAeroPeek.Destroy;
 begin
-  UnhookOwnerWindow;
+{$IFDEF MSWINDOWS}
+  SetWindowAttribute(DWMWA_HAS_ICONIC_BITMAP, False);
+  FOwnerWindow.WindowProc := FPrevWndProc;
+{$ENDIF}
   StopLivePreviewTimer;
   FImageList.OnChange := nil;
   FTaskBarList := nil;
@@ -315,35 +326,36 @@ begin
   inherited Destroy;
 end;
 
-procedure TACLAeroPeek.ConfigLoad(AConfig: TACLIniFile; const ASection: UnicodeString);
+procedure TACLAeroPeek.ConfigLoad(AConfig: TACLIniFile; const ASection: string);
 begin
   ShowProgress := AConfig.ReadBool(ASection, 'ShowPlayingProgress', True);
   ShowStatusAsColor := AConfig.ReadBool(ASection, 'ShowStatusAsColor', True);
 end;
 
-procedure TACLAeroPeek.ConfigSave(AConfig: TACLIniFile; const ASection: UnicodeString);
+procedure TACLAeroPeek.ConfigSave(AConfig: TACLIniFile; const ASection: string);
 begin
   AConfig.WriteBool(ASection, 'ShowStatusAsColor', ShowStatusAsColor);
   AConfig.WriteBool(ASection, 'ShowPlayingProgress', ShowProgress);
 end;
 
-procedure TACLAeroPeek.UpdateOverlay(AIcon: HICON; const AHint: UnicodeString);
+procedure TACLAeroPeek.UpdateOverlay(AIcon: HICON; const AHint: string);
 begin
   if Available then
-    TaskBarList.SetOverlayIcon(OwnerWindow, AIcon, PWideChar(AHint));
+  {$IFDEF MSWINDOWS}
+    TaskBarList.SetOverlayIcon(OwnerWindow.Handle, AIcon, PWideChar(AHint));
+  {$ENDIF}
 end;
 
 procedure TACLAeroPeek.UpdatePreview;
 begin
   if Available then
   begin
+  {$IFDEF MSWINDOWS}
     if FLivePreviewTimer <> nil then
-    begin
-      UpdateThumbnailPreview;
-      UpdatePeekPreview;
-    end
+      UpdateLivePreviews
     else
-      DwmInvalidateIconicBitmaps(OwnerWindow);
+      DwmInvalidateIconicBitmaps(OwnerWindow.Handle);
+  {$ENDIF}
   end;
 end;
 
@@ -370,32 +382,38 @@ begin
 end;
 
 function TACLAeroPeek.CreatePeekPreview(out AHasFrame: Boolean): TACLBitmap;
+{$IFDEF MSWINDOWS}
 var
   AIcon: TIcon;
   AWindowInfo: TWindowInfo;
   AWindowPlacement: TWindowPlacement;
+{$ENDIF}
 begin
-  if IsIconic(OwnerWindow) then
-  begin
-    AHasFrame := False;
+  Result := nil;
+  AHasFrame := False;
+{$IFDEF MSWINDOWS}
+  if IsIconic(OwnerWindow.Handle) then
+  try
     AWindowPlacement.length := SizeOf(AWindowPlacement);
-    GetWindowPlacement(OwnerWindow, AWindowPlacement);
+    GetWindowPlacement(OwnerWindow.Handle, AWindowPlacement);
     Result := TACLBitmap.CreateEx(AWindowPlacement.rcNormalPosition, pf32bit, True);
     acDrawDragImage(Result.Canvas, Result.ClientRect);
 
     AIcon := TIcon.Create;
     try
-      AIcon.Handle := SendMessage(OwnerWindow, WM_GETICON, ICON_BIG, 0);
+      AIcon.Handle := SendMessage(OwnerWindow.Handle, WM_GETICON, ICON_BIG, 0);
       if AIcon.HandleAllocated then
         Result.Canvas.Draw((Result.Width - AIcon.Width) div 2, (Result.Height - AIcon.Height) div 2, AIcon);
     finally
       AIcon.Free;
     end;
+  except
+    FreeAndNil(Result);
   end
   else
-  begin
+  try
     AWindowInfo.cbSize := SizeOf(AWindowInfo);
-    GetWindowInfo(OwnerWindow, AWindowInfo);
+    GetWindowInfo(OwnerWindow.Handle, AWindowInfo);
 
     Result := TACLBitmap.CreateEx(AWindowInfo.rcClient, pf32bit, True);
     Result.Canvas.Lock;
@@ -403,7 +421,7 @@ begin
       SetWindowOrgEx(Result.Canvas.Handle,
         AWindowInfo.rcClient.Left - AWindowInfo.rcWindow.Left,
         AWindowInfo.rcClient.Top - AWindowInfo.rcWindow.Top, nil);
-      SendMessage(OwnerWindow, WM_PRINT, Result.Canvas.Handle,
+      SendMessage(OwnerWindow.Handle, WM_PRINT, Result.Canvas.Handle,
         PRF_NONCLIENT or PRF_ERASEBKGND or PRF_CLIENT or PRF_CHILDREN);
     finally
       Result.Canvas.Unlock;
@@ -411,37 +429,18 @@ begin
 
     AHasFrame :=
       (AWindowInfo.rcWindow <> AWindowInfo.rcClient) and
-      (GetWindowLong(OwnerWindow, GWL_STYLE) and WS_BORDER <> 0) and
-      (GetWindowLong(OwnerWindow, GWL_EXSTYLE) and WS_EX_LAYERED = 0);
-  end;
+      (GetWindowLong(OwnerWindow.Handle, GWL_STYLE) and WS_BORDER <> 0) and
+      (GetWindowLong(OwnerWindow.Handle, GWL_EXSTYLE) and WS_EX_LAYERED = 0);
+  except
+    FreeAndNil(Result);
+  end
+{$ENDIF}
 end;
 
 procedure TACLAeroPeek.DoButtonClick(AIndex: Integer);
 begin
   if Assigned(OnButtonClick) then
     OnButtonClick(Self, AIndex);
-end;
-
-procedure TACLAeroPeek.DoDrawPreview(ABitmap: TACLBitmap);
-var
-  AHasFrame: Boolean;
-  APreview: TACLBitmap;
-  ASize: TSize;
-begin
-  if Assigned(OnDrawPreview) then
-    OnDrawPreview(Self, ABitmap)
-  else
-  begin
-    APreview := CreatePeekPreview(AHasFrame);
-    try
-      ASize := acFitSize(ABitmap.ClientRect.Size, APreview.ClientRect.Size, afmProportionalStretch);
-      ABitmap.SetSize(ASize.cx, ASize.cy);
-      SetStretchBltMode(ABitmap.Canvas.Handle, HALFTONE);
-      acStretchBlt(ABitmap.Canvas.Handle, APreview.Canvas.Handle, ABitmap.ClientRect, APreview.ClientRect);
-    finally
-      APreview.Free;
-    end;
-  end;
 end;
 
 procedure TACLAeroPeek.DoInitialize;
@@ -454,50 +453,32 @@ begin
   begin
     SyncProgress;
     SyncButtons;
+    SyncState;
     UpdatePreview;
+    UpdateForceIconicRepresentation;
   end;
 end;
 
 procedure TACLAeroPeek.SetWindowAttribute(AAttr: Cardinal; AValue: LongBool);
 begin
-  if Available then
-    DwmSetWindowAttribute(OwnerWindow, AAttr, @AValue, SizeOf(AValue));
-end;
-
-procedure TACLAeroPeek.HookOwnerWindow;
-begin
-  FWindowProcPtr := MakeObjectInstance(OwnerWindowWndProc);
-  FWindowProcOld := SetWindowProc(FWindowProcPtr);
-  SetWindowAttribute(DWMWA_HAS_ICONIC_BITMAP, True);
-  UpdateForceIconicRepresentation;
-end;
-
-procedure TACLAeroPeek.UnhookOwnerWindow;
-begin
-  if FWindowProcOld <> nil then
-  try
-    SetWindowAttribute(DWMWA_HAS_ICONIC_BITMAP, False);
-    SetWindowProc(FWindowProcOld);
-    FreeObjectInstance(FWindowProcPtr);
-  finally
-    FWindowProcOld := nil;
-    FWindowProcPtr := nil;
-  end;
+  if Available and OwnerWindow.HandleAllocated then
+  {$IFDEF MSWINDOWS}
+    DwmSetWindowAttribute(OwnerWindow.Handle, AAttr, @AValue, SizeOf(AValue));
+  {$ENDIF}
 end;
 
 function TACLAeroPeek.GetAvailable: Boolean;
 begin
-  Result := (FTaskBarList <> nil) and IsWinSevenOrLater;
+{$IFDEF MSWINDOWS}
+  Result := (FTaskBarList <> nil) and acOSCheckVersion(6, 1);
+{$ELSE}
+  Result := False;
+{$ENDIF}
 end;
 
 function TACLAeroPeek.GetProgressPresents: Boolean;
 begin
   Result := (Progress > 0) or (ProgressTotal > 0);
-end;
-
-function TACLAeroPeek.SetWindowProc(AWindowProc: Pointer): Pointer;
-begin
-  Result := Pointer(SetWindowLong(OwnerWindow, GWL_WNDPROC, NativeUInt(AWindowProc)));
 end;
 
 procedure TACLAeroPeek.ImageListChanged(Sender: TObject);
@@ -507,6 +488,7 @@ end;
 
 procedure TACLAeroPeek.OwnerWindowWndProc(var AMessage: TMessage);
 begin
+{$IFDEF MSWINDOWS}
   case AMessage.Msg of
     WM_COMMAND:
       if HiWord(AMessage.WParam) = THBN_CLICKED then
@@ -528,12 +510,12 @@ begin
         Exit;
       end;
   end;
-
-  AMessage.Result := CallWindowProc(FWindowProcOld, OwnerWindow, AMessage.Msg, AMessage.WParam, AMessage.LParam);
+  FPrevWndProc(AMessage);
   if AMessage.Msg = WM_TASKBARBUTTONCREATED then
     DoInitialize;
-  if AMessage.Msg = WM_NCDESTROY then
-    UnhookOwnerWindow;
+  if AMessage.Msg = WM_CREATE then
+    SyncState;
+{$ENDIF}
 end;
 
 procedure TACLAeroPeek.LivePreviewTimerHandler(Sender: TObject);
@@ -542,10 +524,7 @@ var
 begin
   AClassName := acGetClassName(WindowFromPoint(MouseCursorPos));
   if acSameTextEx(AClassName, ['TaskListThumbnailWnd', 'MSTaskListWClass', 'ToolbarWindow32']) then
-  begin
-    UpdateThumbnailPreview;
-    UpdatePeekPreview;
-  end
+    UpdateLivePreviews
   else
     StopLivePreviewTimer;
 end;
@@ -603,6 +582,7 @@ begin
 end;
 
 procedure TACLAeroPeek.SyncButtons;
+{$IFDEF MSWINDOWS}
 
   procedure PrepareButton(var B: TThumbButton; AItem: TACLAeroPeekButton; AIndex: Integer);
   begin
@@ -616,31 +596,45 @@ procedure TACLAeroPeek.SyncButtons;
 
   procedure UpdateThumbBar(AButtons: PThumbButton; AButtonsCount: Integer);
   begin
-    TaskBarList.ThumbBarSetImageList(OwnerWindow, ImageList.Handle);
+    try
+      TaskBarList.ThumbBarSetImageList(OwnerWindow.Handle, ImageList.Handle);
+    except
+      // failed to create imagelist
+    end;
     if FTaskBarButtonsInitialized then
-      TaskBarList.ThumbBarUpdateButtons(OwnerWindow, AButtonsCount, AButtons)
+      TaskBarList.ThumbBarUpdateButtons(OwnerWindow.Handle, AButtonsCount, AButtons)
     else
     begin
-      TaskBarList.ThumbBarAddButtons(OwnerWindow, AButtonsCount, AButtons);
+      TaskBarList.ThumbBarAddButtons(OwnerWindow.Handle, AButtonsCount, AButtons);
       FTaskBarButtonsInitialized := True;
     end;
   end;
 
 var
-  AButtonsCount: Integer;
+  LButtonCount: Integer;
   I: Integer;
 begin
   if FTaskBarButtonsInitialized or (Buttons.Count <> 0) then
   begin
-    AButtonsCount := Min(Buttons.Count, Length(FTaskBarButtons));
-    for I := 0 to AButtonsCount - 1 do
+    LButtonCount := Min(Buttons.Count, Length(FTaskBarButtons));
+    for I := 0 to LButtonCount - 1 do
       PrepareButton(FTaskBarButtons[I], Buttons[I], I);
     if Initialized then
-      UpdateThumbBar(@FTaskBarButtons[0], AButtonsCount);
+    try
+      UpdateThumbBar(@FTaskBarButtons[0], LButtonCount);
+    except
+      // do nothing
+    end;
   end;
+{$ELSE}
+begin
+{$ENDIF}
 end;
 
 procedure TACLAeroPeek.SyncProgress;
+{$IFDEF MSWINDOWS}
+const
+  StateMap: array[TACLAeroPeekProgressState] of Integer = (TBPF_NORMAL, TBPF_PAUSED, TBPF_ERROR);
 
   function CalculateState: Cardinal;
   begin
@@ -662,52 +656,90 @@ begin
     if ShowProgress and ProgressPresents then
     begin
       AState := CalculateState;
-      TaskBarList.SetProgressState(OwnerWindow, AState);
+      TaskBarList.SetProgressState(OwnerWindow.Handle, AState);
       if (AState <> TBPF_NOPROGRESS) and (AState <> TBPF_INDETERMINATE) then
-        TaskBarList.SetProgressValue(OwnerWindow, Progress, ProgressTotal);
+        TaskBarList.SetProgressValue(OwnerWindow.Handle, Progress, ProgressTotal);
     end
     else
       if ShowStatusAsColor and ProgressPresents then
       begin
-        TaskBarList.SetProgressState(OwnerWindow, StateMap[ProgressState]);
-        TaskBarList.SetProgressValue(OwnerWindow, 100, 100);
+        TaskBarList.SetProgressState(OwnerWindow.Handle, StateMap[ProgressState]);
+        TaskBarList.SetProgressValue(OwnerWindow.Handle, 100, 100);
       end
       else
-        TaskBarList.SetProgressState(OwnerWindow, TBPF_NOPROGRESS);
+        TaskBarList.SetProgressState(OwnerWindow.Handle, TBPF_NOPROGRESS);
   end;
+{$ELSE}
+begin
+{$ENDIF}
+end;
+
+procedure TACLAeroPeek.SyncState;
+begin
+{$IFDEF MSWINDOWS}
+  SetWindowAttribute(DWMWA_HAS_ICONIC_BITMAP, True);
+{$ENDIF}
 end;
 
 procedure TACLAeroPeek.UpdateForceIconicRepresentation;
 begin
+{$IFDEF MSWINDOWS}
   SetWindowAttribute(DWMWA_FORCE_ICONIC_REPRESENTATION, Assigned(OnDrawPreview) or ForceCustomPreview);
+{$ENDIF}
 end;
 
-procedure TACLAeroPeek.UpdatePeekPreview;
+procedure TACLAeroPeek.UpdateLivePreviews;
+{$IFDEF MSWINDOWS}
 var
-  ABitmap: TACLBitmap;
-  AHasBorder: Boolean;
+  LHasBorder: Boolean;
+  LPreview: TACLBitmap;
+  LPreviewImage: TACLImage;
+  LThumbnailRect: TRect;
 begin
-  ABitmap := CreatePeekPreview(AHasBorder);
+  if Assigned(OnDrawPreview) and not FThumbnailSize.IsEmpty then
   try
-    DwmSetIconicLivePreviewBitmap(OwnerWindow, ABitmap.Handle, nil, IfThen(AHasBorder, DWM_SIT_DISPLAYFRAME));
-  finally
-    ABitmap.Free;
+    LPreview := TACLBitmap.CreateEx(FThumbnailSize, pf32bit, True);
+    try
+      OnDrawPreview(Self, LPreview);
+      DwmSetIconicThumbnail(OwnerWindow.Handle, LPreview.Handle, 0);
+    finally
+      LPreview.Free;
+    end;
+  except
+    // do nothing
   end;
+
+  LPreview := CreatePeekPreview(LHasBorder);
+  if LPreview <> nil then
+  try
+    DwmSetIconicLivePreviewBitmap(OwnerWindow.Handle,
+      LPreview.Handle, nil, IfThen(LHasBorder, DWM_SIT_DISPLAYFRAME));
+    if not Assigned(OnDrawPreview) and not FThumbnailSize.IsEmpty then
+    try
+      LThumbnailRect := acFitRect(FThumbnailSize,
+        LPreview.Width, LPreview.Height, afmProportionalStretch);
+      LPreviewImage := TACLImage.Create(LPreview);
+      try
+        LPreview.SetSize(FThumbnailSize);
+        LPreview.Reset;
+        LPreviewImage.Draw(LPreview.Canvas, LThumbnailRect);
+      finally
+        LPreviewImage.Free;
+      end;
+      DwmSetIconicThumbnail(OwnerWindow.Handle, LPreview.Handle, 0);
+    except
+      // do nothing
+    end;
+  finally
+    LPreview.Free;
+  end;
+{$ELSE}
+begin
+{$ENDIF}
 end;
 
-procedure TACLAeroPeek.UpdateThumbnailPreview;
-var
-  ABitmap: TACLBitmap;
-begin
-  ABitmap := TACLBitmap.CreateEx(FThumbnailSize, pf32bit);
-  try
-    DoDrawPreview(ABitmap);
-    DwmSetIconicThumbnail(OwnerWindow, ABitmap.Handle, 0);
-  finally
-    ABitmap.Free;
-  end;
-end;
-
+{$IFDEF MSWINDOWS}
 initialization
   WM_TASKBARBUTTONCREATED := RegisterWindowMessage('TaskbarButtonCreated');
+{$ENDIF}
 end.

@@ -1,36 +1,42 @@
-{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*         2D Render based Controls          *}
-{* (with hardware acceleration via Direct2D) *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Extended Library-based PaintBox
+//             with hardware acceleration via Direct2D
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Scene2D;
 
-{$I ACL.Config.Inc}
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  Winapi.Messages,
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // ACL
   ACL.Graphics,
   ACL.Graphics.Ex,
-  ACL.Graphics.Ex.D2D,
-  ACL.Graphics.Ex.Gdip,
+  ACL.Ui.Controls.Base,
   // VCL
-  Vcl.Controls;
+  {Vcl.}Controls;
 
 type
   TACLRenderEvent = procedure (Sender: TObject; Render: TACL2DRender) of object;
@@ -62,7 +68,8 @@ type
     destructor Destroy; override;
     function IsHardwareAccelerationUsed: Boolean;
   published
-    property UseHardwareAcceleration: Boolean read FUseHardwareAcceleration write SetUseHardwareAcceleration default True;
+    property UseHardwareAcceleration: Boolean read
+      FUseHardwareAcceleration write SetUseHardwareAcceleration default True;
   end;
 
   { TACLPaintBox2D }
@@ -84,6 +91,14 @@ type
 
 implementation
 
+uses
+{$IFDEF FPC}
+  ACL.Graphics.Ex.Cairo;
+{$ELSE}
+  ACL.Graphics.Ex.D2D,
+  ACL.Graphics.Ex.Gdip;
+{$ENDIF}
+
 { TACLCustom2DScene }
 
 constructor TACLCustom2DScene.Create(AOwner: TComponent);
@@ -102,29 +117,43 @@ end;
 
 function TACLCustom2DScene.CreateActualRender: TACL2DRender;
 begin
+{$IFDEF FPC}
+  Result := TACLCairoRender.Create;
+{$ELSE}
   if (csDesigning in ComponentState) or
     not HandleAllocated or
     not UseHardwareAcceleration or
     not TACLDirect2D.TryCreateRender(RecreateRenderRequested, WindowHandle, Result)
   then
     Result := TACLGdiplusRender.Create;
+{$ENDIF}
 end;
 
 procedure TACLCustom2DScene.CreateHandle;
+var
+  LIntf: IACL2DRenderWndBased;
 begin
   inherited;
   if Render = nil then
     FRender := CreateActualRender;
-  if Render is TACLDirect2DHwndBasedRender then
-    TACLDirect2DHwndBasedRender(Render).SetWndHandle(Handle);
+  if Supports(Render, IACL2DRenderWndBased, LIntf) then
+  begin
+    LIntf.SetWndHandle(Handle);
+    LIntf := nil;
+  end;
   DoCreate;
 end;
 
 procedure TACLCustom2DScene.DestroyHandle;
+var
+  LIntf: IACL2DRenderWndBased;
 begin
   DoDestroy;
-  if Render is TACLDirect2DHwndBasedRender then
-    TACLDirect2DHwndBasedRender(Render).SetWndHandle(0);
+  if Supports(Render, IACL2DRenderWndBased, LIntf) then
+  begin
+    LIntf.SetWndHandle(0);
+    LIntf := nil;
+  end;
   inherited;
 end;
 
@@ -140,7 +169,11 @@ end;
 
 function TACLCustom2DScene.IsHardwareAccelerationUsed: Boolean;
 begin
+{$IFDEF FPC}
+  Result := False;
+{$ELSE}
   Result := Render is TACLDirect2DHwndBasedRender;
+{$ENDIF}
 end;
 
 procedure TACLCustom2DScene.Paint(ARender: TACL2DRender);
@@ -165,12 +198,14 @@ begin
   if FUseHardwareAcceleration <> AValue then
   begin
     FUseHardwareAcceleration := AValue;
+  {$IFNDEF FPC}
     if not (csDesigning in ComponentState) then
     begin
       RecreateRenderRequested;
       if HandleAllocated then
         RecreateWnd;
     end;
+  {$ENDIF}
   end;
 end;
 
@@ -181,9 +216,6 @@ end;
 
 procedure TACLCustom2DScene.WMPaint(var Message: TWMPaint);
 var
-  AClipRgn: HRGN;
-  AMemBmp: HBITMAP;
-  AMemDC: HDC;
   APaintStruct: TPaintStruct;
 begin
   if Message.DC <> 0 then
@@ -196,36 +228,24 @@ begin
     end;
   end
   else
-  begin
-    BeginPaint(Handle, APaintStruct);
-    try
-      if Supports(Render, IACL2DRenderGdiCompatible) then
-      begin
-        AMemDC := acCreateMemDC(APaintStruct.hdc, APaintStruct.rcPaint, AMemBmp, AClipRgn);
-        try
-          Message.DC := AMemDC;
-          Perform(WM_PAINT, Message.DC, 0);
-          Message.DC := 0;
-          acBitBlt(APaintStruct.hdc, AMemDC, APaintStruct.rcPaint, APaintStruct.rcPaint.TopLeft);
-        finally
-          acDeleteMemDC(AMemDC, AMemBmp, AClipRgn);
-        end;
-      end
-      else
-      begin
-        // We not need to copy directX frame's content to DC (its already been drawn over our hwnd).
-        // So, set DC to zero.
+    if Supports(Render, IACL2DRenderGdiCompatible) then
+      TACLControls.BufferedPaint(Self)
+    else
+    begin
+      BeginPaint(Handle, APaintStruct{%H-});
+      try
+        // We not need to copy directX frame's content to DC (its already been
+        // drawn over our hwnd). So, what why we set DC to zero.
         Render.BeginPaint(0, ClientRect, APaintStruct.rcPaint);
         try
           Paint(Render);
         finally
           Render.EndPaint;
         end;
+      finally
+        EndPaint(Handle, APaintStruct);
       end;
-    finally
-      EndPaint(Handle, APaintStruct);
     end;
-  end;
 end;
 
 { TACLPaintBox2D }

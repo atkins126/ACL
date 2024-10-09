@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*  UI Insight - Search thougth app controls *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2023-2024                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   search thougth app controls
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Insight;
 
 {$I ACL.Config.inc}
@@ -17,33 +19,39 @@ unit ACL.UI.Insight;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLProc,
+  LCLType,
+  LMessages,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
+  {System.}TypInfo,
   System.Actions,
   System.UITypes,
-  System.Generics.Collections,
-  System.Generics.Defaults,
-  System.SysUtils,
-  System.Classes,
-  System.Types,
   // Vcl
-  Vcl.ActnList,
-  Vcl.Menus,
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.Forms,
+  {Vcl.}ActnList,
+  {Vcl.}Menus,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
   ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Ex.Gdip,
-  ACL.Math,
   ACL.Threading,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.Buttons,
   ACL.UI.Controls.DropDown,
@@ -53,6 +61,7 @@ uses
   ACL.UI.Controls.TreeList,
   ACL.UI.Controls.TreeList.SubClass,
   ACL.UI.Controls.TreeList.Types,
+  ACL.UI.Menus,
   ACL.UI.Forms,
   ACL.UI.Resources,
   ACL.Utils.Common,
@@ -82,7 +91,7 @@ type
 
   { TACLUIInsightCandidates }
 
-  TACLUIInsightCandidates = class(TACLObjectList<TACLUIInsightCandidate>);
+  TACLUIInsightCandidates = class(TACLObjectListOf<TACLUIInsightCandidate>);
 
   { TACLUIInsightSearchQueueBuilder }
 
@@ -133,7 +142,6 @@ type
     procedure DoGetHint(const P: TPoint; var AHint: string); override;
     procedure PopulateCandidates(ACandidates: TACLUIInsightCandidates); virtual;
     procedure SelectCandidate(ACandidate: TACLUIInsightCandidate); virtual;
-    procedure SetDefaultSize; override;
     procedure SetTargetDPI(AValue: Integer); override;
     procedure ShowDropDownWindow; override;
   public
@@ -200,8 +208,11 @@ type
 implementation
 
 uses
-  System.Math,
-  System.TypInfo;
+{$IFDEF FPC}
+  ACL.Graphics.Ex.Cairo;
+{$ELSE}
+  ACL.Graphics.Ex.Gdip;
+{$ENDIF}
 
 type
 
@@ -214,12 +225,16 @@ type
     FlashTimerId = 42;
   strict private
     FTimestamp: Cardinal;
+    procedure UpdateAlpha;
     procedure WMTimer(var Message: TWMTimer); message WM_TIMER;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure DoPopup; override;
     procedure DoPopupClosed; override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
+  public
+    constructor Create(AOwner: TComponent); override;
+    procedure DestroyWnd; override;
   end;
 
   { TACLUIInsightSearchBox }
@@ -256,7 +271,7 @@ type
       Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
   protected
     procedure AdjustClientRect(var Rect: TRect); override;
-    procedure CalculateViewInfo;
+    procedure Calculate;
     procedure DoPopup; override;
     procedure Paint; override;
     procedure PopulateCandidates; virtual;
@@ -366,6 +381,7 @@ var
 {$IFNDEF DELPHI110ALEXANDRIA}
   C: TArray<string>;
 {$ENDIF}
+  I: Integer;
 begin
   Result := '';
   if FNestedCaptions.Count > 0 then
@@ -375,7 +391,7 @@ begin
     {$IFNDEF DELPHI110ALEXANDRIA}
       C := FNestedCaptions.ToArray;
     {$ENDIF}
-      for var I := 0 to FNestedCaptions.Count - 1 do
+      for I := 0 to FNestedCaptions.Count - 1 do
       begin
         if B.Length > 0 then
           B.Append(' » ');
@@ -433,13 +449,7 @@ end;
 procedure TACLUIInsightButton.DoGetHint(const P: TPoint; var AHint: string);
 begin
   inherited;
-  if ShortCut <> scNone then
-  begin
-    if AHint <> '' then
-      AHint := AHint + ' (' + ShortCutToText(ShortCut) + ')'
-    else
-      AHint := ShortCutToText(ShortCut);
-  end;
+  AHint := acMenuAppendShortCut(AHint, ShortCut);
 end;
 
 function TACLUIInsightButton.CreateDropDownWindow: TACLPopupWindow;
@@ -529,11 +539,6 @@ begin
   DropDownWindow.PopupUnderControl(LBounds, LAlignment);
 end;
 
-procedure TACLUIInsightButton.SetDefaultSize;
-begin
-  SetBounds(Left, Top, DefaultButtonHeight, DefaultButtonHeight);
-end;
-
 procedure TACLUIInsightButton.SetShortCut(AValue: TShortCut);
 var
   AAction: TAction;
@@ -589,6 +594,13 @@ end;
 
 { TACLUIInsightHighlightWindow }
 
+constructor TACLUIInsightHighlightWindow.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  AlphaBlend := True;
+  Color := clRed;
+end;
+
 procedure TACLUIInsightHighlightWindow.CreateParams(var Params: TCreateParams);
 begin
   inherited;
@@ -596,14 +608,19 @@ begin
   Params.WindowClass.style := Params.WindowClass.style and not CS_DROPSHADOW;
 end;
 
+procedure TACLUIInsightHighlightWindow.DestroyWnd;
+begin
+  KillTimer(Handle, FlashTimerId);
+  inherited DestroyWnd;
+end;
+
 procedure TACLUIInsightHighlightWindow.DoPopup;
 begin
-  AlphaBlend := True;
-  Color := clRed;
-  FTimestamp := GetTickCount;
+  FTimestamp := TACLThread.Timestamp;
   AlphaBlendValue := Alpha;
   SetTimer(Handle, FlashTimerId, GetCaretBlinkTime, nil);
   inherited;
+  TACLMainThread.RunPostponed(UpdateAlpha, Self);
 end;
 
 procedure TACLUIInsightHighlightWindow.DoPopupClosed;
@@ -614,8 +631,13 @@ end;
 
 procedure TACLUIInsightHighlightWindow.MouseMove(Shift: TShiftState; X, Y: Integer);
 begin
-  if (GetTickCount - FTimestamp > HideDelay) and IsMouseInControl then
+  if TACLThread.IsTimeout(FTimestamp, HideDelay) and IsMouseInControl then
     ClosePopup;
+end;
+
+procedure TACLUIInsightHighlightWindow.UpdateAlpha;
+begin
+  AlphaBlendValue := MulDiv(Tag + 1, Alpha, 2);
 end;
 
 procedure TACLUIInsightHighlightWindow.WMTimer(var Message: TWMTimer);
@@ -623,7 +645,7 @@ begin
   if Message.TimerID = FlashTimerId then
   begin
     Tag := (Tag + 1) mod 2;
-    AlphaBlendValue := MulDiv(Tag + 1, Alpha, 2);
+    UpdateAlpha;
   end
   else
     inherited;
@@ -674,6 +696,7 @@ end;
 
 destructor TACLUIInsightSearchPopupWindow.Destroy;
 begin
+  TACLMainThread.Unsubscribe(Self);
   FreeAndNil(FCandidates);
   FreeAndNil(FHintFont);
   inherited;
@@ -685,18 +708,19 @@ begin
   PopulateCandidates;
 end;
 
-procedure TACLUIInsightSearchPopupWindow.CalculateViewInfo;
+procedure TACLUIInsightSearchPopupWindow.Calculate;
 var
   ABeakSize: TSize;
   ABounds: TRect;
   AButtonCenter: TPoint;
-  ARegion: HRGN;
+  AContentMargins: TRect;
+  ARegion: TRegionHandle;
 begin
   ABounds := ClientRect;
   ABeakSize.cy := dpiApply(BeakSize, FCurrentPPI);
   ABeakSize.cx := {2 * }ABeakSize.cy;
   AButtonCenter := acMapRect(Owner.Handle, Handle, Owner.ClientRect).CenterPoint;
-  FContentMargins := TRect.CreateMargins(dpiApply(acIndentBetweenElements, FCurrentPPI));
+  AContentMargins := TRect.CreateMargins(dpiApply(acIndentBetweenElements, FCurrentPPI));
 
   if (AButtonCenter.X < ABounds.Left + ABeakSize.cx) or (AButtonCenter.X > ABounds.Right - ABeakSize.cx) then
   begin
@@ -719,7 +743,7 @@ begin
       FPolyline[5] := Point(ABounds.Right, ABounds.Bottom);
       FPolyline[6] := Point(ABounds.Left, ABounds.Bottom);
       FPolyline[7] := Point(ABounds.Left, ABounds.Top + ABeakSize.cy);
-      Inc(FContentMargins.Top, ABeakSize.cy);
+      Inc(AContentMargins.Top, ABeakSize.cy);
     end
     else
     begin
@@ -732,12 +756,18 @@ begin
       FPolyline[5] := Point(AButtonCenter.X - ABeakSize.cx, ABounds.Bottom - ABeakSize.cy);
       FPolyline[6] := Point(ABounds.Left, ABounds.Bottom - ABeakSize.cy);
       FPolyline[7] := Point(ABounds.Left, ABounds.Top);
-      Inc(FContentMargins.Bottom, ABeakSize.cy);
+      Inc(AContentMargins.Bottom, ABeakSize.cy);
     end;
 
-  ARegion := CreatePolygonRgn(FPolyline[0], Length(FPolyline), WINDING);
+  ARegion := CreatePolygonRgn({$IFDEF FPC}@{$ENDIF}FPolyline[0], Length(FPolyline), WINDING);
   SetWindowRgn(Handle, ARegion, True);
   DeleteObject(ARegion);
+
+  if AContentMargins <> FContentMargins then
+  begin
+    FContentMargins := AContentMargins;
+    Realign;
+  end;
 end;
 
 procedure TACLUIInsightSearchPopupWindow.AdjustClientRect(var Rect: TRect);
@@ -753,19 +783,25 @@ begin
     Color := LColor.AsColor;
   if TACLRootResourceCollection.GetResource('Common.Colors.Border3', TACLResourceColor, nil, LColor) then
     FBorderColor := LColor.AsColor;
+  Font.ResolveHeight;
   FHintFont.Assign(Font);
   FHintFont.Size := FHintFont.Size - 1;
   FSearchResults.OptionsView.Nodes.Height := 3 * acTextIndent +
     dpiRevert(acFontHeight(Font) + acFontHeight(FHintFont), FCurrentPPI);
   inherited;
+{$IFDEF FPC}
+  TACLMainThread.RunPostponed(Calculate, Self);
+{$ENDIF}
 end;
 
 procedure TACLUIInsightSearchPopupWindow.Paint;
 begin
-  GpPaintCanvas.BeginPaint(Canvas.Handle);
+  GpPaintCanvas.BeginPaint(Canvas);
   try
+  {$IFNDEF FPC}
     GpPaintCanvas.SmoothingMode := smNone;
     GpPaintCanvas.PixelOffsetMode := pomHalf;
+  {$ENDIF}
     GpPaintCanvas.FillRectangle(ClientRect, TAlphaColor.FromColor(Color));
     GpPaintCanvas.Line(FPolyline, TAlphaColor.FromColor(FBorderColor), 2);
   finally
@@ -781,9 +817,8 @@ end;
 
 procedure TACLUIInsightSearchPopupWindow.Resize;
 begin
-  CalculateViewInfo;
   inherited;
-  Realign;
+  Calculate;
 end;
 
 procedure TACLUIInsightSearchPopupWindow.SelectCandidate(const ANode: TACLTreeListNode);
@@ -835,11 +870,11 @@ begin
 
   ACanvas.Font := Font;
   ACanvas.Font.Color := SearchResults.Style.RowColorsText[True];
-  acTextDraw(ACanvas, ANode.Caption, LRect, taLeftJustify, taAlignTop, True);
+  acSysDrawText(ACanvas, LRect, ANode.Caption, DT_TOP or DT_SINGLELINE or DT_END_ELLIPSIS);
 
   ACanvas.Font := FHintFont;
   ACanvas.Font.Color := SearchResults.Style.RowColorsText[ANode.Selected];
-  acTextDraw(ACanvas, ANode.Caption, LRect, taLeftJustify, taAlignBottom, True);
+  acSysDrawText(ACanvas, LRect, ANode.Caption, DT_BOTTOM or DT_SINGLELINE or DT_END_ELLIPSIS);
 
   AHandled := True;
 end;

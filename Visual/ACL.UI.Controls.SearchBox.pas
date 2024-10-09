@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*            Search Like Controls           *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   SearchBox
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.SearchBox;
 
 {$I ACL.Config.inc}
@@ -16,38 +18,35 @@ unit ACL.UI.Controls.SearchBox;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+  LMessages,
+{$ELSE}
+  {Winapi.}Messages,
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Collections,
-  System.Generics.Defaults,
-  System.Math,
-  System.Types,
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}TypInfo,
   System.UITypes,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.Forms,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
-  ACL.Timers,
-  ACL.Geometry,
   ACL.Graphics,
-  ACL.Math,
+  ACL.Timers,
   ACL.Threading,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.Buttons,
-  ACL.UI.Controls.DropDown,
-  ACL.UI.Controls.ScrollBar,
   ACL.UI.Controls.TextEdit,
-  ACL.UI.Controls.TreeList,
-  ACL.UI.Controls.TreeList.SubClass,
-  ACL.UI.Controls.TreeList.Types,
-  ACL.UI.Forms,
   ACL.UI.Resources,
   ACL.Utils.Strings;
 
@@ -79,20 +78,19 @@ type
     procedure WaitTimerHandler(Sender: TObject);
   protected
     function CreateStyleButton: TACLStyleButton; override;
-
     procedure Changed; override;
     procedure DoChange; override;
     procedure DoMoveFocusToFirstSearchResult;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
-    //
+    //# Messages
     procedure CMWantSpecialKey(var Message: TCMWantSpecialKey); message CM_WANTSPECIALKEY;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure CancelSearch;
   published
-    property AutoHeight;
+    property AutoSize;
     property Borders;
     property ChangeDelay: Integer read GetChangeDelay write SetChangeDelay default acSearchDelay;
     property FocusControl: TWinControl read FFocusControl write SetFocusControl;
@@ -105,10 +103,6 @@ type
   end;
 
 implementation
-
-uses
-  System.SysUtils,
-  System.TypInfo;
 
 { TACLSearchEdit }
 
@@ -238,7 +232,7 @@ end;
 
 procedure TACLSearchEdit.SetChangeDelay(AValue: Integer);
 begin
-  FWaitTimer.Interval := MinMax(AValue, 0, 5000);
+  FWaitTimer.Interval := EnsureRange(AValue, 0, 5000);
 end;
 
 procedure TACLSearchEdit.SetFocusControl(const Value: TWinControl);

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*       High-level Parsers Routines         *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2021-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   High-level parsing routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Parsers.Ripper;
 
 {$I ACL.Config.inc}
@@ -16,9 +18,9 @@ unit ACL.Parsers.Ripper;
 interface
 
 uses
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // ACL
   ACL.Classes.Collections,
   ACL.Expressions,
@@ -33,13 +35,13 @@ type
   strict private
     FSource: TACLRipperRule;
   protected
-    procedure ProcessCore(const ATarget: TACLList<string>; const ASource: string); virtual;
+    procedure ProcessCore(const ATarget: TACLListOfString; const ASource: string); virtual;
   public
     constructor Create(ASource: TACLRipperRule = nil);
     destructor Destroy; override;
     function Extract(const AData: string): string; overload;
-    function ExtractEx(const AData: string): TACLList<string>; overload;
-    procedure Process(var AData: TACLList<string>);
+    function ExtractEx(const AData: string): TACLListOfString; overload;
+    procedure Process(var AData: TACLListOfString);
   end;
 
   { TACLRipperRuleAimingByTags }
@@ -54,7 +56,7 @@ type
 
     function Find(const AStrToFind, AStr: string; AStartPos, AEndPos: Integer; AFromEnd: Boolean): Integer;
   protected
-    procedure ProcessCore(const ATarget: TACLList<string>; const ASource: string); override;
+    procedure ProcessCore(const ATarget: TACLListOfString; const ASource: string); override;
   public
     constructor Create(const AStartTags, AFinishTags: string;
       AOptions: TACLRipperRuleAimingByTagsOptions; ASource: TACLRipperRule = nil);
@@ -66,7 +68,7 @@ type
   strict private
     FExpression: TACLExpression;
   protected
-    procedure ProcessCore(const ATarget: TACLList<string>; const ASource: string); override;
+    procedure ProcessCore(const ATarget: TACLListOfString; const ASource: string); override;
   public
     constructor Create(const AExpression: string; ASource: TACLRipperRule = nil);
     destructor Destroy; override;
@@ -76,7 +78,7 @@ type
 
   TACLRipperRuleRemoveHtmlTags = class(TACLRipperRule)
   protected
-    procedure ProcessCore(const ATarget: TACLList<string>; const ASource: string); override;
+    procedure ProcessCore(const ATarget: TACLListOfString; const ASource: string); override;
   end;
 
 implementation
@@ -147,7 +149,7 @@ end;
 
 function TACLRipperRule.Extract(const AData: string): string;
 var
-  AList: TACLList<string>;
+  AList: TACLListOfString;
 begin
   AList := ExtractEx(AData);
   try
@@ -160,23 +162,23 @@ begin
   end;
 end;
 
-function TACLRipperRule.ExtractEx(const AData: string): TACLList<string>;
+function TACLRipperRule.ExtractEx(const AData: string): TACLListOfString;
 begin
-  Result := TACLList<string>.Create;
+  Result := TACLListOfString.Create;
   Result.Capacity := 1;
   Result.Add(AData);
   Process(Result)
 end;
 
-procedure TACLRipperRule.Process(var AData: TACLList<string>);
+procedure TACLRipperRule.Process(var AData: TACLListOfString);
 var
-  ATarget: TACLList<string>;
+  ATarget: TACLListOfString;
   I: Integer;
 begin
   if FSource <> nil then
     FSource.Process(AData);
 
-  ATarget := TACLList<string>.Create;
+  ATarget := TACLListOfString.Create;
   try
     ATarget.Capacity := AData.Count;
     for I := 0 to AData.Count - 1 do
@@ -187,7 +189,7 @@ begin
   end;
 end;
 
-procedure TACLRipperRule.ProcessCore(const ATarget: TACLList<string>; const ASource: string);
+procedure TACLRipperRule.ProcessCore(const ATarget: TACLListOfString; const ASource: string);
 begin
   ATarget.Add(ASource);
 end;
@@ -216,12 +218,12 @@ begin
   SplitTags(AFinishTags, FFinishTags);
 end;
 
-procedure TACLRipperRuleAimingByTags.ProcessCore(const ATarget: TACLList<string>; const ASource: string);
+procedure TACLRipperRuleAimingByTags.ProcessCore(const ATarget: TACLListOfString; const ASource: string);
 var
   I0: Integer;
   L1, L2: Integer;
   P1, P2, PE: Integer;
-  US: UnicodeString;
+  US: string;
 begin
   L1 := Length(FStartTags);
   L2 := Length(FFinishTags);
@@ -262,12 +264,13 @@ begin
   until (P1 < 0) or not (ratMultipleTargets in FOptions);
 end;
 
-function TACLRipperRuleAimingByTags.Find(const AStrToFind, AStr: string; AStartPos, AEndPos: Integer; AFromEnd: Boolean): Integer;
+function TACLRipperRuleAimingByTags.Find(const AStrToFind, AStr: string;
+  AStartPos, AEndPos: Integer; AFromEnd: Boolean): Integer;
 var
   AIterationCount: Integer;
-  AStrScan: PWideChar;
+  AStrScan: PChar;
   AStrToFindLength: Integer;
-  AStrToFindScan: PWideChar;
+  AStrToFindScan: PChar;
 begin
   if AStartPos <= 0 then
     Exit(0);
@@ -282,12 +285,12 @@ begin
 
   if AFromEnd then
   begin
-    AStrToFindScan := PWideChar(AStrToFind);
+    AStrToFindScan := PChar(AStrToFind);
     AStartPos := AEndPos - AStrToFindLength;
-    AStrScan := PWideChar(AStr) + AStartPos;
+    AStrScan := PChar(AStr) + AStartPos;
     while AIterationCount >= 0 do
     begin
-      if CompareMem(AStrToFindScan, AStrScan, AStrToFindLength * SizeOf(WideChar)) then
+      if CompareMem(AStrToFindScan, AStrScan, AStrToFindLength * SizeOf(Char)) then
         Exit(AStartPos);
       Dec(AIterationCount);
       Dec(AStartPos);
@@ -296,11 +299,11 @@ begin
   end
   else
   begin
-    AStrToFindScan := PWideChar(AStrToFind);
-    AStrScan := PWideChar(AStr) + (AStartPos - 1);
+    AStrToFindScan := PChar(AStrToFind);
+    AStrScan := PChar(AStr) + (AStartPos - 1);
     while AIterationCount >= 0 do
     begin
-      if CompareMem(AStrToFindScan, AStrScan, AStrToFindLength * SizeOf(WideChar)) then
+      if CompareMem(AStrToFindScan, AStrScan, AStrToFindLength * SizeOf(Char)) then
         Exit(AStartPos);
       Dec(AIterationCount);
       Inc(AStartPos);
@@ -324,7 +327,7 @@ begin
   inherited Destroy;
 end;
 
-procedure TACLRipperRuleExpression.ProcessCore(const ATarget: TACLList<string>; const ASource: string);
+procedure TACLRipperRuleExpression.ProcessCore(const ATarget: TACLListOfString; const ASource: string);
 var
   AContext: TACLRipperRuleExpressionContext;
 begin
@@ -339,18 +342,18 @@ end;
 
 { TACLRipperRuleRemoveHtmlTags }
 
-procedure TACLRipperRuleRemoveHtmlTags.ProcessCore(const ATarget: TACLList<string>; const ASource: string);
+procedure TACLRipperRuleRemoveHtmlTags.ProcessCore(const ATarget: TACLListOfString; const ASource: string);
 var
   ABuffer: TACLStringBuilder;
   AByte1, AByte2: Byte;
   ACount: Integer;
   AData: string;
-  AScan: PWideChar;
+  AScan: PChar;
 begin
   AData := TACLXMLConvert.DecodeName(ASource);
   ABuffer := TACLStringBuilder.Get(Length(AData));
   try
-    AScan := PWideChar(AData);
+    AScan := PChar(AData);
     ACount := Length(AData);
     repeat
       case AScan^ of

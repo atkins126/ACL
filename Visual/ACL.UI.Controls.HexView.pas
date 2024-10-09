@@ -1,47 +1,58 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*              HexView Control              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   HexView
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.HexView;
 
-{$I ACL.Config.Inc}
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+  Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
+  System.AnsiStrings,
   System.UITypes,
-  System.Types,
-  System.SysUtils,
-  System.Classes,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
-  Vcl.Forms,
+  {Vcl.}Clipbrd,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.ByteBuffer,
   ACL.Geometry,
+  ACL.Geometry.Utils,
   ACL.Graphics,
-  ACL.Graphics.FontCache,
   ACL.Graphics.Ex,
+  ACL.Graphics.FontCache,
+  ACL.Graphics.TextLayout,
   ACL.Math,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.CompoundControl,
   ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
-  ACL.Utils.Clipboard,
   ACL.Utils.Strings;
 
 const
@@ -56,18 +67,10 @@ type
 
   { TACLHexViewStyle }
 
-  TACLHexViewStyle = class(TACLStyle)
+  TACLHexViewStyle = class(TACLStyleBackground)
   protected
     procedure InitializeResources; override;
-  public
-    procedure DrawBorder(ACanvas: TCanvas; const R: TRect; const ABorders: TACLBorders);
-    procedure DrawContent(ACanvas: TCanvas; const R: TRect);
-    function IsTransparentBackground: Boolean;
   published
-    property ColorBorder1: TACLResourceColor index 0 read GetColor write SetColor stored IsColorStored;
-    property ColorBorder2: TACLResourceColor index 1 read GetColor write SetColor stored IsColorStored;
-    property ColorContent1: TACLResourceColor index 2 read GetColor write SetColor stored IsColorStored;
-    property ColorContent2: TACLResourceColor index 3 read GetColor write SetColor stored IsColorStored;
     property ColorContentFocused: TACLResourceColor index 4 read GetColor write SetColor stored IsColorStored;
     property ColorContentSelected: TACLResourceColor index 5 read GetColor write SetColor stored IsColorStored;
     property ColorContentSelectedInactive: TACLResourceColor index 6 read GetColor write SetColor stored IsColorStored;
@@ -78,26 +81,26 @@ type
 
   { TACLHexViewCharacterSet }
 
-  TACLHexViewCharacterSet = class abstract
+  TACLHexViewCharacterSet = class
   strict private const
     EmptyChar = '.';
   strict private
     FData: array[Byte] of string;
     FEmptyCharView: TACLTextViewInfo;
-    FFont: TACLFontInfo;
+    FFont: TFont;
     FSize: TSize;
     FView: array[Byte] of TACLTextViewInfo;
 
     procedure CreateViewInfo;
     function GetView(Index: Byte): TACLTextViewInfo;
     procedure ReleaseViewInfo;
-    procedure SetFont(AValue: TACLFontInfo);
+    procedure SetFont(AValue: TFont);
   protected
     function CreateData(AIndex: Byte): string; virtual;
   public
     destructor Destroy; override;
-    //
-    property Font: TACLFontInfo read FFont write SetFont;
+    //# Properties
+    property Font: TFont read FFont write SetFont;
     property Size: TSize read FSize;
     property View[Index: Byte]: TACLTextViewInfo read GetView;
   end;
@@ -113,7 +116,7 @@ type
 
   TACLHexViewSubClass = class(TACLCompoundControlSubClass)
   public type
-    TEncodeProc = reference to function (const ABytes: TBytes): string;
+    TEncodeProc = reference to function (const ABytes: TBytes): UnicodeString;
   strict private
     FCharacters: TACLHexViewCharacterSet;
     FCharactersHex: TACLHexViewHexCharacterSet;
@@ -138,7 +141,7 @@ type
     procedure DoSelectionChanged; virtual;
     function GetPositionFromHitTest(AHitTestInfo: TACLHitTestInfo): Int64;
     procedure ProcessChanges(AChanges: TIntegerSet = []); override;
-    procedure ProcessKeyDown(AKey: Word; AShift: TShiftState); override;
+    procedure ProcessKeyDown(var AKey: Word; AShift: TShiftState); override;
     procedure ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState); override;
     procedure ProcessMouseDown(AButton: TMouseButton; AShift: TShiftState); override;
     procedure ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState); override;
@@ -157,7 +160,7 @@ type
     procedure SelectAll;
     procedure SetSelection(AStart, ALength: Int64);
     procedure SetTargetDPI(AValue: Integer); override;
-    //
+    //# Properties
     property Characters: TACLHexViewCharacterSet read FCharacters;
     property CharactersHex: TACLHexViewHexCharacterSet read FCharactersHex;
     property Cursor: Int64 read FCursor write SetCursor;
@@ -168,7 +171,7 @@ type
     property SelStart: Int64 read FSelStart;
     property Style: TACLHexViewStyle read FStyle;
     property ViewInfo: TACLHexViewViewInfo read GetViewInfo;
-    //
+    //# Events
     property OnSelect: TNotifyEvent read FOnSelect write FOnSelect;
   end;
 
@@ -186,11 +189,12 @@ type
     // IACLDraggableObject
     function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
   public
-    constructor Create(ASubClass: TACLHexViewSubClass; ACharacterSet: TACLHexViewCharacterSet); reintroduce;
+    constructor Create(ASubClass: TACLHexViewSubClass;
+      ACharacterSet: TACLHexViewCharacterSet); reintroduce;
     procedure Draw(ACanvas: TCanvas; AData: PByte; ADataSize: Integer);
     function MeasureHeight: Integer;
     function MeasureWidth: Integer;
-    //
+    //# Properties
     property CharacterSet: TACLHexViewCharacterSet read FCharacterSet;
     property ColorEven: TColor read FColorEven write FColorEven;
     property ColorOdd: TColor read FColorOdd write FColorOdd;
@@ -220,7 +224,7 @@ type
     procedure Draw(ACanvas: TCanvas; const AOrigin: TPoint; AData: PByte; ADataSize: Integer);
     function MeasureHeight: Integer; virtual;
     function MeasureWidth: Integer; virtual;
-
+    //# Properties
     property TextView: TACLHexViewChararterSetViewViewInfo read FTextView;
     property HexView: TACLHexViewChararterSetViewViewInfo read FHexView;
     property IndentBetweenViews: Integer read FIndentBetweenViews write FIndentBetweenViews;
@@ -255,9 +259,10 @@ type
     constructor Create(AViewInfo: TACLHexViewViewInfo;
       ACharsetViewInfo: TACLHexViewChararterSetViewViewInfo);
     procedure Calculate;
-    function CalculateCharBounds(AOffset: Int64; ADiscardNegativeOffset: Boolean = False): TRect;
+    function CalculateCharBounds(AOffset: Int64;
+      ADiscardNegativeOffset: Boolean = False): TRect;
     procedure Draw(ACanvas: TCanvas; const AOrigin: TPoint);
-    //
+    //# Properties
     property CharsetViewInfo: TACLHexViewChararterSetViewViewInfo read FCharsetViewInfo;
     property Focused: Boolean read FFocused write FFocused;
     property Style: TACLHexViewStyle read GetStyle;
@@ -282,7 +287,7 @@ type
     function DragStart: Boolean; override;
     procedure DragMove(const P: TPoint; var ADeltaX: Integer; var ADeltaY: Integer); override;
     procedure DragFinished(ACanceled: Boolean); override;
-    //
+    //# Properties
     property HitTest: TACLHitTestInfo read GetHitTest;
     property SubClass: TACLHexViewSubClass read FSubClass;
   end;
@@ -293,7 +298,9 @@ type
   protected type
     TPane = (pHex, pText);
   strict private const
-    HexHeaderData: array[0..acHexViewBytesPerRow - 1] of Byte = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    HexHeaderData: array[0..acHexViewBytesPerRow - 1] of Byte = (
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    );
     IndentBetweenViews = 16;
     Padding = 6;
     function GetRowsAreaClipRect: TRect;
@@ -324,7 +331,7 @@ type
     function GetScrollInfo(AKind: TScrollBarKind; out AInfo: TACLScrollInfo): Boolean; override;
     procedure PopulateData;
     procedure RecreateSubCells; override;
-    //
+    //# Properties
     property BufferPosition: Int64 read FBufferPosition write SetBufferPosition;
     property RowHeight: Integer read FRowHeight;
     property RowsArea: TRect read GetRowsArea;
@@ -333,7 +340,7 @@ type
   public
     constructor Create(AOwner: TACLCompoundControlSubClass); override;
     destructor Destroy; override;
-    //
+    //# Properties
     property FocusedPane: TPane read FFocusedPane write SetFocusedPane;
     property HexSelection: TACLHexViewSelectionViewInfo read FHexSelection;
     property SubClass: TACLHexViewSubClass read GetSubClass;
@@ -358,13 +365,13 @@ type
     procedure SetSelLength(const Value: Int64);
     procedure SetSelStart(const Value: Int64);
     procedure SetStyle(AValue: TACLHexViewStyle); inline;
-    //
+    //# Messages
     procedure WMGetDlgCode(var AMessage: TWMGetDlgCode); message WM_GETDLGCODE;
   protected
     function CreateSubClass: TACLCompoundControlSubClass; override;
-    procedure DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect); override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     function GetContentOffset: TRect; override;
+    procedure Paint; override;
+    procedure UpdateTransparency; override;
   public
     constructor Create(AOwner: TComponent); override;
     procedure CopyToClipboard; overload;
@@ -372,7 +379,7 @@ type
     function GetSelectedBytes: TBytes;
     procedure SelectAll;
     procedure SetSelection(const AStart, ALength: Int64);
-
+    //# Properties
     property Data: TStream read GetData write SetData;
     property FocusOnClick default True;
     property SelLength: Int64 read GetSelLength write SetSelLength;
@@ -384,22 +391,19 @@ type
     property Style: TACLHexViewStyle read GetStyle write SetStyle;
     property StyleScrollBox;
     property Transparent;
-
+    //# Events
     property OnSelect: TNotifyEvent read GetOnSelect write SetOnSelect;
   end;
 
-function FormatHex(const ABytes: TBytes): string;
+function FormatHex(const ABytes: TBytes): UnicodeString;
 implementation
-
-uses
-  System.Math,
-  System.AnsiStrings;
 
 const
   acHexViewHitDataOffset = 'DataOffset';
 
-function FormatHex(const ABytes: TBytes): string;
+function FormatHex(const ABytes: TBytes): UnicodeString;
 var
+  I: Integer;
   S: TACLStringBuilder;
 begin
   if ABytes = nil then
@@ -408,13 +412,13 @@ begin
   S := TACLStringBuilder.Get(Length(ABytes) * 3);
   try
     S.Capacity := Length(ABytes) * 3;
-    for var I := 0 to Length(ABytes) - 1 do
+    for I := 0 to Length(ABytes) - 1 do
     begin
       if I > 0 then
         S.Append(' ');
       S.Append(IntToHex(ABytes[I], 2));
     end;
-    Result := S.ToString;
+    Result := acUString(S.ToString);
   finally
     S.Release;
   end;
@@ -422,28 +426,9 @@ end;
 
 { TACLHexViewStyle }
 
-procedure TACLHexViewStyle.DrawBorder(ACanvas: TCanvas; const R: TRect; const ABorders: TACLBorders);
-begin
-  acDrawComplexFrame(ACanvas.Handle, R, ColorBorder1.Value, ColorBorder2.Value, ABorders);
-end;
-
-procedure TACLHexViewStyle.DrawContent(ACanvas: TCanvas; const R: TRect);
-begin
-  acDrawGradient(ACanvas.Handle, R, ColorContent1.Value, ColorContent2.Value);
-end;
-
-function TACLHexViewStyle.IsTransparentBackground: Boolean;
-begin
-  Result := acIsSemitransparentFill(ColorContent1, ColorContent2);
-end;
-
 procedure TACLHexViewStyle.InitializeResources;
 begin
   inherited;
-  ColorBorder1.InitailizeDefaults('Common.Colors.Border1', True);
-  ColorBorder2.InitailizeDefaults('Common.Colors.Border2', True);
-  ColorContent1.InitailizeDefaults('Common.Colors.Background1', True);
-  ColorContent2.InitailizeDefaults('Common.Colors.Background2', True);
   ColorHeaderText.InitailizeDefaults('Common.Colors.TextHeader');
   ColorContentText1.InitailizeDefaults('HexView.Colors.Text1');
   ColorContentText2.InitailizeDefaults('HexView.Colors.Text2');
@@ -477,21 +462,10 @@ begin
   Result := TACLHexViewSubClass.Create(Self);
 end;
 
-procedure TACLHexView.DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect);
+procedure TACLHexView.Paint;
 begin
-  Style.DrawContent(ACanvas, R);
-  Style.DrawBorder(ACanvas, R, Borders);
-end;
-
-function TACLHexView.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  if Transparent then
-    Result := cbsTransparent
-  else
-    if Style.IsTransparentBackground then
-      Result := cbsSemitransparent
-    else
-      Result := cbsOpaque;
+  Style.Draw(Canvas, ClientRect, Transparent, Borders);
+  inherited;
 end;
 
 function TACLHexView.GetContentOffset: TRect;
@@ -579,6 +553,14 @@ begin
   SubClass.Style.Assign(AValue);
 end;
 
+procedure TACLHexView.UpdateTransparency;
+begin
+  if Transparent or Style.IsTransparentBackground then
+    ControlStyle := ControlStyle - [csOpaque]
+  else
+    ControlStyle := ControlStyle + [csOpaque];
+end;
+
 procedure TACLHexView.WMGetDlgCode(var AMessage: TWMGetDlgCode);
 begin
   AMessage.Result := DLGC_WANTARROWS;
@@ -594,20 +576,30 @@ end;
 
 function TACLHexViewCharacterSet.CreateData(AIndex: Byte): string;
 begin
-  Result := WideChar(AIndex);
+  if AIndex < Ord(' ') then
+    Result := EmptyChar
+  else
+    Result := Char(AIndex);
 end;
 
 procedure TACLHexViewCharacterSet.CreateViewInfo;
 var
-  AIndex: Byte;
+  LIndex: Byte;
+  LRender: TACLTextLayoutRender;
 begin
-  FEmptyCharView := TACLTextViewInfo.Create(MeasureCanvas.Handle, Font, EmptyChar);
-  FSize := FEmptyCharView.Size;
-  for AIndex := Low(Byte) to High(Byte) do
-  begin
-    FData[AIndex] := CreateData(AIndex);
-    FView[AIndex] := TACLTextViewInfo.Create(MeasureCanvas.Handle, Font, FData[AIndex]);
-    FSize := Max(FSize, FView[AIndex].Size);
+  LRender := DefaultTextLayoutCanvasRender.Create(MeasureCanvas);
+  try
+    LRender.SetFont(Font);
+    FEmptyCharView := TACLTextViewInfo.Create(EmptyChar);
+    FSize := FEmptyCharView.Measure(LRender);
+    for LIndex := Low(Byte) to High(Byte) do
+    begin
+      FData[LIndex] := CreateData(LIndex);
+      FView[LIndex] := TACLTextViewInfo.Create(FData[LIndex]);
+      FSize := Max(FSize, FView[LIndex].Measure(LRender));
+    end;
+  finally
+    LRender.Free;
   end;
 end;
 
@@ -623,18 +615,15 @@ end;
 function TACLHexViewCharacterSet.GetView(Index: Byte): TACLTextViewInfo;
 begin
   Result := FView[Index];
-  if (Result = nil) or (Result.Size.cx = 0) then
+  if (Result = nil) or (Result.TextWidth = 0) then
     Result := FEmptyCharView;
 end;
 
-procedure TACLHexViewCharacterSet.SetFont(AValue: TACLFontInfo);
+procedure TACLHexViewCharacterSet.SetFont(AValue: TFont);
 begin
-  if FFont <> AValue then
-  begin
-    ReleaseViewInfo;
-    FFont := AValue;
-    CreateViewInfo;
-  end;
+  ReleaseViewInfo;
+  FFont := AValue;
+  CreateViewInfo;
 end;
 
 { TACLHexViewHexCharacterSet }
@@ -674,17 +663,21 @@ begin
   if ViewInfo.FocusedPane = pHex then
     CopyToClipboard(FormatHex)
   else
-    CopyToClipboard(acStringFromBytes);
+    CopyToClipboard(acUStringFromBytes);
 end;
 
 procedure TACLHexViewSubClass.CopyToClipboard(AEncoding: TEncoding);
 begin
-  CopyToClipboard(AEncoding.GetString);
+  CopyToClipboard(
+    function (const ABytes: TBytes): UnicodeString
+    begin
+      Result := AEncoding.GetString(ABytes);
+    end); // to prevent from linking error in FPC
 end;
 
 procedure TACLHexViewSubClass.CopyToClipboard(AEncodeProc: TEncodeProc);
 
-  function BytesToString(const ABytes: TBytes): string;
+  function BytesToString(const ABytes: TBytes): UnicodeString;
   begin
     if ABytes <> nil then
     try
@@ -697,14 +690,14 @@ procedure TACLHexViewSubClass.CopyToClipboard(AEncodeProc: TEncodeProc);
   end;
 
 begin
-  acCopyStringToClipboard(BytesToString(GetSelectedBytes));
+  Clipboard.AsText := acString(BytesToString(GetSelectedBytes));
 end;
 
 function TACLHexViewSubClass.GetSelectedBytes: TBytes;
 begin
   if Data <> nil then
   begin
-    SetLength(Result, SelLength);
+    SetLength(Result{%H-}, SelLength);
     Data.Position := SelStart;
     Data.ReadBuffer(Result, SelLength);
   end
@@ -756,8 +749,8 @@ end;
 
 procedure TACLHexViewSubClass.SetTargetDPI(AValue: Integer);
 begin
-  Style.SetTargetDPI(AValue);
   inherited SetTargetDPI(AValue);
+  Style.TargetDPI := AValue;
 end;
 
 function TACLHexViewSubClass.CreateStyle: TACLHexViewStyle;
@@ -799,12 +792,9 @@ begin
 end;
 
 procedure TACLHexViewSubClass.UpdateCharacters;
-var
-  AFontInfo: TACLFontInfo;
 begin
-  AFontInfo := TACLFontCache.GetInfo(Font);
-  Characters.Font := AFontInfo;
-  CharactersHex.Font := AFontInfo;
+  Characters.Font := Font;
+  CharactersHex.Font := Font;
 end;
 
 function TACLHexViewSubClass.GetViewInfo: TACLHexViewViewInfo;
@@ -837,7 +827,7 @@ begin
   end;
 end;
 
-procedure TACLHexViewSubClass.ProcessKeyDown(AKey: Word; AShift: TShiftState);
+procedure TACLHexViewSubClass.ProcessKeyDown(var AKey: Word; AShift: TShiftState);
 
   procedure MoveCursor(ACursor: Int64; AGranularity: Integer = 0);
   begin
@@ -889,7 +879,10 @@ begin
     Ord('A'):
       if ssCtrl in AShift then
         SelectAll;
+  else
+    Exit;
   end;
+  AKey := 0;
 end;
 
 procedure TACLHexViewSubClass.ProcessMouseClick(AButton: TMouseButton; AShift: TShiftState);
@@ -910,7 +903,6 @@ end;
 procedure TACLHexViewSubClass.ProcessMouseDown(AButton: TMouseButton; AShift: TShiftState);
 begin
   inherited;
-
   if HitTest.HitObject is TACLHexViewChararterSetViewViewInfo then
   begin
     if TACLHexViewChararterSetViewViewInfo(HitTest.HitObject).CharacterSet = CharactersHex then
@@ -920,7 +912,8 @@ begin
   end;
 end;
 
-procedure TACLHexViewSubClass.ProcessMouseWheel(ADirection: TACLMouseWheelDirection; AShift: TShiftState);
+procedure TACLHexViewSubClass.ProcessMouseWheel(
+  ADirection: TACLMouseWheelDirection; AShift: TShiftState);
 begin
   ViewInfo.ScrollByMouseWheel(ADirection, AShift);
 end;
@@ -944,40 +937,47 @@ end;
 
 { TACLHexViewChararterSetViewViewInfo }
 
-constructor TACLHexViewChararterSetViewViewInfo.Create(ASubClass: TACLHexViewSubClass; ACharacterSet: TACLHexViewCharacterSet);
+constructor TACLHexViewChararterSetViewViewInfo.Create(
+  ASubClass: TACLHexViewSubClass; ACharacterSet: TACLHexViewCharacterSet);
 begin
   inherited Create(ASubClass);
   FCharacterSet := ACharacterSet;
 end;
 
-procedure TACLHexViewChararterSetViewViewInfo.Draw(ACanvas: TCanvas; AData: PByte; ADataSize: Integer);
+procedure TACLHexViewChararterSetViewViewInfo.Draw(
+  ACanvas: TCanvas; AData: PByte; ADataSize: Integer);
 var
   APrevTextColor: Cardinal;
   ASize: TSize;
+  ARender: TACLTextLayoutRender;
   ATextColor1: Cardinal;
   ATextColor2: Cardinal;
   ATextViewInfo: TACLTextViewInfo;
-  DC: HDC;
   X, Y: Integer;
 begin
   X := Bounds.Left;
   Y := Bounds.Top;
   ASize := FCharacterSet.Size;
-  DC := ACanvas.Handle;
   ATextColor1 := FColorOdd;
   ATextColor2 := FColorEven;
-  APrevTextColor := GetTextColor(DC);
-  while ADataSize > 0 do
-  begin
-    SetTextColor(DC, ATextColor1);
-    ATextViewInfo := FCharacterSet.View[AData^];
-    ATextViewInfo.Draw(ACanvas.Handle, X + (ASize.cx - ATextViewInfo.Size.cx) div 2, Y);
-    acExchangeIntegers(ATextColor1, ATextColor2);
-    Inc(X, ASize.cx + IndentBetweenCharacters);
-    Dec(ADataSize);
-    Inc(AData);
+  APrevTextColor := ACanvas.Font.Color;
+  ARender := DefaultTextLayoutCanvasRender.Create(ACanvas);
+  try
+    while ADataSize > 0 do
+    begin
+      ATextViewInfo := FCharacterSet.View[AData^];
+      ACanvas.Font.Color := ATextColor1;
+      ARender.SetFont(ACanvas.Font);
+      ARender.DrawText(ATextViewInfo, X + (ASize.cx - ATextViewInfo.TextWidth) div 2, Y);
+      acExchangeIntegers(ATextColor1, ATextColor2);
+      Inc(X, ASize.cx + IndentBetweenCharacters);
+      Dec(ADataSize);
+      Inc(AData);
+    end;
+  finally
+    ARender.Free;
+    ACanvas.Font.Color := APrevTextColor;
   end;
-  SetTextColor(DC, APrevTextColor);
 end;
 
 function TACLHexViewChararterSetViewViewInfo.MeasureHeight: Integer;
@@ -1041,7 +1041,7 @@ begin
   AWindowOrg := acMoveWindowOrg(ACanvas.Handle, AOrigin);
   try
     ACanvas.Font.Color := FLabelTextColor;
-    acTextOut(ACanvas, FLabelRect.Left, FLabelRect.Top, LabelText, 0);
+    acTextOut(ACanvas, FLabelRect.Left, FLabelRect.Top, LabelText);
     HexView.Draw(ACanvas, AData, ADataSize);
     TextView.Draw(ACanvas, AData, ADataSize);
   finally
@@ -1056,7 +1056,9 @@ end;
 
 function TACLHexViewRowViewInfo.MeasureWidth: Integer;
 begin
-  Result := FLabelAreaWidth + IndentBetweenViews + HexView.MeasureWidth + IndentBetweenViews + TextView.MeasureWidth;
+  Result := FLabelAreaWidth +
+    IndentBetweenViews + HexView.MeasureWidth +
+    IndentBetweenViews + TextView.MeasureWidth;
 end;
 
 procedure TACLHexViewRowViewInfo.DoCalculate(AChanges: TIntegerSet);
@@ -1122,7 +1124,7 @@ begin
   TextView.ColorEven := FLabelTextColor;
 
   MeasureCanvas.Font := SubClass.Font;
-  GetTextMetrics(MeasureCanvas.Handle, AMetric);
+  GetTextMetrics(MeasureCanvas.Handle, AMetric{%H-});
   FLinespacing := IndentBetweenViews - AMetric.tmDescent;
 end;
 
@@ -1159,7 +1161,10 @@ begin
       FRects[2] := Rect(CharsetViewInfo.Bounds.Left, ASelFinish.Top, ASelFinish.Right, ASelFinish.Bottom);
     end
     else
-      FRects[0] := Rect(ASelStart.TopLeft, ASelFinish.BottomRight);
+    begin
+      FRects[0].TopLeft := ASelStart.TopLeft;
+      FRects[0].BottomRight := ASelFinish.BottomRight;
+    end;
   end;
 
   if ViewInfo.SubClass.Data <> nil then
@@ -1213,13 +1218,13 @@ begin
       AColor := Style.ColorContentSelectedInactive.Value;
 
     for I := Low(FRects) to High(FRects) do
-      acFillRect(ACanvas.Handle, FRects[I], AColor);
+      acFillRect(ACanvas, FRects[I], AColor);
 
     if Focused then
-      acFillRect(ACanvas.Handle, FCursor, Style.ColorContentFocused.Value)
+      acFillRect(ACanvas, FCursor, Style.ColorContentFocused.Value)
     else
       if FRects[0].IsEmpty then // no multiple selection
-        acFillRect(ACanvas.Handle, FCursor, AColor);
+        acFillRect(ACanvas, FCursor, AColor);
   finally
     acRestoreWindowOrg(ACanvas.Handle, AWindowOrg);
   end;
@@ -1262,7 +1267,6 @@ begin
 
   UpdateAutoScrollDirection(P, FScrollableArea);
   UpdateSelection;
-  inherited;
 end;
 
 function TACLHexViewSelectionDragObject.DragStart: Boolean;
@@ -1394,7 +1398,7 @@ end;
 
 procedure TACLHexViewViewInfo.DoDraw(ACanvas: TCanvas);
 var
-  AClipRegion: HRGN;
+  AClipRegion: TRegionHandle;
   AData: PByte;
   ADataOffset: Integer;
   ADataSize: Integer;

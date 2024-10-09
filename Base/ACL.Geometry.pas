@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*             Geometry Routines             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Geometry Routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Geometry;
 
 {$I ACL.Config.inc}
@@ -16,19 +18,23 @@ unit ACL.Geometry;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+  {Winapi.}Messages,
+{$ENDIF}
   // System
-  System.Types,
-  System.SysUtils,
-  System.Classes,
-  System.Math,
-  System.Generics.Collections,
+  {System.}Types,
+  {System.}SysUtils,
+  {System.}Classes,
+  {System.}Math,
+  {System.}Generics.Collections,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Utils.Common,
-  ACL.Utils.FileSystem,
   ACL.Utils.Strings;
 
 type
@@ -52,6 +58,8 @@ const
   acBorderOffsets: TRect = (Left: 2; Top: 2; Right: 2; Bottom: 2);
 
 type
+  PRectArray = ^TRectArray;
+  TRectArray = array [0..0] of TRect;
 
   { TACLRange }
 
@@ -70,7 +78,7 @@ type
 
   { TACLAutoSizeCalculator }
 
-  TACLAutoSizeCalculator = class(TACLObjectList<TACLAutoSizeItem>)
+  TACLAutoSizeCalculator = class(TACLObjectListOf<TACLAutoSizeItem>)
   strict private
     FAvailableSize: Integer;
   public
@@ -169,7 +177,9 @@ type
 
   TACLPointHelper = record helper for TPoint
   public
+  {$IFNDEF FPC}
     class operator Multiply(const L: TPoint; Factor: Single): TPoint;
+  {$ENDIF} // ref.to ACL.Geometry.Utils
     procedure Scale(ANumerator, ADenominator: Integer); inline;
     function ScaleTo(ANumerator, ADenominator: Integer): TPoint; inline;
   end;
@@ -182,11 +192,13 @@ type
     class function Create(const Origin: TPoint; const Size: TSize): TRect; overload; static;
 
     //# Operators
+  {$IFNDEF FPC}
     class operator Add(const L: TRect; const R: TPoint): TRect;
     class operator Implicit(const Value: TSize): TRect;
     class operator Multiply(const L: TRect; Borders: TACLBorders): TRect;
     class operator Multiply(const L: TRect; Factor: Single): TRect;
     class operator Subtract(const L: TRect; const R: TPoint): TRect;
+  {$ENDIF} // ref.to ACL.Geometry.Utils
 
     //# Margins
     class function CreateMargins(const Rect, ContentRect: TRect): TRect; overload; static;
@@ -230,7 +242,9 @@ type
 
   TACLRectFHelper = record helper for TRectF
   public
+  {$IFNDEF FPC}
     class operator Multiply(const L: TRectF; Factor: Single): TRectF;
+  {$ENDIF} // ref.to ACL.Geometry.Utils
   end;
 
   { TACLSizeHelper }
@@ -242,6 +256,13 @@ type
     procedure Scale(ANumerator, ADenominator: Integer); inline;
     function ScaleTo(ANumerator, ADenominator: Integer): TSize; inline;
   end;
+
+{$IFDEF FPC}
+  PXForm = ^TXForm;
+  TXForm = packed record
+    eM11, eM12, eM21, eM22, eDx, eDy: Single;
+  end;
+{$ENDIF}
 
   { TACLXFormHelper }
 
@@ -262,6 +283,8 @@ type
     function Transform(const P: TPointF): TPointF;
   end;
 
+procedure acCalcArcSegment(ACenterX, ACenterY, ARadiusX, ARadiusY: Single;
+  AAngle1, AAngle2: Single{Rad}; out AStartPoint, AEndPoint: TPointF);
 procedure acCalcPartBounds(out AParts: TACLMarginPartBounds; const AMargins: TRect;
   const ADestRect, ASourceRect: TRect; AStretchMode: TACLStretchMode = isStretch);
 function acCalcPatternCount(ADestSize, APatternSize: Integer): Integer;
@@ -289,12 +312,51 @@ function acMapPoint(const ASource, ATarget: HWND; const P: TPoint): TPoint;
 function acMapRect(const ASource, ATarget: HWND; const R: TRect): TRect;
 implementation
 
-function acCalcPatternCount(ADestSize, APatternSize: Integer): Integer;
+procedure acCalcArcSegment(ACenterX, ACenterY, ARadiusX, ARadiusY: Single;
+  AAngle1, AAngle2: Single; out AStartPoint, AEndPoint: TPointF);
+//
+//                      A * B
+//  V = ---------------------------------------------
+//      Sqrt(A^2 * Sin^2(Alpha) + B^2 * Cos^2(Alpha))
+//
+//  Radial.X = V * Cos(Alpha)
+//  Radial.Y = V * Sin(Alpha)
+//
+//  where:
+//    A - horizontal ellipse semiaxis
+//    B - vertical ellipse semiaxis
+//    Angle - an angle between Radius-Vector and A calculated in counterclockwise direction
+//
+var
+  A, B, C: Double;
+  ASin, ACos, AValue: Extended;
 begin
-  if (ADestSize <= 0) or (APatternSize = 0) then
-    Result := 0
+  if IsZero(ARadiusX) or IsZero(ARadiusY) then
+  begin
+    AStartPoint := PointF(ACenterX, ACenterY);
+    AEndPoint := AStartPoint;
+  end
   else
-    Result := ADestSize div APatternSize + Ord(ADestSize mod APatternSize <> 0);
+  begin
+    C := ARadiusX * ARadiusY;
+    A := Sqr(ARadiusX);
+    B := Sqr(ARadiusY);
+
+    SinCos(AAngle1, ASin, ACos);
+    AValue := C / Sqrt(A * Sqr(ASin) + B * Sqr(ACos));
+    AStartPoint.X := ACenterX + AValue * ACos;
+    AStartPoint.Y := ACenterY - AValue * ASin;
+
+    if SameValue(AAngle1, AAngle2) then
+      AEndPoint := AStartPoint
+    else
+    begin
+      SinCos(AAngle2, ASin, ACos);
+      AValue := C / Sqrt(A * Sqr(ASin) + B * Sqr(ACos));
+      AEndPoint.X := ACenterX + AValue * ACos;
+      AEndPoint.Y := ACenterY - AValue * ASin;
+    end;
+  end;
 end;
 
 procedure acCalcPartBounds(out AParts: TACLMarginPartBounds; const AMargins: TRect;
@@ -370,8 +432,17 @@ begin
           AParts[LPart].Top := LTemp.Bottom;
           AParts[LPart].Bottom := ADestRect.Bottom;
         end;
+    else;
     end;
   end;
+end;
+
+function acCalcPatternCount(ADestSize, APatternSize: Integer): Integer;
+begin
+  if (ADestSize <= 0) or (APatternSize = 0) then
+    Result := 0
+  else
+    Result := ADestSize div APatternSize + Ord(ADestSize mod APatternSize <> 0);
 end;
 
 procedure acReduceFraction(var A, B: Integer);
@@ -426,13 +497,25 @@ end;
 function acMapPoint(const ASource, ATarget: HWND; const P: TPoint): TPoint;
 begin
   Result := P;
+{$IFDEF FPC}
+  ClientToScreen(ASource, Result);
+  ScreenToClient(ATarget, Result);
+{$ELSE}
   MapWindowPoints(ASource, ATarget, Result, 1);
+{$ENDIF}
 end;
 
 function acMapRect(const ASource, ATarget: HWND; const R: TRect): TRect;
 begin
   Result := R;
+{$IFDEF FPC}
+  ClientToScreen(ASource, Result.TopLeft);
+  ClientToScreen(ASource, Result.BottomRight);
+  ScreenToClient(ATarget, Result.TopLeft);
+  ScreenToClient(ATarget, Result.BottomRight);
+{$ELSE}
   MapWindowPoints(ASource, ATarget, Result, 2);
+{$ENDIF}
 end;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -486,6 +569,7 @@ begin
           SourceWidth := Round(SourceWidth * K2);
         end;
       end;
+  else;
   end;
   ATargetHeight := SourceHeight;
   ATargetWidth := SourceWidth;
@@ -809,7 +893,16 @@ end;
 
 class function TACLXFormHelper.Combine(const AMatrix1, AMatrix2: TXForm): TXForm;
 begin
+{$IFDEF FPC}
+  Result.eM11 := AMatrix1.eM11 * AMatrix2.eM11 + AMatrix1.eM12 * AMatrix2.eM21;
+  Result.eM12 := AMatrix1.eM11 * AMatrix2.eM12 + AMatrix1.eM12 * AMatrix2.eM22;
+  Result.eM21 := AMatrix1.eM21 * AMatrix2.eM11 + AMatrix1.eM22 * AMatrix2.eM21;
+  Result.eM22 := AMatrix1.eM21 * AMatrix2.eM12 + AMatrix1.eM22 * AMatrix2.eM22;
+  Result.eDx  := AMatrix1.eDx  * AMatrix2.eM11 + AMatrix1.eDy  * AMatrix2.eM21 + AMatrix2.eDx;
+  Result.eDy  := AMatrix1.eDx  * AMatrix2.eM12 + AMatrix1.eDy  * AMatrix2.eM22 + AMatrix2.eDy;
+{$ELSE}
   CombineTransform(Result, AMatrix1, AMatrix2);
+{$ENDIF}
 end;
 
 class function TACLXFormHelper.CreateFlip(
@@ -890,12 +983,6 @@ begin
 end;
 
 { TACLRectHelper }
-
-class operator TACLRectHelper.Add(const L: TRect; const R: TPoint): TRect;
-begin
-  Result := L;
-  Result.Offset(R.X, R.Y);
-end;
 
 procedure TACLRectHelper.Add(const R: TRect);
 begin
@@ -1008,14 +1095,6 @@ begin
     ((Bottom - Top) = (R.Bottom - R.Top));
 end;
 
-class operator TACLRectHelper.Implicit(const Value: TSize): TRect;
-begin
-  Result.Left := 0;
-  Result.Top := 0;
-  Result.Right := Value.cx;
-  Result.Bottom := Value.cy;
-end;
-
 procedure TACLRectHelper.Inflate(const Margins: TRect; Borders: TACLBorders);
 begin
   if mTop in Borders then
@@ -1101,27 +1180,6 @@ begin
   Right := Left + LWidth;
 end;
 
-class operator TACLRectHelper.Multiply(const L: TRect; Borders: TACLBorders): TRect;
-begin
-  Result := NullRect;
-  if mLeft in Borders then
-    Result.Left := L.Left;
-  if mRight in Borders then
-    Result.Right := L.Right;
-  if mTop in Borders then
-    Result.Top := L.Top;
-  if mBottom in Borders then
-    Result.Bottom := L.Bottom;
-end;
-
-class operator TACLRectHelper.Multiply(const L: TRect; Factor: Single): TRect;
-begin
-  Result.Bottom := Round(L.Bottom * Factor);
-  Result.Right := Round(L.Right * Factor);
-  Result.Left := Round(L.Left * Factor);
-  Result.Top := Round(L.Top * Factor);
-end;
-
 function TACLRectHelper.OffsetTo(dX, dY: Integer): TRect;
 begin
   Result := Self;
@@ -1181,8 +1239,44 @@ begin
     srBottom:
       Result := Rect(Left, Origin - Size, Right, Origin);
   else
-    Result := Self;
+    Result := Self{%H-};
   end;
+end;
+
+{$IFNDEF FPC}
+class operator TACLRectHelper.Add(const L: TRect; const R: TPoint): TRect;
+begin
+  Result := L;
+  Result.Offset(R.X, R.Y);
+end;
+
+class operator TACLRectHelper.Implicit(const Value: TSize): TRect;
+begin
+  Result.Left := 0;
+  Result.Top := 0;
+  Result.Right := Value.cx;
+  Result.Bottom := Value.cy;
+end;
+
+class operator TACLRectHelper.Multiply(const L: TRect; Borders: TACLBorders): TRect;
+begin
+  Result := NullRect;
+  if mLeft in Borders then
+    Result.Left := L.Left;
+  if mRight in Borders then
+    Result.Right := L.Right;
+  if mTop in Borders then
+    Result.Top := L.Top;
+  if mBottom in Borders then
+    Result.Bottom := L.Bottom;
+end;
+
+class operator TACLRectHelper.Multiply(const L: TRect; Factor: Single): TRect;
+begin
+  Result.Bottom := Round(L.Bottom * Factor);
+  Result.Right := Round(L.Right * Factor);
+  Result.Left := Round(L.Left * Factor);
+  Result.Top := Round(L.Top * Factor);
 end;
 
 class operator TACLRectHelper.Subtract(const L: TRect; const R: TPoint): TRect;
@@ -1190,9 +1284,11 @@ begin
   Result := L;
   Result.Offset(-R.X, -R.Y);
 end;
+{$ENDIF}
 
 { TACLRectFHelper }
 
+{$IFNDEF FPC}
 class operator TACLRectFHelper.Multiply(const L: TRectF; Factor: Single): TRectF;
 begin
   Result.Bottom := L.Bottom * Factor;
@@ -1200,14 +1296,17 @@ begin
   Result.Left := L.Left * Factor;
   Result.Top := L.Top * Factor;
 end;
+{$ENDIF}
 
 { TACLPointHelper }
 
+{$IFNDEF FPC}
 class operator TACLPointHelper.Multiply(const L: TPoint; Factor: Single): TPoint;
 begin
   Result.X := Round(L.X * Factor);
   Result.Y := Round(L.Y * Factor);
 end;
+{$ENDIF}
 
 procedure TACLPointHelper.Scale(ANumerator, ADenominator: Integer);
 begin

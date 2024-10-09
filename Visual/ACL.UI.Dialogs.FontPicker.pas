@@ -1,40 +1,44 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*            Font Picker Dialog             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Font Picker Dialog
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Dialogs.FontPicker;
+
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  Winapi.Windows,
+{$IFNDEF FPC}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // Vcl
-  Vcl.ExtCtrls,
-  Vcl.Graphics,
-  Vcl.Controls,
-  Vcl.Forms,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Forms,
+  {Vcl.}Dialogs,
+  {Vcl.}ExtCtrls,
   // ACL
-  ACL.Classes,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.FontCache,
-  ACL.Graphics.Ex.Gdip,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.Buttons,
-  ACL.UI.Controls.Category,
-  ACL.UI.Controls.ColorPicker,
   ACL.UI.Controls.ComboBox,
   ACL.UI.Controls.GroupBox,
   ACL.UI.Controls.Panel,
@@ -72,8 +76,8 @@ type
 
     procedure HandlerColorPickerClick(Sender: TObject);
     procedure HandlerFontModified(Sender: TObject);
-    procedure HandlerFontPreview(Sender: TObject; ACanvas: TCanvas; const R: TRect;
-      ANode: TACLTreeListNode; AColumn: TACLTreeListColumn; var AHandled: Boolean);
+    procedure HandlerFontPreview(Sender: TObject; ACanvas: TCanvas;
+      var AData: TACLTreeListNodeCustomDrawData; var AHandled: Boolean);
     procedure HandlerFontNameListChanged(Sender: TObject);
     procedure HandlerFontSizeListChanged(Sender: TObject);
     procedure HandlerPreviewPaint(Sender: TObject);
@@ -109,13 +113,11 @@ type
   public
     destructor Destroy; override;
     procedure AfterConstruction; override;
-    class function Execute(AFont: TFont; AOwnerWnd: THandle = 0; AOnApply: TProc = nil): Boolean;
+    class function Execute(AFont: TFont;
+      AOwnerWnd: TWndHandle = 0; AOnApply: TProc = nil): Boolean;
   end;
 
 implementation
-
-uses
-  System.Math;
 
 { TACLFontPickerDialog }
 
@@ -134,7 +136,8 @@ begin
   inherited;
 end;
 
-class function TACLFontPickerDialog.Execute(AFont: TFont; AOwnerWnd: THandle = 0; AOnApply: TProc = nil): Boolean;
+class function TACLFontPickerDialog.Execute(AFont: TFont;
+  AOwnerWnd: TWndHandle = 0; AOnApply: TProc = nil): Boolean;
 begin
   with TACLFontPickerDialog.CreateDialog(AOwnerWnd, True) do
   try
@@ -309,8 +312,8 @@ begin
   if TACLColors.IsDark(ACanvas.Font.Color) = TACLColors.IsDark(ABackgroundColor) then
     acExchangeIntegers(ABackgroundColor, AForegroundColor);
 
-  acDrawFrame(ACanvas.Handle, R, FontNameEdit.Style.ColorBorder.AsColor);
-  acFillRect(ACanvas.Handle, R.InflateTo(-1, -1), ABackgroundColor);
+  acDrawFrame(ACanvas, R, FontNameEdit.Style.ColorBorder.AsColor);
+  acFillRect(ACanvas, R.InflateTo(-1, -1), ABackgroundColor);
 end;
 
 procedure TACLFontPickerDialog.PlaceControls(var R: TRect);
@@ -369,16 +372,16 @@ end;
 
 procedure TACLFontPickerDialog.UpdateColorPickerPreview;
 var
-  ABitmap: TACLBitmap;
+  ABitmap: TACLDib;
   AFocusRect: TRect;
 begin
-  if not ColorPicker.ViewInfo.FocusRect.IsEmpty then
+  if not ColorPicker.SubClass.FocusRect.IsEmpty then
   begin
-    AFocusRect := ColorPicker.ViewInfo.FocusRect;
+    AFocusRect := ColorPicker.SubClass.FocusRect;
     AFocusRect.Inflate(-1);
-    ABitmap := TACLBitmap.CreateEx(AFocusRect, pf32bit, True);
+    ABitmap := TACLDib.Create(AFocusRect);
     try
-      acFillRect(ABitmap.Canvas.Handle, ABitmap.ClientRect, TAlphaColor(ColorPicker.Tag));
+      acFillRect(ABitmap.Canvas, ABitmap.ClientRect, TAlphaColor(ColorPicker.Tag));
       ColorPicker.Glyph.Overriden := True;
       ColorPicker.Glyph.Scalable := TACLBoolean.False;
       ColorPicker.Glyph.Image.LoadFromBitmap(ABitmap);
@@ -417,10 +420,13 @@ begin
     FontNameEdit.Text := FontName.FocusedNode.Caption;
 end;
 
-procedure TACLFontPickerDialog.HandlerFontPreview(Sender: TObject; ACanvas: TCanvas;
-  const R: TRect; ANode: TACLTreeListNode; AColumn: TACLTreeListColumn; var AHandled: Boolean);
+procedure TACLFontPickerDialog.HandlerFontPreview(
+  Sender: TObject; ACanvas: TCanvas;
+  var AData: TACLTreeListNodeCustomDrawData;
+  var AHandled: Boolean);
 begin
-  TACLFontCache.GetInfo(ANode.Caption, [], ACanvas.Font.Height, acDefaultDPI, fqDefault).AssignTo(ACanvas.Font);
+  TACLFontCache.GetInfo(AData.Node.Caption, [],
+    ACanvas.Font.Height, acDefaultDPI, fqDefault).AssignTo(ACanvas.Font);
   ACanvas.Font.Color := FFontName.Style.RowColorsText[True];
 end;
 

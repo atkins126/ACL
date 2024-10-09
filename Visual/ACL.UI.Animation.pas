@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             Animation Manager             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2024                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Animation Engine
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Animation;
 
 {$I ACL.Config.inc}
@@ -16,23 +18,26 @@ unit ACL.UI.Animation;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
   Winapi.Messages,
+  Winapi.Windows,
+{$ENDIF}
   // System
+  {System.}Types,
+  {System.}Classes,
+  {System.}Generics.Collections,
   System.UITypes,
-  System.Types,
-  System.Classes,
-  System.Generics.Collections,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
-  ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.Graphics.Ex,
+  ACL.Timers,
   ACL.Utils.Common;
 
 type
@@ -121,7 +126,7 @@ type
 
   { TACLAnimationManager }
 
-  TACLAnimationManager = class(TACLTimerList<TACLAnimation>)
+  TACLAnimationManager = class(TACLTimerListOf<TACLAnimation>)
   protected
     procedure DoAdding(const AObject: TACLAnimation); override;
     procedure TimerObject(const AObject: TACLAnimation); override;
@@ -233,11 +238,11 @@ function AnimationManager: TACLAnimationManager;
 implementation
 
 uses
-  System.SysUtils,
-  System.Math,
-  System.StrUtils,
+  {System.}Math,
+  {System.}StrUtils,
+  {System.}SysUtils,
   // VCL
-  Vcl.Forms;
+  {Vcl.}Forms;
 
 var
   FAnimationManager: TACLAnimationManager;
@@ -518,7 +523,7 @@ end;
 
 procedure TACLCustomBitmapAnimation.Draw(ACanvas: TCanvas; const R: TRect);
 var
-  LSaveRgn: HRGN;
+  LSaveRgn: TRegionHandle;
 begin
   if CanAnimate(R) then
   begin

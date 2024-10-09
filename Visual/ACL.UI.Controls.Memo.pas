@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             Editors Controls              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Memo
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       Partial (scrollbars are not get skinned)
+//
 unit ACL.UI.Controls.Memo;
 
 {$I ACL.Config.inc}
@@ -16,104 +18,103 @@ unit ACL.UI.Controls.Memo;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
-  // VCL
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.Forms,
-  Vcl.Menus,
-  Vcl.StdCtrls,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
+  // VCL
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
+  {Vcl.}Menus,
+  {Vcl.}StdCtrls,
+{$IFNDEF FPC}
   System.UITypes,
-  System.Classes,
-  System.Types,
+{$ENDIF}
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Controls.Buttons,
+  ACL.Geometry,
+  ACL.Graphics,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.ScrollBar,
+  ACL.UI.Controls.ScrollBox,
   ACL.UI.Resources;
 
 type
-  TACLMemo = class;
 
-  { TACLInnerMemo }
+  { TACLCustomMemoContainerStyle }
 
-  TACLInnerMemo = class(TMemo, IACLInnerControl)
-  strict private
-    function GetContainer: TACLMemo;
-  protected
-    procedure Change; override;
-  {$IFDEF DELPHI110ALEXANDRIA}
-    procedure UpdateEditMargins; override;
-  {$ENDIF}
-    procedure WndProc(var Message: TMessage); override;
-    // Key
-    procedure KeyDown(var Key: Word; Shift: TShiftState); override;
-    procedure KeyPress(var Key: Char); override;
-    procedure KeyUp(var Key: Word; Shift: TShiftState); override;
-    // Mouse
-    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X: Integer; Y: Integer); override;
-    procedure MouseMove(Shift: TShiftState; X: Integer; Y: Integer); override;
-    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X: Integer; Y: Integer); override;
-    // IACLInnerControl
-    function GetInnerContainer: TWinControl;
-    // Messages
-    procedure WMContextMenu(var Message: TWMContextMenu); message WM_CONTEXTMENU;
-    procedure WMNCCalcSize(var Message: TWMNCCalcSize); message WM_NCCALCSIZE;
-    procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHitTest;
-    procedure WMNCPaint(var Message: TWMNCPaint); message WM_NCPAINT;
+  TACLCustomMemoContainerStyle = class(TACLScrollBoxStyle)
   public
-    constructor Create(AOwner: TComponent); override;
-    //
-    property Container: TACLMemo read GetContainer;
+    procedure DrawBorder(ACanvas: TCanvas;
+      const R: TRect; const ABorders: TACLBorders); override;
   end;
 
-  { TACLCustomEditContainer }
+  { TACLCustomMemoContainer }
 
-  TACLCustomEditContainer = class(TACLCustomEdit)
+  TACLCustomMemoContainer = class(TACLCustomScrollingControl)
   strict private
-    FScrollBarHorz: TACLScrollBar;
-    FScrollBarVert: TACLScrollBar;
     FScrolling: Boolean;
-    FStyleScrollBox: TACLStyleScrollBox;
+    FStyle: TACLStyleEdit;
 
-    function GetSizeGripArea: TRect;
+    function GetStyleScrollBox: TACLStyleScrollBox;
+    procedure SetStyle(AValue: TACLStyleEdit);
     procedure SetStyleScrollBox(AValue: TACLStyleScrollBox);
-    procedure ScrollBarHandler(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
+    //# Messages
+  {$IFNDEF FPC}
     procedure WMCommand(var Message: TWMCommand); message WM_COMMAND;
+  {$ENDIF}
   protected
-    procedure CalculateContent(const R: TRect); override;
-    function CalculateEditorPosition: TRect; override;
-    procedure SetDefaultSize; override;
+    function CreateStyle: TACLScrollBoxStyle; override;
+    procedure EditorUpdateBounds; override;
+    procedure EditorUpdateParamsCore; override;
+    procedure EditorWndProc(var Message: TMessage); override;
+    procedure FocusChanged; override;
     procedure SetTargetDPI(AValue: Integer); override;
-    procedure DrawContent(ACanvas: TCanvas); override;
-    procedure ResourceChanged; override;
 
-    // Scrollbars
-    function CreateScrollBar(AKind: TScrollBarKind): TACLScrollBar;
+    // ScrollBars
+    procedure AlignScrollBars(const ARect: TRect); override;
     function GetScrollBars: TScrollStyle; virtual; abstract;
     procedure SetScrollBars(AValue: TScrollStyle); virtual; abstract;
-    procedure Scroll(Kind: TScrollBarKind; ScrollCode: TScrollCode; var ScrollPos: Integer); virtual;
+    procedure Scroll(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer); override;
+    procedure ScrollContent(dX, dY: Integer); override;
     procedure UpdateScrollBars;
 
-    property DoubleBuffered default True;
-    property ScrollBarHorz: TACLScrollBar read FScrollBarHorz;
+    // Properties
     property ScrollBars: TScrollStyle read GetScrollBars write SetScrollBars;
-    property ScrollBarVert: TACLScrollBar read FScrollBarVert;
-    property SizeGripArea: TRect read GetSizeGripArea;
-    property StyleScrollBox: TACLStyleScrollBox read FStyleScrollBox write SetStyleScrollBox;
+    property Style: TACLStyleEdit read FStyle write SetStyle;
+    property StyleScrollBox: TACLStyleScrollBox read GetStyleScrollBox write SetStyleScrollBox;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
   end;
 
+  { TACLInnerMemo }
+
+  TACLInnerMemo = class(TMemo, IACLInnerControl)
+  protected
+    procedure Change; override;
+    // IACLInnerControl
+    function GetInnerContainer: TWinControl;
+  {$IFDEF DELPHI110ALEXANDRIA}
+    procedure UpdateEditMargins; override;
+  {$ENDIF}
+  public
+    constructor Create(AOwner: TComponent); override;
+  end;
+
   { TACLMemo }
 
-  TACLMemo = class(TACLCustomEditContainer)
+  TACLMemo = class(TACLCustomMemoContainer)
   strict private
     function GetCaretPos: TPoint;
     function GetHideSelection: Boolean;
@@ -122,10 +123,10 @@ type
     function GetMaxLength: Integer;
     function GetReadOnly: Boolean;
     function GetSelLength: Integer;
-    function GetSelLine: UnicodeString;
+    function GetSelLine: string;
     function GetSelStart: Integer;
-    function GetSelText: UnicodeString;
-    function GetText: UnicodeString;
+    function GetSelText: string;
+    function GetText: string;
     procedure SetCaretPos(const AValue: TPoint);
     procedure SetHideSelection(const Value: Boolean);
     procedure SetLines(AValue: TStrings);
@@ -133,28 +134,26 @@ type
     procedure SetReadOnly(AValue: Boolean);
     procedure SetSelLength(const Value: Integer);
     procedure SetSelStart(const Value: Integer);
-    procedure SetSelText(const Value: UnicodeString);
-    procedure SetText(const Value: UnicodeString);
+    procedure SetSelText(const Value: string);
+    procedure SetText(const Value: string);
   protected
+    function CreateEditor: TACLInnerMemo; virtual;
     function GetScrollBars: TScrollStyle; override;
     procedure SetScrollBars(AValue: TScrollStyle); override;
-
-    function CanOpenEditor: Boolean; override;
-    function CreateEditor: TWinControl; override;
   public
     constructor Create(AOwner: TComponent); override;
     procedure Clear;
     procedure CopyToClipboard;
     procedure CutToClipboard;
     procedure PasteFromClipboard;
-    //
+    //# Properties
     property CaretPos: TPoint read GetCaretPos write SetCaretPos;
     property InnerMemo: TACLInnerMemo read GetInnerMemo;
     property SelLength: Integer read GetSelLength write SetSelLength;
-    property SelLine: UnicodeString read GetSelLine;
+    property SelLine: string read GetSelLine;
     property SelStart: Integer read GetSelStart write SetSelStart;
-    property SelText: UnicodeString read GetSelText write SetSelText;
-    property Text: UnicodeString read GetText write SetText;
+    property SelText: string read GetSelText write SetSelText;
+    property Text: string read GetText write SetText;
   published
     property Borders;
     property Lines: TStrings read GetLines write SetLines;
@@ -165,208 +164,97 @@ type
     property ResourceCollection;
     property Style;
     property StyleScrollBox;
+    //# Events
     property OnChange;
   end;
 
 implementation
 
 uses
-  System.Math,
-  System.SysUtils,
-  // ACL
-  ACL.Geometry,
-  ACL.Utils.Common,
   ACL.MUI,
-  ACL.Math;
+  ACL.Utils.Common;
 
-{ TACLInnerMemo }
+{ TACLCustomMemoContainer }
 
-constructor TACLInnerMemo.Create(AOwner: TComponent);
+constructor TACLCustomMemoContainer.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  BorderStyle := bsNone;
-end;
-
-procedure TACLInnerMemo.Change;
-begin
-  Container.Changed;
-  Container.UpdateScrollBars;
-end;
-
-{$IFDEF DELPHI110ALEXANDRIA}
-procedure TACLInnerMemo.UpdateEditMargins;
-begin
-  // do nothing
-end;
-{$ENDIF}
-
-procedure TACLInnerMemo.WndProc(var Message: TMessage);
-begin
-  inherited WndProc(Message);
-  case Message.Msg of
-    WM_VSCROLL, WM_HSCROLL, WM_WINDOWPOSCHANGED:
-      Container.UpdateScrollBars;
-  end;
-end;
-
-procedure TACLInnerMemo.KeyDown(var Key: Word; Shift: TShiftState);
-begin
-  Container.KeyDown(Key, Shift);
-end;
-
-procedure TACLInnerMemo.KeyPress(var Key: Char);
-begin
-  Container.KeyPress(Key);
-end;
-
-procedure TACLInnerMemo.KeyUp(var Key: Word; Shift: TShiftState);
-begin
-  Container.KeyUp(Key, Shift);
-end;
-
-procedure TACLInnerMemo.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
-begin
-  Container.MouseDown(Button, Shift, X, Y);
-end;
-
-procedure TACLInnerMemo.MouseMove(Shift: TShiftState; X, Y: Integer);
-begin
-  Container.MouseMove(Shift, X, Y);
-end;
-
-procedure TACLInnerMemo.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
-begin
-  Container.MouseUp(Button, Shift, X, Y);
-end;
-
-function TACLInnerMemo.GetInnerContainer: TWinControl;
-begin
-  Result := TWinControl(Owner);
-end;
-
-procedure TACLInnerMemo.WMContextMenu(var Message: TWMContextMenu);
-begin
-  SetFocus;
-  Message.Result := Parent.Perform(Message.Msg, Parent.Handle, TMessage(Message).LParam);
-  if Message.Result = 0 then
-    inherited;
-end;
-
-procedure TACLInnerMemo.WMNCCalcSize(var Message: TWMNCCalcSize);
-var
-  R: TRect;
-begin
-  R := Message.CalcSize_Params^.rgrc[0];
-  inherited;
-  Message.CalcSize_Params^.rgrc[0] := R;
-end;
-
-procedure TACLInnerMemo.WMNCHitTest(var Message: TWMNCHitTest);
-begin
-  if csDesigning in Container.ComponentState then
-    Message.Result := HTTRANSPARENT
-  else
-    Message.Result := HTCLIENT;
-end;
-
-procedure TACLInnerMemo.WMNCPaint(var Message: TWMNCPaint);
-begin
-  // do nothing
-end;
-
-function TACLInnerMemo.GetContainer: TACLMemo;
-begin
-  Result := TACLMemo(Owner);
-end;
-
-{ TACLCustomEditContainer }
-
-constructor TACLCustomEditContainer.Create(AOwner: TComponent);
-begin
-  inherited Create(AOwner);
-  FAutoHeight := False;
-  ControlStyle := ControlStyle + [csOpaque];
-  FStyleScrollBox := TACLStyleScrollBox.Create(Self);
-  FScrollBarHorz := CreateScrollBar(sbHorizontal);
-  FScrollBarVert := CreateScrollBar(sbVertical);
-  DoubleBuffered := True;
+  ControlStyle := ControlStyle - [csAcceptsControls];
+  FStyle := TACLStyleEdit.Create(Self);
   TabStop := True;
 end;
 
-destructor TACLCustomEditContainer.Destroy;
+destructor TACLCustomMemoContainer.Destroy;
 begin
-  FreeAndNil(FScrollBarHorz);
-  FreeAndNil(FScrollBarVert);
-  FreeAndNil(FStyleScrollBox);
+  FreeAndNil(FStyle);
   inherited Destroy;
 end;
 
-function TACLCustomEditContainer.CreateScrollBar(AKind: TScrollBarKind): TACLScrollBar;
+procedure TACLCustomMemoContainer.AlignScrollBars(const ARect: TRect);
 begin
-  Result := TACLScrollBar.Create(Self);
-  Result.ControlStyle := Result.ControlStyle + [csNoDesignVisible];
-  Result.OnScroll := ScrollBarHandler;
-  Result.Style := StyleScrollBox;
-  Result.Parent := Self;
-  Result.Kind := AKind;
+  HorzScrollBar.Visible := {$IFDEF FPC}False{$ELSE}ScrollBars in [ssHorizontal, ssBoth]{$ENDIF};
+  VertScrollBar.Visible := {$IFDEF FPC}False{$ELSE}ScrollBars in [ssVertical, ssBoth]{$ENDIF};
+  UpdateScrollBars;
+  inherited;
 end;
 
-procedure TACLCustomEditContainer.CalculateContent(const R: TRect);
+function TACLCustomMemoContainer.CreateStyle: TACLScrollBoxStyle;
 begin
-  inherited CalculateContent(R);
+  Result := TACLCustomMemoContainerStyle.Create(Self);
+end;
 
-  ScrollBarHorz.Visible := ScrollBars in [TScrollStyle.ssBoth, TScrollStyle.ssHorizontal];
-  ScrollBarVert.Visible := ScrollBars in [TScrollStyle.ssBoth, TScrollStyle.ssVertical];
-
-  if ScrollBarVert.Visible then
-  begin
-    ScrollBarVert.SetBounds(R.Right - ScrollBarVert.Width, R.Top, ScrollBarVert.Width,
-      R.Height - IfThen(ScrollBarHorz.Visible, ScrollBarHorz.Height));
-  end;
-
-  if ScrollBarHorz.Visible then
-  begin
-    ScrollBarHorz.SetBounds(R.Left, R.Bottom - ScrollBarHorz.Height,
-      R.Right - IfThen(ScrollBarVert.Visible, ScrollBarVert.Width), ScrollBarHorz.Height);
-  end;
-
+procedure TACLCustomMemoContainer.EditorUpdateBounds;
+begin
+  inherited;
   UpdateScrollBars;
 end;
 
-function TACLCustomEditContainer.CalculateEditorPosition: TRect;
-begin
-  Result := inherited CalculateEditorPosition;
-  if ScrollBarVert.Visible then
-    Dec(Result.Right, ScrollBarVert.Width);
-  if ScrollBarHorz.Visible then
-    Dec(Result.Bottom, ScrollBarHorz.Height);
-end;
-
-procedure TACLCustomEditContainer.SetTargetDPI(AValue: Integer);
+procedure TACLCustomMemoContainer.EditorUpdateParamsCore;
 begin
   inherited;
-  StyleScrollBox.TargetDPI := AValue;
+  FEditor.Align := alClient;
+  Style.ApplyColors(FEditor, Enabled);
 end;
 
-procedure TACLCustomEditContainer.DrawContent(ACanvas: TCanvas);
+procedure TACLCustomMemoContainer.EditorWndProc(var Message: TMessage);
 begin
-  StyleScrollBox.DrawSizeGripArea(ACanvas.Handle, SizeGripArea);
-end;
-
-procedure TACLCustomEditContainer.ResourceChanged;
-begin
-  ScrollBarHorz.ResourceCollection := ResourceCollection;
-  ScrollBarHorz.Style := StyleScrollBox;
-  ScrollBarVert.ResourceCollection := ResourceCollection;
-  ScrollBarVert.Style := StyleScrollBox;
+  case Message.Msg of
+    WM_NCCALCSIZE, WM_NCPAINT:
+      Exit;
+    WM_NCHITTEST:
+      begin
+        Message.Result := IfThen(csDesigning in ComponentState, HTTRANSPARENT, HTCLIENT);
+        Exit;
+      end;
+  end;
   inherited;
+  case Message.Msg of
+    WM_VSCROLL, WM_HSCROLL, WM_WINDOWPOSCHANGED:
+      if not (csDestroying in ComponentState) then
+      begin
+        UpdateScrollBars;
+        UpdateBorders;
+      end;
+  end;
 end;
 
-procedure TACLCustomEditContainer.Scroll(Kind: TScrollBarKind; ScrollCode: TScrollCode; var ScrollPos: Integer);
+procedure TACLCustomMemoContainer.FocusChanged;
+begin
+  inherited;
+  UpdateBorders;
+end;
+
+function TACLCustomMemoContainer.GetStyleScrollBox: TACLStyleScrollBox;
+begin
+  Result := inherited Style;
+end;
+
+procedure TACLCustomMemoContainer.Scroll(
+  Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
 
   function GetWParam: WParam;
   begin
-    if (Kind = sbHorizontal) or not (ScrollCode in [scLineDown, scLineUp]) then
+    if (Sender = HorzScrollBar) or not (ScrollCode in [scLineDown, scLineUp]) then
       Result := ScrollPos
     else
       Result := 0;
@@ -375,23 +263,47 @@ procedure TACLCustomEditContainer.Scroll(Kind: TScrollBarKind; ScrollCode: TScro
   end;
 
 const
-  ScrollBarIDs: array[TScrollBarKind] of Integer = (SB_HORZ, SB_VERT);
-  ScrollMessages: array[TScrollBarKind] of UINT = (WM_HSCROLL, WM_VSCROLL);
+  ScrollBarIDs: array[Boolean] of Integer = (SB_HORZ, SB_VERT);
+  ScrollMessages: array[Boolean] of UINT = (WM_HSCROLL, WM_VSCROLL);
 begin
   FScrolling := True;
   try
-    SetScrollPos(FEditor.Handle, ScrollBarIDs[Kind], ScrollPos, False);
-    SendMessage(FEditor.Handle, ScrollMessages[Kind], GetWParam, 0);
+    SetScrollPos(FEditor.Handle, ScrollBarIDs[Sender = VertScrollBar], ScrollPos, False);
+    SendMessage(FEditor.Handle, ScrollMessages[Sender = VertScrollBar], GetWParam, 0);
     if ScrollCode <> scTrack then
-      ScrollPos := GetScrollPos(FEditor.Handle, ScrollBarIDs[Kind]);
+      ScrollPos := GetScrollPos(FEditor.Handle, ScrollBarIDs[Sender = VertScrollBar]);
   finally
     FScrolling := False;
   end;
   if ScrollCode <> scTrack then
-    UpdateScrollBars;
+    UpdateScrollBars
+  else
+    Update;
 end;
 
-procedure TACLCustomEditContainer.UpdateScrollBars;
+procedure TACLCustomMemoContainer.ScrollContent(dX, dY: Integer);
+begin
+  // do nothing
+end;
+
+procedure TACLCustomMemoContainer.SetStyle(AValue: TACLStyleEdit);
+begin
+  FStyle.Assign(AValue);
+end;
+
+procedure TACLCustomMemoContainer.SetStyleScrollBox(AValue: TACLStyleScrollBox);
+begin
+  StyleScrollBox.Assign(AValue);
+end;
+
+procedure TACLCustomMemoContainer.SetTargetDPI(AValue: Integer);
+begin
+  inherited;
+  Style.TargetDPI := AValue;
+end;
+
+procedure TACLCustomMemoContainer.UpdateScrollBars;
+{$IFNDEF FPC}
 
   procedure SetScrollBarParameters(AScrollBar: TACLScrollBar);
   const
@@ -421,58 +333,82 @@ procedure TACLCustomEditContainer.UpdateScrollBars;
 begin
   if not FScrolling then
   begin
-    SetScrollBarParameters(ScrollBarHorz);
-    SetScrollBarParameters(ScrollBarVert);
+    SetScrollBarParameters(HorzScrollBar);
+    SetScrollBarParameters(VertScrollBar);
   end;
-end;
-
-procedure TACLCustomEditContainer.ScrollBarHandler(Sender: TObject; ScrollCode: TScrollCode; var ScrollPos: Integer);
+{$ELSE}
 begin
-  if Sender = ScrollBarHorz then
-    Scroll(sbHorizontal, ScrollCode, ScrollPos)
-  else
-    Scroll(sbVertical, ScrollCode, ScrollPos);
+{$ENDIF}
 end;
 
-function TACLCustomEditContainer.GetSizeGripArea: TRect;
-begin
-  if ScrollBarHorz.Visible and ScrollBarVert.Visible then
-  begin
-    Result := ScrollBarHorz.BoundsRect;
-    Result.Left := Result.Right;
-    Result.Right := ScrollBarVert.BoundsRect.Right;
-  end
-  else
-    Result := NullRect;
-end;
-
-procedure TACLCustomEditContainer.SetDefaultSize;
-begin
-  SetBounds(Left, Top, 185, 90);
-end;
-
-procedure TACLCustomEditContainer.SetStyleScrollBox(AValue: TACLStyleScrollBox);
-begin
-  FStyleScrollBox.Assign(AValue);
-end;
-
-procedure TACLCustomEditContainer.WMCommand(var Message: TWMCommand);
+{$IFNDEF FPC}
+procedure TACLCustomMemoContainer.WMCommand(var Message: TWMCommand);
 begin
   inherited;
-
   case Message.NotifyCode of
     EN_VSCROLL, EN_HSCROLL:
       UpdateScrollBars;
   end;
 end;
+{$ENDIF}
+
+{ TACLCustomMemoContainerStyle }
+
+procedure TACLCustomMemoContainerStyle.DrawBorder(
+  ACanvas: TCanvas; const R: TRect; const ABorders: TACLBorders);
+var
+  LEdit: TACLCustomMemoContainer;
+begin
+  LEdit := TACLCustomMemoContainer(Owner);
+  LEdit.Style.DrawBorders(ACanvas, R, LEdit.Focused);
+  acDrawFrame(ACanvas, R.InflateTo(-1), LEdit.Style.ColorContent.AsColor);
+end;
+
+{ TACLInnerMemo }
+
+constructor TACLInnerMemo.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  ParentDoubleBuffered := False;
+  DoubleBuffered := False;
+  BorderStyle := bsNone;
+end;
+
+procedure TACLInnerMemo.Change;
+var
+  LMemo: TACLMemo;
+begin
+  inherited;
+  LMemo := TACLMemo(GetInnerContainer);
+  LMemo.Changed;
+  LMemo.UpdateScrollBars;
+end;
+
+function TACLInnerMemo.GetInnerContainer: TWinControl;
+begin
+  Result := TWinControl(Owner);
+end;
+
+{$IFDEF DELPHI110ALEXANDRIA}
+procedure TACLInnerMemo.UpdateEditMargins;
+begin
+  // do nothing
+end;
+{$ENDIF}
 
 { TACLMemo }
 
 constructor TACLMemo.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
-  EditorOpen;
-  InnerMemo.ScrollBars := ssNone;
+  FEditor := CreateEditor;
+  ScrollBars := ssNone;
+  EditorHook(True);
+end;
+
+function TACLMemo.CreateEditor: TACLInnerMemo;
+begin
+  Result := TACLInnerMemo.Create(Self);
 end;
 
 procedure TACLMemo.Clear;
@@ -483,16 +419,6 @@ end;
 procedure TACLMemo.CopyToClipboard;
 begin
   InnerMemo.CopyToClipboard;
-end;
-
-function TACLMemo.CanOpenEditor: Boolean;
-begin
-  Result := True;
-end;
-
-function TACLMemo.CreateEditor: TWinControl;
-begin
-  Result := TACLInnerMemo.Create(Self);
 end;
 
 procedure TACLMemo.CutToClipboard;
@@ -540,9 +466,9 @@ begin
   Result := InnerMemo.SelLength;
 end;
 
-function TACLMemo.GetSelLine: UnicodeString;
+function TACLMemo.GetSelLine: string;
 begin
-  if (CaretPos.Y >= 0) and (CaretPos.Y < Lines.Count) then
+  if InRange(CaretPos.Y, 0, Lines.Count - 1) then
     Result := Lines.Strings[CaretPos.Y]
   else
     Result := '';
@@ -553,12 +479,12 @@ begin
   Result := InnerMemo.SelStart;
 end;
 
-function TACLMemo.GetSelText: UnicodeString;
+function TACLMemo.GetSelText: string;
 begin
   Result := InnerMemo.SelText;
 end;
 
-function TACLMemo.GetText: UnicodeString;
+function TACLMemo.GetText: string;
 begin
   Result := Lines.Text;
 end;
@@ -613,12 +539,12 @@ begin
   InnerMemo.SelStart := Value;
 end;
 
-procedure TACLMemo.SetSelText(const Value: UnicodeString);
+procedure TACLMemo.SetSelText(const Value: string);
 begin
   InnerMemo.SelText := Value;
 end;
 
-procedure TACLMemo.SetText(const Value: UnicodeString);
+procedure TACLMemo.SetText(const Value: string);
 begin
   Lines.Text := Value;
 end;

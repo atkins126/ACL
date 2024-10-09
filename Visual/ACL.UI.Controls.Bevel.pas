@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*               Bevel Control               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Bevel
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Bevel;
 
 {$I ACL.Config.inc}
@@ -16,31 +18,30 @@ unit ACL.UI.Controls.Bevel;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // Vcl
-  Vcl.Controls,
-  Vcl.ImgList,
-  Vcl.Graphics,
-  Vcl.ActnList,
-  Vcl.ExtCtrls,
+  {Vcl.}Controls,
+  {Vcl.}ImgList,
+  {Vcl.}Graphics,
+  {Vcl.}ActnList,
+  {Vcl.}ExtCtrls,
   // ACL
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
   ACL.Graphics.SkinImage,
-  ACL.Math,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Forms,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
-  ACL.Utils.Common,
-  ACL.Utils.FileSystem,
-  ACL.Utils.Shell;
+  ACL.Utils.Common;
 
 type
 
@@ -75,10 +76,10 @@ type
 
     procedure SetStyle(AValue: TACLStyleBevel);
   protected
-    procedure SetTargetDPI(AValue: Integer); override;
     function CreateStyle: TACLStyleBevel; virtual;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     procedure Paint; override;
+    procedure SetTargetDPI(AValue: Integer); override;
+    procedure UpdateTransparency; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -91,9 +92,6 @@ type
   end;
 
 implementation
-
-uses
-  System.Math;
 
 { TACLStyleBevel }
 
@@ -109,13 +107,13 @@ end;
 
 procedure TACLStyleBevel.Draw(ACanvas: TCanvas; R: TRect);
 var
-  AClipRgn: HRGN;
+  AClipRgn: TRegionHandle;
 begin
   case BorderStyle of
     bbsSimple:
-      acDrawFrameEx(ACanvas.Handle, R, ColorBorder1.Value, Borders);
+      acDrawFrameEx(ACanvas, R, ColorBorder1.Value, Borders);
     bbs3D:
-      acDrawComplexFrame(ACanvas.Handle, R, ColorBorder1.Value, ColorBorder2.Value, Borders);
+      acDrawComplexFrame(ACanvas, R, ColorBorder1.Value, ColorBorder2.Value, Borders);
 
     bbsRounded:
       begin
@@ -130,6 +128,7 @@ begin
           acRestoreClipRegion(ACanvas.Handle, AClipRgn);
         end;
       end;
+  else;
   end;
 end;
 
@@ -185,11 +184,6 @@ begin
   Result := TACLStyleBevel.Create(Self);
 end;
 
-function TACLBevel.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  Result := cbsTransparent;
-end;
-
 procedure TACLBevel.Paint;
 begin
   Style.Draw(Canvas, ClientRect);
@@ -198,6 +192,11 @@ end;
 procedure TACLBevel.SetStyle(AValue: TACLStyleBevel);
 begin
   FStyle.Assign(AValue);
+end;
+
+procedure TACLBevel.UpdateTransparency;
+begin
+  ControlStyle := ControlStyle - [csOpaque];
 end;
 
 end.

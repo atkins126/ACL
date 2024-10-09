@@ -1,26 +1,32 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*         Multi Threading Routines          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Multi-threaded sorting
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Threading.Sorting;
 
 {$I ACL.Config.inc}
+{$POINTERMATH ON}
 
 interface
 
 uses
+{$IFNDEF FPC}
   Winapi.Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Defaults,
-  System.SysUtils,
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}SyncObjs,
+  {System.}SysUtils,
   // ACL
   ACL.Classes.Collections,
   ACL.Classes.StringList,
@@ -75,7 +81,7 @@ type
 
   TACLMultithreadedListSorter = class(TACLCustomMultithreadedSorter)
   protected
-    FCompareProc: TACLListCompareProc;
+    FCompareProc: TACLListCompareProcPtr;
     FList: PPointerArray;
     FTempList: PPointerArray;
 
@@ -84,9 +90,9 @@ type
     procedure QuickSort(L, R: Integer); override;
   public
     class procedure Sort(List: PPointerArray; Count: Integer;
-      CompareProc: TACLListCompareProc; Multithreadeding: Boolean = True); overload;
+      CompareProc: TACLListCompareProcPtr; Multithreadeding: Boolean = True); overload;
     class procedure Sort(List: TList;
-      CompareProc: TACLListCompareProc; Multithreadeding: Boolean = True); overload;
+      CompareProc: TACLListCompareProcPtr; Multithreadeding: Boolean = True); overload;
   end;
 
   { TACLMultithreadedStringListSorter }
@@ -109,6 +115,10 @@ implementation
 
 uses
   ACL.FastCode;
+
+{$IFDEF FPC}
+  {$WARN 4055 off : Conversion between ordinals and pointers is not portable}
+{$ENDIF}
 
 type
   TACLStringListAccess = class(TACLStringList);
@@ -252,7 +262,7 @@ end;
 { TACLMultithreadedListSorter }
 
 class procedure TACLMultithreadedListSorter.Sort(List: PPointerArray; Count: Integer;
-  CompareProc: TACLListCompareProc; Multithreadeding: Boolean = True);
+  CompareProc: TACLListCompareProcPtr; Multithreadeding: Boolean = True);
 begin
   if Count > 1 then
   begin
@@ -268,7 +278,8 @@ begin
   end;
 end;
 
-class procedure TACLMultithreadedListSorter.Sort(List: TList; CompareProc: TACLListCompareProc; Multithreadeding: Boolean = True);
+class procedure TACLMultithreadedListSorter.Sort(List: TList;
+  CompareProc: TACLListCompareProcPtr; Multithreadeding: Boolean = True);
 begin
   Sort(@List.List[0], List.Count, CompareProc, Multithreadeding);
 end;
@@ -305,7 +316,7 @@ begin
   AItemB := AHighA;
   Inc(AItemB);
   AHighB := @FTempList[AHiBound];
-  while (NativeUInt(AItemA) <= NativeUInt(AHighA)) and (NativeUInt(AItemB) <= NativeUInt(AHighB)) do
+  while (AItemA <= AHighA) and (AItemB <= AHighB) do
   begin
     if FCompareProc(AItemA^, AItemB^) < 0 then
     begin
@@ -422,17 +433,17 @@ begin
   AItemB := AHighA;
   Inc(AItemB);
   AHighB := @FTempList[AHiBound];
-  while (NativeUInt(AItemA) <= NativeUInt(AHighA)) and (NativeUInt(AItemB) <= NativeUInt(AHighB)) do
+  while (AItemA <= AHighA) and (AItemB <= AHighB) do
   begin
     if FCompareProc(AItemA^, AItemB^) < 0 then
     begin
-      ADest^.MoveFrom(AItemA^);
+      ADest^.Assign(AItemA^);
       Inc(AItemA);
       Inc(AIndexA);
     end
     else
     begin
-      ADest^.MoveFrom(AItemB^);
+      ADest^.Assign(AItemB^);
       Inc(AItemB);
       Inc(AIndexB);
     end;

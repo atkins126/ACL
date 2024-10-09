@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*         HintWindow & Controllers          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Tooltips and their controllers
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.HintWindow;
 
 {$I ACL.Config.inc}
@@ -16,21 +18,29 @@ unit ACL.UI.HintWindow;
 interface
 
 uses
-  Winapi.DwmApi,
-  Winapi.Messages,
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}DwmApi,
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Types,
-  System.Classes,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Forms,
-  Vcl.Controls,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
-  ACL.Timers,
   ACL.Geometry,
+  ACL.Geometry.Utils,
+  ACL.Graphics,
   ACL.Graphics.TextLayout,
-  ACL.UI.Menus,
+  ACL.Timers,
   ACL.UI.Resources,
   ACL.Utils.DPIAware,
   ACL.Utils.Strings;
@@ -40,6 +50,10 @@ const
   HintTextIndentV = 5;
 
 type
+{$IFDEF FPC}
+  TCustomData = Pointer;
+{$ENDIF}
+
   TACLHintWindowHorzAlignment = (hwhaLeft, hwhaCenter, hwhaRight);
   TACLHintWindowVertAlignment = (hwvaAbove, hwvaOver, hwvaBelow);
 
@@ -50,7 +64,7 @@ type
     AlignVert: TACLHintWindowVertAlignment;
     DelayBeforeShow: Cardinal;
     ScreenBounds: TRect;
-    Text: UnicodeString;
+    Text: string;
 
     class operator Equal(const V1, V2: TACLHintData): Boolean;
     class operator NotEqual(const V1, V2: TACLHintData): Boolean;
@@ -66,9 +80,9 @@ type
     procedure InitializeResources; override;
   public
     procedure AfterConstruction; override;
-    function CreateRegion(const R: TRect): HRGN;
+    function CreateRegion(const R: TRect): TRegionHandle;
     procedure Draw(ACanvas: TCanvas; const R: TRect);
-    //
+    //# Properties
     property Radius: Integer read FRadius;
   published
     property ColorBorder: TACLResourceColor index 0 read GetColor write SetColor stored IsColorStored;
@@ -83,36 +97,45 @@ type
   public const
     HeightCorrection = 4;
   strict private
+    FClickable: Boolean;
     FLayout: TACLTextLayout;
     FStyle: TACLStyleHint;
 
     procedure SetStyle(AValue: TACLStyleHint);
-    // Messages
+    //# Messages
     procedure CMTextChanged(var Message: TMessage); message CM_TEXTCHANGED;
-    procedure WMMouseWheel(var Message: TWMMouseWheel); message WM_MOUSEWHEEL;
+    procedure WMNCHitTest(var Message: TMessage); message WM_NCHITTEST;
+    procedure WMMouseWheel(var Message: TMessage); {$IFNDEF FPC}message WM_MOUSEWHEEL;{$ENDIF}
     procedure WMSize(var Message: TWMSize); message WM_SIZE;
   protected
+  {$IFDEF FPC}
+    FCurrentPPI: Integer;
+  {$ENDIF}
     procedure CreateParams(var Params: TCreateParams); override;
-    procedure NCPaint(DC: HDC); override;
+    procedure NCPaint(DC: HDC); {$IFNDEF FPC}override;{$ENDIF}
     procedure Paint; override;
     procedure ScaleForPPI(ATargetDpi: Integer); reintroduce; virtual;
     procedure SetHintData(const AHint: string; AData: TCustomData); virtual;
+    //# Properties
     property Layout: TACLTextLayout read FLayout;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure AfterConstruction; override;
     procedure ActivateHint(Rect: TRect; const AHint: string); override;
-    procedure ActivateHintData(Rect: TRect; const AHint: string; AData: TCustomData); override;
-    function CalcHintRect(MaxWidth: Integer; const AHint: string; AData: TCustomData): TRect; overload; override;
+    procedure ActivateHintData(Rect: TRect;
+      const AHint: string; AData: TCustomData); override;
+    function CalcHintRect(MaxWidth: Integer;
+      const AHint: string; AData: TCustomData): TRect; overload; override;
     procedure Hide;
     //# FloatHints
-    procedure ShowFloatHint(const AHint: UnicodeString; const AScreenRect: TRect;
+    procedure ShowFloatHint(const AHint: string; const AScreenRect: TRect;
       AHorzAlignment: TACLHintWindowHorzAlignment; AVertAligment: TACLHintWindowVertAlignment); overload;
-    procedure ShowFloatHint(const AHint: UnicodeString; const AControl: TControl;
+    procedure ShowFloatHint(const AHint: string; const AControl: TControl;
       AHorzAlignment: TACLHintWindowHorzAlignment; AVertAligment: TACLHintWindowVertAlignment); overload;
-    procedure ShowFloatHint(const AHint: UnicodeString; const P: TPoint); overload;
+    procedure ShowFloatHint(const AHint: string; const P: TPoint); overload;
     //# Properties
+    property Clickable: Boolean read FClickable write FClickable;
     property Style: TACLStyleHint read FStyle write SetStyle;
   end;
 
@@ -131,14 +154,16 @@ type
     FPauseTimer: TACLTimer;
 
     function CanShowHintOverOwner: Boolean;
+    function GetOwnerForm(out AForm: TCustomForm): Boolean;
     function IsFormActive(AForm: TCustomForm): Boolean;
     procedure DeactivateTimerHandler(Sender: TObject);
     procedure PauseTimerHandler(Sender: TObject);
   protected
-    function CanShowHint(AHintOwner: TObject; const AHintData: TACLHintData): Boolean; virtual;
+    function CanShowHint(AHintOwner: TObject;
+      const AHintData: TACLHintData): Boolean; virtual;
     function CreateHintWindow: TACLHintWindow; virtual;
-    function GetOwnerForm: TCustomForm; virtual;
-    //
+    function GetOwnerControl: TWinControl; virtual;
+    //# Properties
     property HintData: TACLHintData read FHintData;
     property HintOwner: TObject read FHintOwner;
     property HintPoint: TPoint read FHintPoint;
@@ -148,91 +173,27 @@ type
     destructor Destroy; override;
     procedure Cancel;
     procedure Hide;
-    procedure Update(AHintOwner: TObject; const AHintPoint: TPoint; const AHintData: TACLHintData);
+    procedure Update(AHintOwner: TObject;
+      const AHintPoint: TPoint; const AHintData: TACLHintData);
   end;
 
 implementation
 
 uses
-  System.Math,
-  System.SysUtils,
-  // ACL
   ACL.Classes,
-  ACL.Graphics,
+  ACL.UI.Menus,
   ACL.Utils.Common,
   ACL.Utils.Desktop;
-
-type
-  TCustomFormAccess = class(TCustomForm);
-
-{ Return number of scanlines between the scanline containing cursor hotspot and the last scanline included in the cursor mask. }
-function GetCursorHeightMargin: Integer;
-var
-  IconInfo: TIconInfo;
-  BitmapInfoSize, BitmapBitsSize, ImageSize: DWORD;
-  Bitmap: PBitmapInfoHeader;
-  Bits: Pointer;
-  BytesPerScanline: Integer;
-
-  function FindScanline(Source: Pointer; MaxLen: Cardinal; Value: Cardinal): Cardinal;
-  var
-    P: PByte;
-  begin
-    P := Source;
-    Result := MaxLen;
-    while (Result > 0) and (P^ = Value) do
-    begin
-      Inc(P);
-      Dec(Result);
-    end;
-  end;
-
-begin
-  { Default value is entire icon height }
-  Result := GetSystemMetrics(SM_CYCURSOR);
-  if GetIconInfo(GetCursor, IconInfo) then
-  try
-    GetDIBSizes(IconInfo.hbmMask, BitmapInfoSize, BitmapBitsSize);
-    Bitmap := AllocMem(BitmapInfoSize + BitmapBitsSize);
-    try
-    Bits := Pointer(PByte(Bitmap) + BitmapInfoSize);
-    if GetDIB(IconInfo.hbmMask, 0, Bitmap^, Bits^) and
-      (Bitmap^.biBitCount = 1) then
-    begin
-      { Point Bits to the end of this bottom-up bitmap }
-      with Bitmap^ do
-      begin
-        BytesPerScanline := ((biWidth * biBitCount + 31) and not 31) div 8;
-        ImageSize := biWidth * BytesPerScanline;
-        Bits := Pointer(PByte(Bits) + BitmapBitsSize - ImageSize);
-        { Use the width to determine the height since another mask bitmap may immediately follow }
-        Result := FindScanline(Bits, ImageSize, $FF);
-        { In case the and mask is blank, look for an empty scanline in the xor mask. }
-        if (Result = 0) and (biHeight >= 2 * biWidth) then
-          Result := FindScanline(Pointer(PByte(Bits) - ImageSize),
-          ImageSize, $00);
-        Result := Result div BytesPerScanline;
-      end;
-      Dec(Result, IconInfo.yHotSpot);
-      Result := System.Math.Max(Result, 1)
-    end;
-    finally
-      FreeMem(Bitmap, BitmapInfoSize + BitmapBitsSize);
-    end;
-  finally
-    if IconInfo.hbmColor <> 0 then
-      DeleteObject(IconInfo.hbmColor);
-    if IconInfo.hbmMask <> 0 then
-      DeleteObject(IconInfo.hbmMask);
-  end;
-end;
 
 { TACLHintData }
 
 class operator TACLHintData.Equal(const V1, V2: TACLHintData): Boolean;
 begin
-  Result := (V1.AlignHorz = V2.AlignHorz) and (V1.AlignVert = V2.AlignVert) and
-    (V1.DelayBeforeShow = V2.DelayBeforeShow) and (V1.ScreenBounds = V2.ScreenBounds) and
+  Result :=
+    (V1.AlignHorz = V2.AlignHorz) and
+    (V1.AlignVert = V2.AlignVert) and
+    (V1.DelayBeforeShow = V2.DelayBeforeShow) and
+    (V1.ScreenBounds = V2.ScreenBounds) and
     (V1.Text = V2.Text);
 end;
 
@@ -255,10 +216,12 @@ end;
 procedure TACLStyleHint.AfterConstruction;
 begin
   inherited AfterConstruction;
-  FRadius := IfThen(not IsWin8OrLater, 3);
+{$IFNDEF FPC}
+  FRadius := IfThen(acOSCheckVersion(6, 2), 0, 3);
+{$ENDIF}
 end;
 
-function TACLStyleHint.CreateRegion(const R: TRect): HRGN;
+function TACLStyleHint.CreateRegion(const R: TRect): TRegionHandle;
 begin
   if Radius > 0 then
     Result := CreateRoundRectRgn(R.Left + 1, R.Top + 1, R.Right, R.Bottom, Radius, Radius)
@@ -268,16 +231,16 @@ end;
 
 procedure TACLStyleHint.Draw(ACanvas: TCanvas; const R: TRect);
 begin
-  acDrawGradient(ACanvas.Handle, R, ColorContent1.AsColor, ColorContent2.AsColor);
-  if IsWin8OrLater then
-    acDrawFrame(ACanvas.Handle, R, ColorBorder.AsColor)
-  else
+  acDrawGradient(ACanvas, R, ColorContent1.AsColor, ColorContent2.AsColor);
+  if Radius > 0 then
   begin
     ACanvas.Brush.Style := bsClear;
     ACanvas.Pen.Color := ColorBorder.AsColor;
-    ACanvas.RoundRect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1, 6, 6);
-    ACanvas.RoundRect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1, 3, 3);
-  end;
+    ACanvas.RoundRect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1, Radius * 2, Radius * 2);
+    ACanvas.RoundRect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1, Radius, Radius);
+  end
+  else
+    acDrawFrame(ACanvas, R, ColorBorder.AsColor);
 end;
 
 procedure TACLStyleHint.InitializeResources;
@@ -297,7 +260,10 @@ begin
   DoubleBuffered := True;
   FStyle := TACLStyleHint.Create(Self);
   FLayout := TACLTextLayout.Create(Canvas.Font);
-  FLayout.Options := [tloWordWrap, tloAutoHeight];
+  FLayout.Options := atoWordWrap or atoAutoHeight;
+{$IFDEF FPC}
+  FCurrentPPI := acDefaultDpi;
+{$ENDIF}
 end;
 
 destructor TACLHintWindow.Destroy;
@@ -316,6 +282,7 @@ procedure TACLHintWindow.ActivateHintData(Rect: TRect; const AHint: string; ADat
 var
   AMonitor: TACLMonitor;
   AMonitorBounds: TRect;
+  AHintSize: TSize;
 begin
   if (AHint <> Caption) or not IsWindowVisible(Handle) then
   begin
@@ -329,16 +296,25 @@ begin
     Caption := AHint;
     SetHintData(AHint, AData);
     Inc(Rect.Bottom, HeightCorrection);
-    UpdateBoundsRect(Rect);
+    AHintSize := Rect.Size;
 
     AMonitorBounds := AMonitor.BoundsRect;
-    Rect.Top := Min(Rect.Top,  AMonitorBounds.Bottom - Height);
+    Rect.Top := Min(Rect.Top,  AMonitorBounds.Bottom - AHintSize.cy);
     Rect.Top := Max(Rect.Top, AMonitorBounds.Top);
-    Rect.Left := Min(Rect.Left, AMonitorBounds.Right - Width);
+    Rect.Left := Min(Rect.Left, AMonitorBounds.Right - AHintSize.cx);
     Rect.Left := Max(Rect.Left, AMonitorBounds.Left);
+    Rect.Size := AHintSize;
 
-    SetWindowPos(Handle, HWND_TOPMOST, Rect.Left, Rect.Top, Width, Height, SWP_NOACTIVATE);
+  {$IFDEF FPC}
+    BoundsRect := Rect;
+    HintRect := Rect;
+    Visible := True;
+  {$ELSE}
+    UpdateBoundsRect(Rect);
+    SetWindowPos(Handle, HWND_TOPMOST,
+      Rect.Left, Rect.Top, AHintSize.cx, AHintSize.cy, SWP_NOACTIVATE);
     ShowWindow(Handle, SW_SHOWNOACTIVATE);
+  {$ENDIF}
     Invalidate;
   end;
 end;
@@ -350,11 +326,13 @@ begin
   Font := Screen.HintFont; // after ScaleForPPI
 end;
 
-function TACLHintWindow.CalcHintRect(MaxWidth: Integer; const AHint: string; AData: TCustomData): TRect;
+function TACLHintWindow.CalcHintRect(
+  MaxWidth: Integer; const AHint: string; AData: TCustomData): TRect;
 begin
   Canvas.Font := Font;
   Layout.Bounds := Rect(0, 0, MaxWidth, 2);
   SetHintData(AHint, AData);
+  Layout.Calculate(Canvas);
   Result := TRect.Create(Layout.MeasureSize);
 
   Inc(Result.Right, 2 * dpiApply(HintTextIndentH, FCurrentPPI));
@@ -364,12 +342,18 @@ end;
 
 procedure TACLHintWindow.Hide;
 begin
+{$IFDEF FPC}
+  Visible := False;
+{$ELSE}
   SetWindowPos(Handle, 0, 0, 0, 0, 0, SWP_HIDEWINDOW or
     SWP_NOACTIVATE or SWP_NOSIZE or SWP_NOMOVE or SWP_NOZORDER);
+{$ENDIF}
 end;
 
-procedure TACLHintWindow.ShowFloatHint(const AHint: UnicodeString; const AScreenRect: TRect;
-  AHorzAlignment: TACLHintWindowHorzAlignment; AVertAligment: TACLHintWindowVertAlignment);
+procedure TACLHintWindow.ShowFloatHint(
+  const AHint: string; const AScreenRect: TRect;
+  AHorzAlignment: TACLHintWindowHorzAlignment;
+  AVertAligment: TACLHintWindowVertAlignment);
 const
   Indent = 6;
 var
@@ -386,6 +370,7 @@ begin
       AHintPos.X := (AScreenRect.Right - AHintSize.cx);
     hwhaCenter:
       AHintPos.X := (AScreenRect.Right + AScreenRect.Left - AHintSize.cx) div 2;
+  else;
   end;
 
   case AVertAligment of
@@ -400,7 +385,7 @@ begin
   ActivateHint(Bounds(AHintPos.X, AHintPos.Y, AHintSize.cx, AHintSize.cy), AHint);
 end;
 
-procedure TACLHintWindow.ShowFloatHint(const AHint: UnicodeString; const P: TPoint);
+procedure TACLHintWindow.ShowFloatHint(const AHint: string; const P: TPoint);
 var
   LRect: TRect;
 begin
@@ -409,7 +394,7 @@ begin
   ActivateHint(LRect, AHint);
 end;
 
-procedure TACLHintWindow.ShowFloatHint(const AHint: UnicodeString; const AControl: TControl;
+procedure TACLHintWindow.ShowFloatHint(const AHint: string; const AControl: TControl;
   AHorzAlignment: TACLHintWindowHorzAlignment; AVertAligment: TACLHintWindowVertAlignment);
 begin
   ShowFloatHint(AHint, AControl.ClientRect + AControl.ClientOrigin, AHorzAlignment, AVertAligment);
@@ -419,6 +404,8 @@ procedure TACLHintWindow.CreateParams(var Params: TCreateParams);
 begin
   inherited CreateParams(Params);
   Params.Style := WS_POPUP;
+  if Owner is TWinControl then
+    Params.WndParent := TWinControl(Owner).Handle;
 end;
 
 procedure TACLHintWindow.NCPaint(DC: HDC);
@@ -443,7 +430,11 @@ procedure TACLHintWindow.ScaleForPPI(ATargetDpi: Integer);
 begin
   if FCurrentPPI <> ATargetDpi then
   begin
+  {$IFDEF FPC}
+    FCurrentPPI := ATargetDpi;
+  {$ELSE}
     ChangeScale(ATargetDpi, FCurrentPPI, True);
+  {$ENDIF}
     Layout.TargetDpi := ATargetDpi;
     Style.TargetDpi := ATargetDpi;
   end;
@@ -464,7 +455,15 @@ begin
   Layout.SetText(Caption, TACLTextFormatSettings.Formatted);
 end;
 
-procedure TACLHintWindow.WMMouseWheel(var Message: TWMMouseWheel);
+procedure TACLHintWindow.WMNCHitTest(var Message: TMessage);
+begin
+  if Clickable then
+    Message.Result := HTCLIENT
+  else
+    Message.Result := HTTRANSPARENT;
+end;
+
+procedure TACLHintWindow.WMMouseWheel(var Message: TMessage);
 begin
   Hide;
 end;
@@ -491,6 +490,12 @@ begin
   inherited Destroy;
 end;
 
+procedure TACLHintController.Cancel;
+begin
+  Hide;
+  FHintOwner := nil;
+end;
+
 procedure TACLHintController.Hide;
 begin
   FPauseTimer.Enabled := False;
@@ -498,13 +503,8 @@ begin
   FreeAndNil(FHintWindow);
 end;
 
-procedure TACLHintController.Cancel;
-begin
-  Hide;
-  FHintOwner := nil;
-end;
-
-procedure TACLHintController.Update(AHintOwner: TObject; const AHintPoint: TPoint; const AHintData: TACLHintData);
+procedure TACLHintController.Update(AHintOwner: TObject;
+  const AHintPoint: TPoint; const AHintData: TACLHintData);
 begin
   if (HintOwner <> AHintOwner) or (HintData <> AHintData) or (FHintPoint <> AHintPoint) then
   begin
@@ -522,33 +522,50 @@ begin
   FHintData := AHintData;
 end;
 
-function TACLHintController.CanShowHint(AHintOwner: TObject; const AHintData: TACLHintData): Boolean;
+function TACLHintController.CanShowHint(
+  AHintOwner: TObject; const AHintData: TACLHintData): Boolean;
 var
-  AForm: TCustomForm;
+  LForm: TCustomForm;
 begin
-  Result := Application.ShowHint and (AHintOwner <> nil) and (AHintData.Text <> '');
-  if Result then
-  begin
-    AForm := GetOwnerForm;
-    Result := (AForm <> nil) and IsFormActive(AForm) and not acMenusHasActivePopup;
-  end;
+  Result := Application.ShowHint and (AHintOwner <> nil) and (AHintData.Text <> '') and
+    GetOwnerForm(LForm) and IsFormActive(LForm) and not acMenusHasActivePopup;
 end;
 
 function TACLHintController.CanShowHintOverOwner: Boolean;
 begin
   // Otherwise cases, the hint does not want to be transparent for mouse (for some reason)
   // and prevents the user from clicking on the item
-  Result := IsWinVistaOrLater and not IsWine and (not IsWinSeven or DwmCompositionEnabled);
+{$IFDEF MSWINDOWS}
+  if IsWine then
+    Exit(False);
+  if (TOSVersion.Build = 6) and (TOSVersion.Build = 1) then
+    Exit(DwmCompositionEnabled);
+  Result := acOSCheckVersion(6, 0);
+{$ELSE}
+  Result := True;
+{$ENDIF}
 end;
 
 function TACLHintController.CreateHintWindow: TACLHintWindow;
 begin
-  Result := TACLHintWindow.Create(nil);
+  Result := TACLHintWindow.Create(GetOwnerControl);
 end;
 
-function TACLHintController.GetOwnerForm: TCustomForm;
+function TACLHintController.GetOwnerControl: TWinControl;
 begin
   Result := nil;
+end;
+
+function TACLHintController.GetOwnerForm(out AForm: TCustomForm): Boolean;
+var
+  LCtrl: TWinControl;
+begin
+  LCtrl := GetOwnerControl;
+  if LCtrl <> nil then
+    AForm := GetParentForm(LCtrl)
+  else
+    AForm := nil;
+  Result := AForm <> nil;
 end;
 
 function TACLHintController.IsFormActive(AForm: TCustomForm): Boolean;
@@ -558,16 +575,15 @@ end;
 
 procedure TACLHintController.DeactivateTimerHandler(Sender: TObject);
 var
-  AForm: TCustomForm;
+  LForm: TCustomForm;
 begin
-  AForm := GetOwnerForm;
-  if (AForm <> nil) and not IsFormActive(AForm)or not ((HintWindow <> nil) and IsWindowVisible(HintWindow.Handle)) then
+  if GetOwnerForm(LForm) and not IsFormActive(LForm) or
+    not ((HintWindow <> nil) and IsWindowVisible(HintWindow.Handle))
+  then
     Hide;
 end;
 
 procedure TACLHintController.PauseTimerHandler(Sender: TObject);
-const
-  SWP_TOPMOST = SWP_SHOWWINDOW or SWP_NOSIZE or SWP_NOMOVE or SWP_NOACTIVATE;
 var
   LHintPos: TPoint;
 begin
@@ -582,7 +598,7 @@ begin
         if HintData.ScreenBounds.IsEmpty or (FHintData.AlignVert = hwvaOver) and not CanShowHintOverOwner then
         begin
           LHintPos := HintPoint;
-          LHintPos.Offset(0, GetCursorHeightMargin);
+          LHintPos.Offset(0, {$IFDEF FPC}25{$ELSE}Screen.CursorHeightMargin{$ENDIF});
           HintWindow.ShowFloatHint(HintData.Text, LHintPos);
         end
         else

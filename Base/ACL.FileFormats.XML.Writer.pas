@@ -1,33 +1,31 @@
-{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*         Stream based XML Writer           *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Stream-based XML Writer
+//             Based on .NET platform code:
+//             https://github.com/microsoft/referencesource/tree/master/System.Xml/System/Xml/Core
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.FileFormats.XML.Writer;
 
 {$I ACL.Config.inc}
 {$SCOPEDENUMS ON}
 
-// Ported from .NET platform:
-// https://github.com/microsoft/referencesource/tree/master/System.Xml/System/Xml/Core
-
 interface
 
 uses
-  System.Rtti,
-  System.Types,
-  System.Classes,
-  System.SysUtils,
-  System.Generics.Defaults,
-  System.Generics.Collections,
+  {System.}Classes,
+  {System.}Character,
+  {System.}SysUtils,
+  {System.}Rtti,
   // ACL
-  ACL.Classes,
   ACL.FileFormats.XML.Types,
   ACL.Utils.Strings;
 
@@ -83,23 +81,26 @@ type
   { TACLXMLWriter }
 
   TACLXMLWriter = class abstract
-  protected
+  strict protected
     function GetWriteState: TACLXMLWriteState; virtual; abstract;
   public
     class function Create(AStream: TStream; const ASettings: TACLXMLWriterSettings): TACLXMLWriter; static;
 
-    procedure WriteStartDocument; overload;
-    procedure WriteStartDocument(AStandalone: TACLXMLStandalone); overload; virtual; abstract;
+    procedure WriteStartDocument(
+      AStandalone: TACLXMLStandalone = TACLXMLStandalone.Omit); virtual; abstract;
     procedure WriteEndDocument; virtual; abstract;
 
+    //# Elements
     procedure WriteStartElement(const APrefix, ALocalName: string); overload; virtual; abstract;
     procedure WriteStartElement(const ALocalName: string); overload;
+    procedure WriteElementString(const ALocalName, AValue: string); overload;
+    procedure WriteElementString(const APrefix, ALocalName, ANs, AValue: string); overload;
     procedure WriteEndElement; overload; virtual; abstract;
     procedure WriteFullEndElement; overload; virtual; abstract;
-    procedure WriteElementString(const ALocalName, AValue: string); overload;
-    procedure WriteElementString(const ALocalName: string; const AValue: AnsiString); overload;
-    procedure WriteElementString(const APrefix, ALocalName, ANs, AValue: string); overload;
 
+    //# Attributes
+    procedure WriteStartAttribute(const APrefix, ALocalName: string); overload; virtual; abstract;
+    procedure WriteStartAttribute(const ALocalName: string); overload;
     procedure WriteAttributeBoolean(const ALocalName: string; AValue: Boolean); overload;
     procedure WriteAttributeBoolean(const APrefix, ALocalName: string; AValue: Boolean); overload;
     procedure WriteAttributeFloat(const ALocalName: string; AValue: Single); overload;
@@ -110,26 +111,22 @@ type
     procedure WriteAttributeInt64(const APrefix, ALocalName: string; const AValue: Int64); overload;
     procedure WriteAttributeString(const ALocalName, AValue: string); overload;
     procedure WriteAttributeString(const APrefix, ALocalName: string; const AValue: string); overload;
-    procedure WriteAttributeString(const ALocalName: string; const AValue: AnsiString); overload;
-    procedure WriteAttributeString(const APrefix, ALocalName: string; const AValue: AnsiString); overload;
-    procedure WriteSpacePreserveAttribute;
-    procedure WriteStartAttribute(const APrefix, ALocalName: string); overload; virtual; abstract;
-    procedure WriteStartAttribute(const ALocalName: string); overload;
     procedure WriteEndAttribute; virtual; abstract;
 
+    //# other
     procedure WriteCData(const AText: string); virtual; abstract;
     procedure WriteComment(const AText: string); virtual; abstract;
-    procedure WriteEntityRef(const AName: string); virtual; abstract;
-    procedure WriteCharEntity(ACh: Char); virtual; abstract;
-
     // Value of attribute or node
-    procedure WriteString(AStr: PChar; ALength: Integer); overload; virtual; abstract;
+    procedure WriteString(AStr: PWideChar; ALength: Integer); overload; virtual; abstract;
     procedure WriteString(const AText: string); overload;
-    procedure WriteString(const AText: AnsiString); overload;
-    procedure WriteSurrogateCharEntity(ALowChar: Char; AHighChar: Char); virtual; abstract;
-    procedure WriteChars(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer);
-    procedure WriteRaw(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer); overload; virtual; abstract;
+
+    //# utils
+    procedure WriteCharEntity(ACh: WideChar); virtual; abstract;
+    procedure WriteChars(const ABuffer: TWideCharArray; AIndex, ACount: Integer);
+    procedure WriteEntityRef(const AName: string); virtual; abstract;
+    procedure WriteRaw(const ABuffer: TWideCharArray; AIndex, ACount: Integer); overload; virtual; abstract;
     procedure WriteRaw(const AData: string); overload; virtual; abstract;
+    procedure WriteSurrogateCharEntity(ALowChar, AHighChar: WideChar); virtual; abstract;
 
     procedure Close; virtual;
     procedure Flush; virtual;
@@ -139,22 +136,15 @@ type
 
 implementation
 
-uses
-  System.Character;
-
 {$REGION 'ErrorMessages'}
 const
   SXmlInvalidSurrogatePair =
     'The surrogate pair (%s, %s) is invalid. A high surrogate character (0xD800 - 0xDBFF) must ' +
     'always be paired with a low surrogate character (0xDC00 - 0xDFFF).';
-  SXmlClosedOrError = 'The Writer is closed or in error state.';
   SXmlDupAttributeName = '"%s" is a duplicate attribute name.';
   SXmlEmptyLocalName = 'The empty string is not a valid local name.';
   SXmlEmptyName = 'The empty string is not a valid name.';
-  SXmlIndentCharsNotWhitespace = 'XmlWriterSettings.%s can contain only valid XML white space characters when ' +
-    'XmlWriterSettings.CheckCharacters and XmlWriterSettings.NewLineOnAttributes are true.';
-  SXmlInvalidCharsInIndent = 'WriterSettings.%s can contain only valid XML text content characters when XmlWriterSettings.CheckCharacters is true. %s';
-  SXmlInvalidCharacter = '%s, hexadecimal value %s, is an invalid character.';
+  SXmlInvalidCharacter = 'The %s is an invalid character.';
   SXmlInvalidHighSurrogateChar = 'Invalid high surrogate character (%s). A high surrogate character must have a value from range (0xD800 - 0xDBFF).';
   SXmlInvalidNameCharsDetail = 'Invalid name character in "%s". The %d character, hexadecimal value %s, cannot be included in a name.';
   SXmlInvalidSurrogateMissingLowChar = 'The surrogate pair is invalid. Missing a low surrogate character.';
@@ -170,12 +160,12 @@ type
 
   EACLXMLInvalidSurrogatePairException = class(EACLXMLArgumentException)
   public
-    constructor Create(const ALowChar, AHighChar: Char);
+    constructor Create(const ALowChar, AHighChar: WideChar);
   end;
 
   { TACLXMLRawWriter }
 
-  TACLXMLRawWriter = class (TACLXMLWriter)
+  TACLXMLRawWriter = class(TACLXMLWriter)
   strict private type
     TElementScope = record
       Prefix: string;
@@ -195,7 +185,7 @@ type
     FElementStack: TArray<TElementScope>;
     FElementStackTop: Integer;
 
-    FBufChars: TCharArray;
+    FBufChars: TWideCharArray;
     FBufLen: Integer;
     FBufPos: Integer;
     FNestingLevel: Integer;
@@ -210,40 +200,39 @@ type
     FNewLineOnNode: Boolean;
     FOmitXmlDeclaration: Boolean;
 
-    procedure FlushBuffer;
-    procedure WriteAttributeTextBlock(ASrc: PChar; ASrcEnd: PChar);
-    procedure WriteElementTextBlock(ASrc: PChar; ASrcEnd: PChar);
-    procedure WriteNewLineAndAlignment(ANestingLevelCorrection: Integer = 0);
-    procedure RawText(const S: string); overload;
-    procedure RawText(ASrcBegin: PChar; ASrcEnd: PChar); overload;
-    procedure WriteRawWithCharChecking(APSrcBegin: PChar; APSrcEnd: PChar);
-    procedure WriteCommentOrPi(const AText: string; AStopChar: Char);
-    function EncodeSurrogate(ASrc: PChar; ASrcEnd: PChar; ADst: PChar): PChar;
-    function InvalidXmlChar(ACh: Char; ADst: PChar; AEntitize: Boolean): PChar;
-    function WriteNewLine(ADst: PChar): PChar;
-    class function LtEntity(ADst: PChar): PChar; static;
-    class function GtEntity(ADst: PChar): PChar; static;
-    class function AmpEntity(ADst: PChar): PChar; static;
-    class function QuoteEntity(ADst: PChar): PChar; static;
-    class function TabEntity(ADst: PChar): PChar; static;
-    class function LineFeedEntity(ADst: PChar): PChar; static;
-    class function CarriageReturnEntity(ADst: PChar): PChar; static;
-    class function CharEntity(ADst: PChar; ACh: Char): PChar; static;
-    class function UCS2Entity(ADst: PChar; ACh: Char): PChar; static;
-    class function RawStartCData(ADst: PChar): PChar; static;
-    class function RawEndCData(ADst: PChar): PChar; static;
-    procedure ValidateContentChars(const AChars: string; const APropertyName: string; AAllowOnlyWhitespace: Boolean);
-    procedure Write(const ABuffer: TCharArray; AIndex, ALength: Integer); overload;
     procedure AdvanceState(AToken: TToken);
+    procedure FlushBuffer;
+    procedure RawText(const S: string); overload;
+    procedure RawText(ASrcBegin: PWideChar; ASrcEnd: PWideChar); overload;
+    procedure WriteAttributeTextBlock(ASrc: PWideChar; ASrcEnd: PWideChar);
+    procedure WriteCommentOrPi(const AText: string; AStopChar: WideChar);
+    procedure WriteElementTextBlock(ASrc: PWideChar; ASrcEnd: PWideChar);
+    procedure WriteInvalidXmlChar(var ASrc, ADst: PWideChar; AEntitize: Boolean);
+    procedure WriteNewLineAndAlignment(ANestingLevelCorrection: Integer = 0);
+    procedure WriteOtherChars(var ASrc, ASrcEnd, ADst: PWideChar; AEntitizeInvalidChars: Boolean);
+    procedure WriteRawWithCharChecking(APSrcBegin: PWideChar; APSrcEnd: PWideChar);
+
+    function WriteNewLine(ADst: PWideChar): PWideChar;
+    procedure Write(const ABuffer: TWideCharArray; AIndex, ALength: Integer); overload;
+
+    class function AmpEntity(ADst: PWideChar): PWideChar; static;
+    class function CarriageReturnEntity(ADst: PWideChar): PWideChar; static;
+    class function GtEntity(ADst: PWideChar): PWideChar; static;
+    class function LineFeedEntity(ADst: PWideChar): PWideChar; static;
+    class function LtEntity(ADst: PWideChar): PWideChar; static;
+    class function QuoteEntity(ADst: PWideChar): PWideChar; static;
+    class function RawEndCData(ADst: PWideChar): PWideChar; static;
+    class function RawStartCData(ADst: PWideChar): PWideChar; static;
+    class function TabEntity(ADst: PWideChar): PWideChar; static;
   strict protected
     function GetWriteState: TACLXMLWriteState; override; final;
-    property Stream: TStream read FStream;
     property Encoding: TEncoding read FEncoding;
+    property Stream: TStream read FStream;
   public
     constructor CreateEx(AStream: TStream; const ASettings: TACLXMLWriterSettings);
     destructor Destroy; override;
 
-    procedure WriteStartDocument(AStandalone: TACLXMLStandalone); override; final;
+    procedure WriteStartDocument(AStandalone: TACLXMLStandalone = TACLXMLStandalone.Omit); override; final;
     procedure WriteEndDocument; override; final;
     procedure WriteXmlDeclaration(AStandalone: TACLXMLStandalone);
 
@@ -255,13 +244,13 @@ type
     procedure WriteEndAttribute; override;
 
     procedure WriteCData(const AText: string); override;
-    procedure WriteCharEntity(ACh: Char); override;
-    procedure WriteRaw(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer); override;
-    procedure WriteRaw(const AData: string); override;
-    procedure WriteSurrogateCharEntity(ALowChar: Char; AHighChar: Char); override;
+    procedure WriteCharEntity(ACh: WideChar); override;
     procedure WriteComment(const AText: string); override;
     procedure WriteEntityRef(const AName: string); override;
-    procedure WriteString(AStr: PChar; ALength: Integer); override;
+    procedure WriteRaw(const ABuffer: TWideCharArray; AIndex: Integer; ACount: Integer); override;
+    procedure WriteRaw(const AData: string); override;
+    procedure WriteSurrogateCharEntity(ALowChar, AHighChar: WideChar); override;
+    procedure WriteString(AStr: PWideChar; ALength: Integer); override;
 
     procedure Close; override;
     procedure Flush; override;
@@ -276,7 +265,6 @@ type
     NamespaceStackInitialSize = 8;
   protected type
   {$REGION 'Sub-Types'}
-
     TElementScope = record
       Prefix: string;
       PrevNSTop: Integer;
@@ -287,21 +275,19 @@ type
       FNamespace: string;
       FPrefix: string;
     public
-      property Prefix: string read FPrefix write FPrefix;
       property Namespace: string read FNamespace write FNamespace;
+      property Prefix: string read FPrefix write FPrefix;
     end;
 
     TAttrName = record
     strict private
-      FPrefix: string;
       FLocalName: string;
+      FPrefix: string;
     public
       constructor Create(const APrefix, ALocalName: string);
-
-      property Prefix: string read FPrefix;
       property LocalName: string read FLocalName;
+      property Prefix: string read FPrefix;
     end;
-
   {$ENDREGION}
   strict private
     FWriter: TACLXMLWriter;
@@ -338,25 +324,25 @@ type
     procedure Close; override;
     procedure Flush; override;
     procedure WriteCData(const AText: string); override;
-    procedure WriteCharEntity(ACh: Char); override;
+    procedure WriteCharEntity(ACh: WideChar); override;
     procedure WriteComment(const AText: string); override;
     procedure WriteEndAttribute; override;
     procedure WriteEndDocument; override;
     procedure WriteEndElement; override;
     procedure WriteEntityRef(const AName: string); override;
     procedure WriteFullEndElement; override;
-    procedure WriteRaw(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer); override;
+    procedure WriteRaw(const ABuffer: TWideCharArray; AIndex: Integer; ACount: Integer); override;
     procedure WriteRaw(const AData: string); override;
     procedure WriteStartAttribute(const APrefix, ALocalName: string); override;
     procedure WriteStartDocument(AStandalone: TACLXMLStandalone); override;
     procedure WriteStartElement(const APrefix, ALocalName: string); override;
-    procedure WriteString(AStr: PChar; ALength: Integer); override;
-    procedure WriteSurrogateCharEntity(ALowChar: Char; AHighChar: Char); override;
+    procedure WriteString(AStr: PWideChar; ALength: Integer); override;
+    procedure WriteSurrogateCharEntity(ALowChar, AHighChar: WideChar); override;
   end;
 
 { EACLXMLInvalidSurrogatePairException }
 
-constructor EACLXMLInvalidSurrogatePairException.Create(const ALowChar, AHighChar: Char);
+constructor EACLXMLInvalidSurrogatePairException.Create(const ALowChar, AHighChar: WideChar);
 begin
   CreateFmt(SXmlInvalidSurrogatePair, [TACLHexCode.Encode(ALowChar), TACLHexCode.Encode(AHighChar)]);
 end;
@@ -383,7 +369,8 @@ end;
 
 { TACLXMLWriter }
 
-class function TACLXMLWriter.Create(AStream: TStream; const ASettings: TACLXMLWriterSettings): TACLXMLWriter;
+class function TACLXMLWriter.Create(AStream: TStream;
+  const ASettings: TACLXMLWriterSettings): TACLXMLWriter;
 begin
   Result := TACLXMLRawWriter.CreateEx(AStream, ASettings);
   if ASettings.CheckWellformed then
@@ -401,21 +388,18 @@ begin
 end;
 
 procedure TACLXMLWriter.WriteString(const AText: string);
+var
+  LText: UnicodeString;
 begin
-  WriteString(PChar(AText), Length(AText));
+  LText := acUString(AText);
+  WriteString(PWideChar(LText), Length(LText));
 end;
 
-procedure TACLXMLWriter.WriteString(const AText: AnsiString);
-begin
-  WriteString(acStringFromAnsiString(AText));
-end;
-
-procedure TACLXMLWriter.WriteChars(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer);
+procedure TACLXMLWriter.WriteChars(const ABuffer: TWideCharArray; AIndex, ACount: Integer);
 begin
   Assert(ABuffer <> nil);
   Assert(AIndex >= 0);
   Assert((ACount >= 0) and (AIndex + ACount <= Length(ABuffer)));
-
   WriteString(@ABuffer[AIndex], ACount);
 end;
 
@@ -473,33 +457,9 @@ begin
   WriteEndAttribute;
 end;
 
-procedure TACLXMLWriter.WriteAttributeString(const APrefix, ALocalName: string; const AValue: AnsiString);
-begin
-  WriteStartAttribute(APrefix, ALocalName);
-  WriteString(AValue);
-  WriteEndAttribute;
-end;
-
-procedure TACLXMLWriter.WriteAttributeString(const ALocalName: string; const AValue: AnsiString);
-begin
-  WriteStartAttribute('', ALocalName);
-  WriteString(AValue);
-  WriteEndAttribute;
-end;
-
-procedure TACLXMLWriter.WriteSpacePreserveAttribute;
-begin
-  WriteAttributeString('xml', 'space', 'preserve');
-end;
-
 procedure TACLXMLWriter.WriteStartAttribute(const ALocalName: string);
 begin
   WriteStartAttribute('', ALocalName);
-end;
-
-procedure TACLXMLWriter.WriteStartDocument;
-begin
-  WriteStartDocument(TACLXMLStandalone.Omit);
 end;
 
 procedure TACLXMLWriter.Close;
@@ -522,17 +482,9 @@ begin
   WriteEndElement;
 end;
 
-procedure TACLXMLWriter.WriteElementString(const ALocalName: string; const AValue: AnsiString);
-begin
-  WriteStartElement(ALocalName);
-  if AValue <> '' then
-    WriteString(AValue);
-  WriteEndElement;
-end;
-
 { TACLXMLRawWriter }
 
-procedure TACLXMLRawWriter.Write(const ABuffer: TCharArray; AIndex, ALength: Integer);
+procedure TACLXMLRawWriter.Write(const ABuffer: TWideCharArray; AIndex, ALength: Integer);
 var
   ABytes: TBytes;
 begin
@@ -644,9 +596,6 @@ begin
   FEncodeInvalidXmlCharAsUCS2 := ASettings.EncodeInvalidXmlCharAsUCS2;
   FNewLineOnNode := ASettings.NewLineOnNode;
   FNewLineOnAttributes := ASettings.NewLineOnAttributes;
-
-  if FCheckCharacters and (FNewLineHandling = TACLXMLNewLineHandling.Replace) then
-    ValidateContentChars(FNewLineChars, 'NewLineChars', False);
 
   //# the buffer is allocated will BufferOverflowSize in order to reduce checks when writing out constant size markup
   SetLength(FBufChars, FBufLen + BufferOverflowSize);
@@ -792,12 +741,15 @@ end;
 //# Serialize a CData section.  If the "]]>" pattern is found within the text, replace it with "]]><![CDATA[>".
 procedure TACLXMLRawWriter.WriteCData(const AText: string);
 var
-  ASrcBegin, ADstBegin, ASrc, ASrcEnd, ADst, ADstEnd: PChar;
-  C: Char;
+  C: WideChar;
+  LSrc, LSrcBegin, LSrcEnd: PWideChar;
+  LDst, LDstBegin, LDstEnd: PWideChar;
+  LText: UnicodeString;
   HadDoubleBracket: boolean;
 begin
   Assert(AText <> '');
   AdvanceState(TToken.Text);
+  LText := acUString(AText);
 
   //# Start a new cdata section
   FBufChars[FBufPos] := '<';
@@ -826,112 +778,94 @@ begin
     Exit;
   end;
 
-  ASrcBegin := PChar(AText);
-  ADstBegin := @FBufChars[0];
-  ASrc := ASrcBegin;
-  ASrcEnd := ASrcBegin + Length(AText);
-  ADst := ADstBegin + FBufPos;
+  LSrcBegin := PWideChar(LText);
+  LDstBegin := @FBufChars[0];
+  LSrc := LSrcBegin;
+  LSrcEnd := LSrcBegin + Length(LText);
+  LDst := LDstBegin + FBufPos;
   HadDoubleBracket := False;
 
   C := #$000;
   while True do
   begin
-    ADstEnd := ADst + (ASrcEnd - ASrc);
-    if ADstEnd > ADstBegin + FBufLen then
-      ADstEnd := ADstBegin + FBufLen;
+    LDstEnd := LDst + (LSrcEnd - LSrc);
+    if LDstEnd > LDstBegin + FBufLen then
+      LDstEnd := LDstBegin + FBufLen;
 
-    while ADst < ADstEnd do
+    while LDst < LDstEnd do
     begin
-      C := ASrc^;
+      C := LSrc^;
       if not (((TACLXMLCharType.CharProperties[C] and TACLXMLCharType.AttrValue) <> 0) and (C <> ']')) then
         Break;
-      ADst^ := C;
-      Inc(ADst);
-      Inc(ASrc);
+      LDst^ := C;
+      Inc(LDst);
+      Inc(LSrc);
     end;
 
-    Assert(ASrc <= ASrcEnd);
+    Assert(LSrc <= LSrcEnd);
     //# end of value
-    if ASrc >= ASrcEnd then
+    if LSrc >= LSrcEnd then
       Break;
     //# end of buffer
-    if ADst >= ADstEnd then
+    if LDst >= LDstEnd then
     begin
-      FBufPos := ADst - ADstBegin;
+      FBufPos := LDst - LDstBegin;
       FlushBuffer;
-      ADst := ADstBegin + 1;
+      LDst := LDstBegin + 1;
       Continue;
     end;
     //# handle special characters
     case C of
       '>':
         begin
-          if HadDoubleBracket and (ADst[-1] = ']') then
+          if HadDoubleBracket and (LDst[-1] = ']') then
           begin
             //# The characters "]]>" were found within the CData text
-            ADst := RawEndCData(ADst);
-            ADst := RawStartCData(ADst);
+            LDst := RawEndCData(LDst);
+            LDst := RawStartCData(LDst);
           end;
-          ADst^ := '>';
-          Inc(ADst);
+          LDst^ := '>';
+          Inc(LDst);
         end;
       ']':
         begin
-          HadDoubleBracket := ADst[-1] = ']';
-          ADst^ := ']';
-          Inc(ADst);
+          HadDoubleBracket := LDst[-1] = ']';
+          LDst^ := ']';
+          Inc(LDst);
         end;
       #$000D:
         if FNewLineHandling = TACLXMLNewLineHandling.Replace then
         begin
           //# Normalize "\r\n", or "\r" to NewLineChars
-          if ASrc[1] = #$000A then
-            Inc(ASrc);
-          ADst := WriteNewLine(ADst);
+          if LSrc[1] = #$000A then
+            Inc(LSrc);
+          LDst := WriteNewLine(LDst);
         end
         else
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
       #$000A:
         if FNewLineHandling = TACLXMLNewLineHandling.Replace then
-          ADst := WriteNewLine(ADst)
+          LDst := WriteNewLine(LDst)
         else
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
       '&', '<', '"', #$0027, #$0009:
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
-      else
-      begin
-        if TACLXMLCharType.IsSurrogate(C) then
-        begin
-          ADst := EncodeSurrogate(ASrc, ASrcEnd, ADst);
-          Inc(ASrc, 2);
-        end
-        else
-          if (C <= #$007F) or (C >= #$FFFE) then
-          begin
-            ADst := InvalidXmlChar(C, ADst, False);
-            Inc(ASrc);
-          end
-          else
-          begin
-            ADst^ := C;
-            Inc(ADst);
-            Inc(ASrc);
-          end;
-        Continue;
-      end;
+    else
+      WriteOtherChars(LSrc, LSrcEnd, LDst, False);
+      Continue;
     end;
-    Inc(ASrc);
+    Inc(LSrc);
   end;
-  FBufPos := ADst - ADstBegin;
+  FBufPos := LDst - LDstBegin;
 
   FBufChars[FBufPos] := ']';
   Inc(FBufPos);
@@ -985,7 +919,7 @@ begin
 end;
 
 //# Serialize a character entity reference.
-procedure TACLXMLRawWriter.WriteCharEntity(ACh: Char);
+procedure TACLXMLRawWriter.WriteCharEntity(ACh: WideChar);
 var
   AValue: string;
 begin
@@ -1012,9 +946,9 @@ begin
 end;
 
 //# Serialize either attribute or element text using XML rules.
-procedure TACLXMLRawWriter.WriteString(AStr: PChar; ALength: Integer);
+procedure TACLXMLRawWriter.WriteString(AStr: PWideChar; ALength: Integer);
 var
-  AEnd: PChar;
+  AEnd: PWideChar;
 begin
   AdvanceState(TToken.Text);
   if ALength > 0 then
@@ -1028,7 +962,7 @@ begin
 end;
 
 //# Serialize surrogate character entity.
-procedure TACLXMLRawWriter.WriteSurrogateCharEntity(ALowChar: Char; AHighChar: Char);
+procedure TACLXMLRawWriter.WriteSurrogateCharEntity(ALowChar, AHighChar: WideChar);
 var
   ASurrogateChar: Integer;
 begin
@@ -1048,9 +982,9 @@ begin
 end;
 
 //# Serialize raw data. Arguments are validated in the XmlWellformedWriter layer
-procedure TACLXMLRawWriter.WriteRaw(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer);
+procedure TACLXMLRawWriter.WriteRaw(const ABuffer: TWideCharArray; AIndex: Integer; ACount: Integer);
 var
-  AStart: PChar;
+  AStart: PWideChar;
 begin
   Assert(ABuffer <> nil);
   Assert(AIndex >= 0);
@@ -1064,14 +998,14 @@ end;
 //# Serialize raw data.
 procedure TACLXMLRawWriter.WriteRaw(const AData: string);
 var
-  AStart, AEnd: PChar;
+  LData: UnicodeString;
+  LStart: PWideChar;
 begin
   Assert(AData <> '');
-
   AdvanceState(TToken.Text);
-  AStart := PChar(AData);
-  AEnd := AStart + Length(AData);
-  WriteRawWithCharChecking(AStart, AEnd);
+  LData := acUString(AData);
+  LStart := PWideChar(LData);
+  WriteRawWithCharChecking(LStart, LStart + Length(LData));
 end;
 
 //# Flush all bytes in the buffer to output and close the output stream or writer.
@@ -1116,10 +1050,10 @@ begin
 end;
 
 //# Serialize text that is part of an attribute value.  The '&', '<', '>', and '"' characters are entitized.
-procedure TACLXMLRawWriter.WriteAttributeTextBlock(ASrc: PChar; ASrcEnd: PChar);
+procedure TACLXMLRawWriter.WriteAttributeTextBlock(ASrc, ASrcEnd: PWideChar);
 var
-  ADstBegin, ADstEnd, ADst: PChar;
-  C: Char;
+  ADstBegin, ADstEnd, ADst: PWideChar;
+  C: WideChar;
 begin
   ADstBegin := @FBufChars[0];
 
@@ -1202,27 +1136,9 @@ begin
             //# escape new lines in attributes
             ADst := LineFeedEntity(ADst);
         end;
-      else
-      begin
-        if TACLXMLCharType.IsSurrogate(C) then
-        begin
-          ADst := EncodeSurrogate(ASrc, ASrcEnd, ADst);
-          Inc(ASrc, 2);
-        end
-        else
-          if (C <= #$007F) or (C >= #$FFFE) then
-          begin
-            ADst := InvalidXmlChar(C, ADst, True);
-            Inc(ASrc);
-          end
-          else
-          begin
-            ADst^ := C;
-            Inc(ADst);
-            Inc(ASrc);
-          end;
-        Continue;
-      end;
+    else
+      WriteOtherChars(ASrc, ASrcEnd, ADst, True);
+      Continue;
     end;
     Inc(ASrc);
   end;
@@ -1230,10 +1146,10 @@ begin
 end;
 
 //# Serialize text that is part of element content.  The '&', '<', and '>' characters are entitized.
-procedure TACLXMLRawWriter.WriteElementTextBlock(ASrc: PChar; ASrcEnd: PChar);
+procedure TACLXMLRawWriter.WriteElementTextBlock(ASrc, ASrcEnd: PWideChar);
 var
-  ADst, ADstEnd, ADstBegin: PChar;
-  C: Char;
+  ADst, ADstEnd, ADstBegin: PWideChar;
+  C: WideChar;
 begin
   ADstBegin := @FBufChars[0];
   ADst := ADstBegin + FBufPos;
@@ -1307,29 +1223,9 @@ begin
               Inc(ADst);
             end;
         end;
+
     else
-    begin
-      if TACLXMLCharType.IsSurrogate(C) then
-      try
-        ADst := EncodeSurrogate(ASrc, ASrcEnd, ADst);
-        Inc(ASrc, 2);
-      except
-        ADst := InvalidXmlChar(C, ADst, True);
-        Inc(ASrc);
-      end
-      else
-        if (C <= #$007F) or (C >= #$FFFE) then
-        begin
-          ADst := InvalidXmlChar(C, ADst, True);
-          Inc(ASrc);
-        end
-        else
-        begin
-          ADst^ := C;
-          Inc(ADst);
-          Inc(ASrc);
-        end;
-      end;
+      WriteOtherChars(ASrc, ASrcEnd, ADst, True);
       Continue;
     end;
     Inc(ASrc);
@@ -1338,31 +1234,63 @@ begin
 end;
 
 procedure TACLXMLRawWriter.WriteNewLineAndAlignment(ANestingLevelCorrection: Integer = 0);
+var
+  I: Integer;
 begin
   RawText(FNewLineChars);
-  for var I := 1 to FNestingLevel + ANestingLevelCorrection do
+  for I := 1 to FNestingLevel + ANestingLevelCorrection do
     RawText(FIndentChars);
+end;
+
+procedure TACLXMLRawWriter.WriteOtherChars(
+  var ASrc, ASrcEnd, ADst: PWideChar; AEntitizeInvalidChars: Boolean);
+begin
+  if TACLXMLCharType.IsSurrogate(ASrc^) then
+  try
+    if not TACLXMLCharType.IsHighSurrogate(ASrc^) then
+      raise EACLXMLArgumentException.CreateFmt(SXmlInvalidHighSurrogateChar, [TACLHexCode.Encode(ASrc^)]);
+    if ASrc + 1 >= ASrcEnd then
+      raise EACLXMLArgumentException.Create(SXmlInvalidSurrogateMissingLowChar);
+    if not TACLXMLCharType.IsLowSurrogate(PChar(ASrc + 1)^) then
+      raise EACLXMLInvalidSurrogatePairException.Create(ASrc^, PChar(ASrc + 1)^);
+    ADst[0] := ASrc^;
+    ADst[1] := PChar(ASrc + 1)^;
+    Inc(ADst, 2);
+    Inc(ASrc, 2);
+  except
+    if FCheckCharacters then raise;
+    WriteInvalidXmlChar(ASrc, ADst, AEntitizeInvalidChars);
+  end
+  else
+    if (Ord(ASrc^) <= $007F) or (Ord(ASrc^) >= $FFFE) then
+      WriteInvalidXmlChar(ASrc, ADst, AEntitizeInvalidChars)
+    else
+    begin
+      ADst^ := ASrc^;
+      Inc(ADst);
+      Inc(ASrc);
+    end;
 end;
 
 procedure TACLXMLRawWriter.RawText(const S: string);
 var
-  AStart, AEnd: PChar;
+  LData: UnicodeString;
+  LStart: PWideChar;
 begin
   Assert(S <> '');
-  AStart := PChar(S);
-  AEnd := AStart + Length(S);
-  RawText(AStart, AEnd);
+  LData := acUString(S);
+  LStart := PWideChar(LData);
+  RawText(LStart, LStart + Length(LData));
 end;
 
-procedure TACLXMLRawWriter.RawText(ASrcBegin: PChar; ASrcEnd: PChar);
+procedure TACLXMLRawWriter.RawText(ASrcBegin: PWideChar; ASrcEnd: PWideChar);
 var
-  ADstBegin, ADst, ASrc, ADstEnd: PChar;
-  C: Char;
+  AChar: WideChar;
+  ADstBegin, ADst, ASrc, ADstEnd: PWideChar;
 begin
   ADstBegin := @FBufChars[0];
   ADst := ADstBegin + FBufPos;
   ASrc := ASrcBegin;
-  C := #$0000;
   while True do
   begin
     ADstEnd := ADst + (ASrcEnd - ASrc);
@@ -1371,11 +1299,11 @@ begin
 
     while ADst < ADstEnd do
     begin
-      C := ASrc^;
-      if C >= TACLXMLCharType.SurHighStart then
+      AChar := ASrc^;
+      if AChar >= TACLXMLCharType.SurHighStart then
         Break;
       Inc(ASrc);
-      ADst^ := C;
+      ADst^ := AChar;
       Inc(ADst);
     end;
     Assert(ASrc <= ASrcEnd);
@@ -1390,32 +1318,15 @@ begin
       ADst := ADstBegin + 1;
       Continue;
     end;
-
-    if TACLXMLCharType.IsSurrogate(C) then
-    begin
-      ADst := EncodeSurrogate(ASrc, ASrcEnd, ADst);
-      Inc(ASrc, 2);
-    end
-    else
-      if (C <= #$007F) or (C >= #$FFFE) then
-      begin
-        ADst := InvalidXmlChar(C, ADst, False);
-        Inc(ASrc);
-      end
-      else
-      begin
-        ADst^ := C;
-        Inc(ADst);
-        Inc(ASrc);
-      end;
+    WriteOtherChars(ASrc, ASrcEnd, ADst, False);
   end;
   FBufPos := ADst - ADstBegin;
 end;
 
-procedure TACLXMLRawWriter.WriteRawWithCharChecking(APSrcBegin: PChar; APSrcEnd: PChar);
+procedure TACLXMLRawWriter.WriteRawWithCharChecking(APSrcBegin: PWideChar; APSrcEnd: PWideChar);
 var
-  ADstBegin, ASrc, ADst, ADstEnd: PChar;
-  C: Char;
+  ADstBegin, ASrc, ADst, ADstEnd: PWideChar;
+  C: WideChar;
 begin
   ADstBegin := @FBufChars[0];
   ASrc := APSrcBegin;
@@ -1475,37 +1386,21 @@ begin
           ADst^ := C;
           Inc(ADst);
         end;
-      else
-      begin
-        if TACLXMLCharType.IsSurrogate(C) then
-        begin
-          ADst := EncodeSurrogate(ASrc, APSrcEnd, ADst);
-          Inc(ASrc, 2);
-        end
-        else
-          if (C <= #$007F) or (C >= #$FFFE) then
-          begin
-            ADst := InvalidXmlChar(C, ADst, False);
-            Inc(ASrc);
-          end
-          else
-          begin
-            ADst^ := C;
-            Inc(ADst);
-            Inc(ASrc);
-          end;
-        Continue;
-      end;
+    else
+      WriteOtherChars(ASrc, APSrcEnd, ADst, False);
+      Continue;
     end;
     Inc(ASrc);
   end;
   FBufPos := ADst - ADstBegin;
 end;
 
-procedure TACLXMLRawWriter.WriteCommentOrPi(const AText: string; AStopChar: Char);
+procedure TACLXMLRawWriter.WriteCommentOrPi(const AText: string; AStopChar: WideChar);
 var
-  ASrcBegin, ADstBegin, ASrc, ASrcEnd, ADst, ADstEnd: PChar;
-  C: Char;
+  LSrc, LSrcBegin, LSrcEnd: PWideChar;
+  LDst, LDstBegin, LDstEnd: PWideChar;
+  LText: UnicodeString;
+  C: WideChar;
 begin
   if AText = '' then
   begin
@@ -1514,180 +1409,161 @@ begin
     Exit;
   end;
 
-  ASrcBegin := PChar(AText);
-  ADstBegin := @FBufChars[0];
-  ASrc := ASrcBegin;
-  ASrcEnd := ASrcBegin + Length(AText);
-  ADst := ADstBegin + FBufPos;
+  LText := acUString(AText);
+  LSrcBegin := PWideChar(LText);
+  LDstBegin := @FBufChars[0];
+  LSrc := LSrcBegin;
+  LSrcEnd := LSrcBegin + Length(LText);
+  LDst := LDstBegin + FBufPos;
   C := #$0000;
   while True do
   begin
-    ADstEnd := ADst + (ASrcEnd - ASrc);
-    if ADstEnd > ADstBegin + FBufLen then
-      ADstEnd := ADstBegin + FBufLen;
+    LDstEnd := LDst + (LSrcEnd - LSrc);
+    if LDstEnd > LDstBegin + FBufLen then
+      LDstEnd := LDstBegin + FBufLen;
 
-    while ADst < ADstEnd do
+    while LDst < LDstEnd do
     begin
-      C := ASrc^;
+      C := LSrc^;
       if not (((TACLXMLCharType.CharProperties[C] and TACLXMLCharType.Text) <> 0) and (C <> AStopChar)) then
         Break;
-      ADst^ := C;
-      Inc(ADst);
-      Inc(ASrc);
+      LDst^ := C;
+      Inc(LDst);
+      Inc(LSrc);
     end;
 
-    Assert(ASrc <= ASrcEnd);
+    Assert(LSrc <= LSrcEnd);
     //# end of value
-    if ASrc >= ASrcEnd then
+    if LSrc >= LSrcEnd then
       Break;
     //# end of buffer
-    if ADst >= ADstEnd then
+    if LDst >= LDstEnd then
     begin
-      FBufPos := ADst - ADstBegin;
+      FBufPos := LDst - LDstBegin;
       FlushBuffer;
-      ADst := ADstBegin + 1;
+      LDst := LDstBegin + 1;
       Continue;
     end;
 
     case C of
       '-':
         begin
-          ADst^ := '-';
-          Inc(ADst);
+          LDst^ := '-';
+          Inc(LDst);
           if C = AStopChar then
           begin
             //# Insert space between adjacent dashes or before comment's end dashes
-            if (ASrc + 1 = ASrcEnd) or (ASrc[1] = '-') then
+            if (LSrc + 1 = LSrcEnd) or (LSrc[1] = '-') then
             begin
-              ADst^ := ' ';
-              Inc(ADst);
+              LDst^ := ' ';
+              Inc(LDst);
             end;
           end;
         end;
       '?':
         begin
-          ADst^ := '?';
-          Inc(ADst);
+          LDst^ := '?';
+          Inc(LDst);
           if C = AStopChar then
           begin
             //# Processing instruction: insert space between adjacent '?' and '>'
-            if (ASrc + 1 < ASrcEnd) and (ASrc[1] = '>') then
+            if (LSrc + 1 < LSrcEnd) and (LSrc[1] = '>') then
             begin
-              ADst^ := ' ';
-              Inc(ADst);
+              LDst^ := ' ';
+              Inc(LDst);
             end;
           end;
         end;
       ']':
         begin
-          ADst^ := ']';
-          Inc(ADst);
+          LDst^ := ']';
+          Inc(LDst);
         end;
       #$000D:
         if FNewLineHandling = TACLXMLNewLineHandling.Replace then
         begin
            //# Normalize "\r\n", or "\r" to NewLineChars
-          if ASrc[1] = #$000A then
-            Inc(ASrc);
-          ADst := WriteNewLine(ADst);
+          if LSrc[1] = #$000A then
+            Inc(LSrc);
+          LDst := WriteNewLine(LDst);
         end
         else
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
       #$000A:
         if FNewLineHandling = TACLXMLNewLineHandling.Replace then
-          ADst := WriteNewLine(ADst)
+          LDst := WriteNewLine(LDst)
         else
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
       '<', '&', #$0009:
         begin
-          ADst^ := C;
-          Inc(ADst);
+          LDst^ := C;
+          Inc(LDst);
         end;
-      else
-      begin
-        if TACLXMLCharType.IsSurrogate(C) then
-        begin
-          ADst := EncodeSurrogate(ASrc, ASrcEnd, ADst);
-          Inc(ASrc, 2);
-        end
-        else
-          if (C <= #$007F) or (C >= #$FFFE) then
-          begin
-            ADst := InvalidXmlChar(C, ADst, False);
-            Inc(ASrc);
-          end
-          else
-          begin
-            ADst^ := C;
-            Inc(ADst);
-            Inc(ASrc);
-          end;
-        Continue;
-      end;
+    else
+      WriteOtherChars(LSrc, LSrcEnd, LDst, False);
+      Continue;
     end;
-    Inc(ASrc);
+    Inc(LSrc);
   end;
-  FBufPos := ADst - ADstBegin;
+  FBufPos := LDst - LDstBegin;
 end;
 
-function TACLXMLRawWriter.EncodeSurrogate(ASrc: PChar; ASrcEnd: PChar; ADst: PChar): PChar;
-var
-  ACh, ALowChar: Char;
+procedure TACLXMLRawWriter.WriteInvalidXmlChar(var ASrc, ADst: PWideChar; AEntitize: Boolean);
 begin
-  ACh := ASrc^;
-  Assert(TACLXMLCharType.IsSurrogate(ACh));
-  if ACh <= TACLXMLCharType.SurHighEnd then
-  begin
-    if ASrc + 1 < ASrcEnd then
-    begin
-      ALowChar := ASrc[1];
-      if ALowChar >= TACLXMLCharType.SurLowStart then
-      begin
-        ADst[0] := ACh;
-        ADst[1] := ALowChar;
-        Inc(ADst, 2);
-        Exit(ADst);
-      end;
-      raise EACLXMLInvalidSurrogatePairException.Create(ALowChar, ACh);
-    end;
-    raise EACLXMLArgumentException.Create(SXmlInvalidSurrogateMissingLowChar);
-  end;
-  raise EACLXMLArgumentException.CreateFmt(SXmlInvalidHighSurrogateChar, [TACLHexCode.Encode(ACh)]);
-end;
-
-function TACLXMLRawWriter.InvalidXmlChar(ACh: Char; ADst: PChar; AEntitize: Boolean): PChar;
-begin
-  Assert(not TACLXMLCharType.IsWhiteSpace(ACh));
-  Assert(not TACLXMLCharType.IsAttributeValueChar(ACh));
+  Assert(not TACLXMLCharType.IsWhiteSpace(ASrc^));
+  Assert(not TACLXMLCharType.IsAttributeValueChar(ASrc^));
 
   if FCheckCharacters then
-    raise EACLXMLArgumentException.CreateFmt(SXmlInvalidCharacter, [ACh, TACLHexCode.Encode(ACh)]);
+    raise EACLXMLArgumentException.CreateFmt(SXmlInvalidCharacter, [TACLHexCode.Encode(ASrc^)]);
 
   if AEntitize then
   begin
+    //# https://msdn.microsoft.com/en-us/library/system.xml.xmlconvert.decodename(v=vs.110).aspx
     if FEncodeInvalidXmlCharAsUCS2 then
-      Result := UCS2Entity(ADst, ACh)
+    begin
+      // _xABCD_
+      ADst^ := '_';
+      Inc(ADst);
+      ADst^ := 'x';
+      Inc(ADst);
+      ADst := TACLHexCode.Encode(ASrc^, ADst);
+      ADst^ := '_';
+      Inc(ADst);
+      Inc(ASrc);
+    end
     else
-      Result := CharEntity(ADst, ACh);
+    begin
+      // &#xABCD;
+      ADst^ := '&';
+      Inc(ADst);
+      ADst^ := '#';
+      Inc(ADst);
+      ADst^ := 'x';
+      Inc(ADst);
+      ADst := TACLHexCode.Encode(ASrc^, ADst);
+      ADst^ := ';';
+      Inc(ADst);
+      Inc(ASrc);
+    end;
   end
   else
   begin
-    ADst^ := ACh;
+    ADst^ := ASrc^;
     Inc(ADst);
-    Result := ADst;
+    Inc(ASrc);
   end;
 end;
 
 //# Write NewLineChars to the specified buffer position and return an updated position.
-function TACLXMLRawWriter.WriteNewLine(ADst: PChar): PChar;
+function TACLXMLRawWriter.WriteNewLine(ADst: PWideChar): PWideChar;
 var
-  ADstBegin: PChar;
+  ADstBegin: PWideChar;
 begin
   ADstBegin := @FBufChars[0];
   FBufPos := ADst - ADstBegin;
@@ -1700,7 +1576,7 @@ end;
 //# for the writes of small constant-length string as below.
 
 //# Entitize '<' as "&lt;".  Return an updated pointer.
-class function TACLXMLRawWriter.LtEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.LtEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := 'l';
@@ -1710,7 +1586,7 @@ begin
 end;
 
 //# Entitize '>' as "&gt;".  Return an updated pointer.
-class function TACLXMLRawWriter.GtEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.GtEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := 'g';
@@ -1720,7 +1596,7 @@ begin
 end;
 
 //# Entitize '&' as "&amp;".  Return an updated pointer.
-class function TACLXMLRawWriter.AmpEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.AmpEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := 'a';
@@ -1731,7 +1607,7 @@ begin
 end;
 
 //# Entitize '"' as "&quot;".  Return an updated pointer.
-class function TACLXMLRawWriter.QuoteEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.QuoteEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := 'q';
@@ -1743,7 +1619,7 @@ begin
 end;
 
 //# Entitize '\t' as "&#x9;".  Return an updated pointer.
-class function TACLXMLRawWriter.TabEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.TabEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := '#';
@@ -1754,7 +1630,7 @@ begin
 end;
 
 //# Entitize 0xa as "&#xA;".  Return an updated pointer.
-class function TACLXMLRawWriter.LineFeedEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.LineFeedEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := '#';
@@ -1765,7 +1641,7 @@ begin
 end;
 
 //# Entitize 0xd as "&#xD;".  Return an updated pointer.
-class function TACLXMLRawWriter.CarriageReturnEntity(ADst: PChar): PChar;
+class function TACLXMLRawWriter.CarriageReturnEntity(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '&';
   ADst[1] := '#';
@@ -1775,33 +1651,8 @@ begin
   Result := ADst + 5;
 end;
 
-class function TACLXMLRawWriter.CharEntity(ADst: PChar; ACh: Char): PChar;
-begin
-  //# VCL refactored
-  ADst[0] := '&';
-  ADst[1] := '#';
-  ADst[2] := 'x';
-  Inc(ADst, 3);
-  ADst := TACLHexCode.Encode(ACh, ADst);
-  ADst[0] := ';';
-  Inc(ADst);
-  Result := ADst;
-end;
-
-//# https://msdn.microsoft.com/en-us/library/system.xml.xmlconvert.decodename(v=vs.110).aspx
-class function TACLXMLRawWriter.UCS2Entity(ADst: PChar; ACh: Char): PChar;
-begin
-  ADst[0] := '_';
-  ADst[1] := 'x';
-  Inc(ADst, 2);
-  ADst := TACLHexCode.Encode(ACh, ADst);
-  ADst[0] := '_';
-  Inc(ADst);
-  Result := ADst;
-end;
-
 //# Write "<![CDATA[" to the specified buffer.  Return an updated pointer.
-class function TACLXMLRawWriter.RawStartCData(ADst: PChar): PChar;
+class function TACLXMLRawWriter.RawStartCData(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := '<';
   ADst[1] := '!';
@@ -1816,59 +1667,12 @@ begin
 end;
 
 //# Write "]]>" to the specified buffer.  Return an updated pointer.
-class function TACLXMLRawWriter.RawEndCData(ADst: PChar): PChar;
+class function TACLXMLRawWriter.RawEndCData(ADst: PWideChar): PWideChar;
 begin
   ADst[0] := ']';
   ADst[1] := ']';
   ADst[2] := '>';
   Result := ADst + 3;
-end;
-
-procedure TACLXMLRawWriter.ValidateContentChars(const AChars: string; const APropertyName: string; AAllowOnlyWhitespace: Boolean);
-var
-  I: Integer;
-begin
-  if AAllowOnlyWhitespace then
-  begin
-    if not TACLXMLCharType.IsOnlyWhitespace(AChars) then
-      raise EACLXMLArgumentException.CreateFmt(SXmlIndentCharsNotWhitespace, [APropertyName]);
-  end
-  else
-  begin
-    I := 1;
-    while I <= Length(AChars) do
-    begin
-      if not TACLXMLCharType.IsTextChar(AChars[I]) then
-      begin
-        case AChars[I] of
-          #13, #10, #9: {do nothing};
-          '<', '&', ']':
-            raise EACLXMLArgumentException.CreateFmt(SXmlInvalidCharsInIndent, [APropertyName,
-              Format(SXmlInvalidCharacter, [AChars[I], TACLHexCode.Encode(AChars[I])])]);
-          else
-          begin
-            if TACLXMLCharType.IsHighSurrogate(AChars[I]) then
-            begin
-              if I + 1 <= Length(AChars) then
-              begin
-                if TACLXMLCharType.IsLowSurrogate(AChars[I + 1]) then
-                begin
-                  Inc(I, 2);
-                  Continue;
-                end;
-              end;
-              raise EACLXMLArgumentException.CreateFmt(SXmlInvalidCharsInIndent, [APropertyName, SXmlInvalidSurrogateMissingLowChar]);
-            end
-            else
-              if TACLXMLCharType.IsLowSurrogate(AChars[I]) then
-                raise EACLXMLArgumentException.CreateFmt(SXmlInvalidCharsInIndent, [APropertyName,
-                  Format(SXmlInvalidHighSurrogateChar, [TACLHexCode.Encode(AChars[I])])]);
-          end;
-        end;
-      end;
-      Inc(I);
-    end;
-  end;
 end;
 
 { TACLXMLWellFormedWriter.TAttrName }
@@ -2092,7 +1896,7 @@ begin
   end;
 end;
 
-procedure TACLXMLWellFormedWriter.WriteCharEntity(ACh: Char);
+procedure TACLXMLWellFormedWriter.WriteCharEntity(ACh: WideChar);
 begin
   try
     if ACh.IsSurrogate then
@@ -2108,10 +1912,10 @@ begin
   end;
 end;
 
-procedure TACLXMLWellFormedWriter.WriteSurrogateCharEntity(ALowChar: Char; AHighChar: Char);
+procedure TACLXMLWellFormedWriter.WriteSurrogateCharEntity(ALowChar, AHighChar: WideChar);
 begin
   try
-    if not Char.IsSurrogatePair(AHighChar, ALowChar) then
+    if not {$IFNDEF FPC}Char.{$ENDIF}IsSurrogatePair(AHighChar, ALowChar) then
       raise EACLXMLInvalidSurrogatePairException.Create(ALowChar, AHighChar);
     if (FWriter.WriteState = TACLXMLWriteState.Attribute) and FIsNamespaceDeclaration then
       raise EACLXMLArgumentException.CreateFmt(SXmlUnexpectedToken, ['Namespace', 'CharEntity']);
@@ -2122,16 +1926,17 @@ begin
   end;
 end;
 
-procedure TACLXMLWellFormedWriter.WriteString(AStr: PChar; ALength: Integer);
+procedure TACLXMLWellFormedWriter.WriteString(AStr: PWideChar; ALength: Integer);
+var
+  L: Integer;
 begin
   try
     if FIsNamespaceDeclaration and (ALength > 0) then
     begin
-      var L := Length(FCurrentDeclarationNamespace);
+      L := Length(FCurrentDeclarationNamespace);
       SetLength(FCurrentDeclarationNamespace, L + ALength);
-      Move(AStr^, FCurrentDeclarationNamespace[L + 1], ALength * SizeOf(Char));
+      Move(AStr^, FCurrentDeclarationNamespace[L + 1], ALength * SizeOf(WideChar));
     end;
-
     FWriter.WriteString(AStr, ALength);
   except
     FIsError := True;
@@ -2139,7 +1944,7 @@ begin
   end;
 end;
 
-procedure TACLXMLWellFormedWriter.WriteRaw(const ABuffer: TCharArray; AIndex: Integer; ACount: Integer);
+procedure TACLXMLWellFormedWriter.WriteRaw(const ABuffer: TWideCharArray; AIndex: Integer; ACount: Integer);
 begin
   try
     if ABuffer = nil then
@@ -2238,8 +2043,10 @@ end;
 procedure TACLXMLWellFormedWriter.StartElementContent;
 
   function GetNamespace(const APrefix: string): string;
+  var
+    I: Integer;
   begin
-    for var I := FNsTop downto 0 do
+    for I := FNsTop downto 0 do
     begin
       if FNsStack[I].Prefix = APrefix then
         Exit(FNsStack[I].Namespace);
@@ -2248,6 +2055,8 @@ procedure TACLXMLWellFormedWriter.StartElementContent;
   end;
 
 var
+  AAttrIndex: Integer;
+  AAttrIndex2: Integer;
   AAttrNamespaces: TArray<string>;
   AHasAttrWithNamespace: Boolean;
   ALocalName: string;
@@ -2255,29 +2064,29 @@ var
   APrefix: string;
 begin
   AHasAttrWithNamespace := False;
-  SetLength(AAttrNamespaces, FAttrCount);
-  for var AttrIndex := 0 to FAttrCount - 1 do
+  SetLength(AAttrNamespaces{%H-}, FAttrCount);
+  for AAttrIndex := 0 to FAttrCount - 1 do
   begin
-    APrefix := FAttrStack[AttrIndex].Prefix;
+    APrefix := FAttrStack[AAttrIndex].Prefix;
     if APrefix <> '' then
     begin
-      AAttrNamespaces[AttrIndex] := GetNamespace(APrefix);
+      AAttrNamespaces[AAttrIndex] := GetNamespace(APrefix);
       AHasAttrWithNamespace := True;
     end;
   end;
 
   if AHasAttrWithNamespace then
-    for var AttrIndex := 1 to FAttrCount - 1 do
+    for AAttrIndex := 1 to FAttrCount - 1 do
     begin
-      ANamespace := AAttrNamespaces[AttrIndex];
+      ANamespace := AAttrNamespaces[AAttrIndex];
       if ANamespace = '' then
         Continue;
 
-      ALocalName := FAttrStack[AttrIndex].LocalName;
-      for var AttrIndex2 := 0 to AttrIndex - 1 do
+      ALocalName := FAttrStack[AAttrIndex].LocalName;
+      for AAttrIndex2 := 0 to AAttrIndex - 1 do
       begin
-        if (FAttrStack[AttrIndex2].LocalName = ALocalName) and (AAttrNamespaces[AttrIndex2] = ANamespace) then
-          raise DupAttrException(FAttrStack[AttrIndex].Prefix, FAttrStack[AttrIndex].LocalName);
+        if (FAttrStack[AAttrIndex2].LocalName = ALocalName) and (AAttrNamespaces[AAttrIndex2] = ANamespace) then
+          raise DupAttrException(FAttrStack[AAttrIndex].Prefix, FAttrStack[AAttrIndex].LocalName);
       end;
     end;
 
@@ -2310,7 +2119,8 @@ begin
   end;
 end;
 
-class function TACLXMLWellFormedWriter.InvalidCharsException(const AName: string; ABadCharIndex: Integer): EACLXMLException;
+class function TACLXMLWellFormedWriter.InvalidCharsException(
+  const AName: string; ABadCharIndex: Integer): EACLXMLException;
 begin
   Result := EACLXMLException.CreateFmt(SXmlInvalidNameCharsDetail,
     [AName, ABadCharIndex, TACLHexCode.Encode(AName[ABadCharIndex + 1])]);
@@ -2318,9 +2128,9 @@ end;
 
 procedure TACLXMLWellFormedWriter.AddAttribute(const APrefix, ALocalName: string);
 var
-  ATop: Integer;
+  I, ATop: Integer;
 begin
-  for var I := 0 to FAttrCount - 1 do
+  for I := 0 to FAttrCount - 1 do
   begin
     if (FAttrStack[I].LocalName = ALocalName) and (FAttrStack[I].Prefix = APrefix) then
       raise DupAttrException(APrefix, ALocalName);

@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             Category Controls             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Category Panel
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Category;
 
 {$I ACL.Config.inc}
@@ -16,24 +18,22 @@ unit ACL.UI.Controls.Category;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+  {Winapi.}Messages,
   // System
-  System.Classes,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
-  ACL.Utils.Common,
-  ACL.Utils.DPIAware;
+  ACL.Utils.Common;
 
 type
 
@@ -48,8 +48,8 @@ type
     procedure DoAssign(ASource: TPersistent); override;
     procedure InitializeResources; override;
   public
-    procedure DrawHeader(DC: HDC; const R: TRect);
-    procedure DrawHeaderText(ACanvas: TCanvas; const R: TRect; const AText: UnicodeString);
+    procedure DrawHeader(ACanvas: TCanvas; const R: TRect);
+    procedure DrawHeaderText(ACanvas: TCanvas; const R: TRect; const AText: string);
     function MeasureHeaderHeight: Integer;
   published
     property HeaderColorContent1: TACLResourceColor index 4 read GetColor write SetColor stored IsColorStored;
@@ -106,13 +106,13 @@ begin
   HeaderTextFont.InitailizeDefaults('Category.Fonts.Header');
 end;
 
-procedure TACLStyleCategory.DrawHeader(DC: HDC; const R: TRect);
+procedure TACLStyleCategory.DrawHeader(ACanvas: TCanvas; const R: TRect);
 begin
-  acDrawGradient(DC, R, HeaderColorContent1.AsColor, HeaderColorContent2.AsColor);
-  acDrawFrame(DC, R, ColorBorder1.AsColor);
+  acDrawGradient(ACanvas, R, HeaderColorContent1.AsColor, HeaderColorContent2.AsColor);
+  acDrawFrame(ACanvas, R, ColorBorder1.AsColor);
 end;
 
-procedure TACLStyleCategory.DrawHeaderText(ACanvas: TCanvas; const R: TRect; const AText: UnicodeString);
+procedure TACLStyleCategory.DrawHeaderText(ACanvas: TCanvas; const R: TRect; const AText: string);
 begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Font.Assign(HeaderTextFont);
@@ -174,7 +174,7 @@ end;
 procedure TACLCategory.Paint;
 begin
   inherited;
-  Style.DrawHeader(Canvas.Handle, FCaptionRect);
+  Style.DrawHeader(Canvas, FCaptionRect);
   Style.DrawHeaderText(Canvas, FCaptionRect, Caption);
 end;
 

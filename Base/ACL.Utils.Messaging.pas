@@ -1,37 +1,54 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*             Messaging Routines            *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Messaging routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Utils.Messaging;
 
-{$I ACL.Config.INC}
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  Winapi.Messages,
-  Winapi.Windows,
+{$IFDEF FPC}
+  InterfaceBase,
+  LCLIntf,
+  LCLType,
+  LMessages,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Classes;
+  {System.}Classes,
+  // ACL
+  ACL.Utils.Common;
+
+const
+{$IFDEF FPC}
+  WM_USER = LMessages.LM_USER;
+{$ELSE}
+  WM_USER = Messages.WM_USER;
+{$ENDIF}
 
 type
+{$IFDEF FPC}
+  TWndMethod = TLCLWndMethod;
 
-  { TMessagesHelper }
-
-  TMessagesHelper = class
-  public
-    class function IsInQueue(AWndHandle: HWND; AMessage: Cardinal): Boolean;
-    class procedure Process(AFromMessage, AToMessage: Cardinal; AWndHandle: HWND = 0); overload;
-    class procedure Process(AMessage: Cardinal; AWndHandle: HWND = 0); overload;
-    class procedure Remove(AMessage: Cardinal; AWndHandle: HWND = 0);
-  end;
+  LPARAM = LCLType.LPARAM;
+  WPARAM = LCLType.WPARAM;
+{$ELSE}
+  LPARAM = Windows.LPARAM;
+  WPARAM = Windows.WPARAM;
+{$ENDIF}
 
   { TACLMessaging }
 
@@ -40,9 +57,10 @@ type
   TACLMessaging = class sealed
   strict private
     class var FCustomMessages: TObject;
-    class var FHandle: HWND;
+    class var FHandle: TWndHandle;
     class var FHandlers: TObject;
 
+    class procedure EnsureInitialized;
     class procedure WndProc(var AMessage: TMessage);
   public
     class constructor Create;
@@ -51,27 +69,89 @@ type
     class procedure HandlerAdd(AHandler: TACLMessageHandler);
     class procedure HandlerRemove(AHandler: TACLMessageHandler);
     // Messages
-    class function RegisterMessage(const AName: UnicodeString): Cardinal;
+    class function RegisterMessage(const AName: string): Cardinal;
     class procedure PostMessage(AMessage: Cardinal; AParamW: WPARAM; AParamL: LPARAM);
     class procedure SendMessage(AMessage: Cardinal; AParamW: WPARAM; AParamL: LPARAM);
     // Properties
-    class property Handle: HWND read FHandle;
+    class property Handle: TWndHandle read FHandle;
+  end;
+
+  { TMessagesHelper }
+
+  TMessagesHelper = class
+  public
+    class function IsInQueue(AWndHandle: TWndHandle; AMessage: Cardinal): Boolean;
+  {$IFDEF MSWINDOWS}
+    class procedure Process(AFromMessage, AToMessage: Cardinal; AWndHandle: TWndHandle = 0); overload;
+    class procedure Process(AMessage: Cardinal; AWndHandle: TWndHandle = 0); overload;
+  {$ENDIF}
+    class procedure Remove(AMessage: Cardinal; AWndHandle: TWndHandle = 0);
   end;
 
 function WndCreate(Method: TWndMethod; const ClassName: string;
-  IsMessageOnly: Boolean = False; const Name: string = ''): HWND;
-procedure WndDefaultProc(W: HWND; var Message: TMessage);
-procedure WndFree(W: HWND);
+  IsMessageOnly: Boolean = False; const Name: string = ''): TWndHandle;
+procedure WndDefaultProc(W: TWndHandle; var Message: TMessage);
+procedure WndFree(W: TWndHandle);
+
+function acSendMessage(AWnd: TWndHandle; AMsg: Cardinal; WParam: WPARAM; LParam: LPARAM): LRESULT;
+function acPostMessage(AWnd: TWndHandle; AMsg: Cardinal; WParam: WPARAM; LParam: LPARAM): Boolean;
 implementation
 
 uses
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // ACL
   ACL.Classes.Collections,
   ACL.Classes.StringList,
   ACL.Threading;
+
+function acSendMessage(AWnd: TWndHandle; AMsg: Cardinal; WParam: WPARAM; LParam: LPARAM): LRESULT;
+{$IFDEF FPC}
+var
+  LInnerResult: LRESULT;
+{$ENDIF}
+begin
+{$IFDEF FPC}
+  if not IsMainThread then
+  begin
+    LInnerResult := 0;
+    TThread.Synchronize(nil, procedure begin
+      LInnerResult := LCLIntf.SendMessage(AWnd, AMsg, WParam, LParam);
+    end);
+    Exit(LInnerResult);
+  end;
+{$ENDIF}
+  Result := SendMessage(AWnd, AMsg, WParam, LParam);
+end;
+
+function acPostMessage(AWnd: TWndHandle; AMsg: Cardinal; WParam: WPARAM; LParam: LPARAM): Boolean;
+begin
+  Result := PostMessage(AWnd, AMsg, WParam, LParam);
+end;
+
+{$IFDEF FPC}
+function WndCreate(Method: TWndMethod; const ClassName: string;
+  IsMessageOnly: Boolean; const Name: string): TWndHandle;
+begin
+  if not IsMainThread then
+    raise EInvalidOperation.Create('Cannot create window in non-main thread');
+  Result := AllocateHWnd(Method);
+  if Result = 0 then
+    raise ENotImplemented.Create('AllocateHWnd is not implemented for this platform');
+end;
+
+procedure WndDefaultProc(W: TWndHandle; var Message: TMessage);
+begin
+  // do nothing
+end;
+
+procedure WndFree(W: TWndHandle);
+begin
+  DeallocateHWnd(W);
+end;
+
+{$ELSE}
 
 var
   UtilWindowClass: TWndClass = (Style: 0; lpfnWndProc: @DefWindowProc;
@@ -80,7 +160,7 @@ var
   UtilWindowClassName: string;
 
 function WndCreate(Method: TWndMethod; const ClassName: string;
-  IsMessageOnly: Boolean = False; const Name: string = ''): HWND;
+  IsMessageOnly: Boolean = False; const Name: string = ''): TWndHandle;
 var
   ClassRegistered: Boolean;
   TempClass: TWndClass;
@@ -94,8 +174,8 @@ begin
   if not ClassRegistered or (TempClass.lpfnWndProc <> @DefWindowProc) then
   begin
     if ClassRegistered then
-      Winapi.Windows.UnregisterClass(UtilWindowClass.lpszClassName, HInstance);
-    Winapi.Windows.RegisterClass(UtilWindowClass);
+      {Winapi.}Windows.UnregisterClass(UtilWindowClass.lpszClassName, HInstance);
+    {Winapi.}Windows.RegisterClass(UtilWindowClass);
   end;
   Result := CreateWindowEx(WS_EX_TOOLWINDOW, UtilWindowClass.lpszClassName, PChar(Name),
     WS_POPUP {!0}, 0, 0, 0, 0, IfThen(IsMessageOnly, HWND_MESSAGE), 0, HInstance, nil);
@@ -103,12 +183,12 @@ begin
     SetWindowLong(Result, GWL_WNDPROC, NativeUInt(System.Classes.MakeObjectInstance(Method)));
 end;
 
-procedure WndDefaultProc(W: HWND; var Message: TMessage);
+procedure WndDefaultProc(W: TWndHandle; var Message: TMessage);
 begin
   Message.Result := DefWindowProc(W, Message.Msg, Message.WParam, Message.LParam);
 end;
 
-procedure WndFree(W: HWND);
+procedure WndFree(W: TWndHandle);
 var
   AInstance: Pointer;
 begin
@@ -121,45 +201,47 @@ begin
   end;
 end;
 
+{$ENDIF}
+
 { TMessagesHelper }
 
-class function TMessagesHelper.IsInQueue(AWndHandle: HWND; AMessage: Cardinal): Boolean;
+class function TMessagesHelper.IsInQueue(AWndHandle: TWndHandle; AMessage: Cardinal): Boolean;
 var
   AMsg: TMSG;
 begin
-  Result := PeekMessage(AMsg, AWndHandle, AMessage, AMessage, PM_NOREMOVE) and (AMsg.hwnd = AWndHandle);
+  Result := PeekMessage(AMsg{%H-}, AWndHandle, AMessage, AMessage, PM_NOREMOVE) and (AMsg.hwnd = AWndHandle);
 end;
 
-class procedure TMessagesHelper.Process(AFromMessage, AToMessage: Cardinal; AWndHandle: HWND = 0);
+{$IFDEF MSWINDOWS}
+class procedure TMessagesHelper.Process(AFromMessage, AToMessage: Cardinal; AWndHandle: TWndHandle = 0);
 var
   AMsg: TMsg;
 begin
-  while PeekMessage(AMsg, AWndHandle, AFromMessage, AToMessage, PM_REMOVE) do
+  while PeekMessage(AMsg{%H-}, AWndHandle, AFromMessage, AToMessage, PM_REMOVE) do
   begin
     TranslateMessage(AMsg);
     DispatchMessage(AMsg);
   end;
 end;
 
-class procedure TMessagesHelper.Process(AMessage: Cardinal; AWndHandle: HWND = 0);
+class procedure TMessagesHelper.Process(AMessage: Cardinal; AWndHandle: TWndHandle = 0);
 begin
   Process(AMessage, AMessage, AWndHandle);
 end;
+{$ENDIF}
 
-class procedure TMessagesHelper.Remove(AMessage: Cardinal; AWndHandle: HWND = 0);
+class procedure TMessagesHelper.Remove(AMessage: Cardinal; AWndHandle: TWndHandle = 0);
 var
   AMsg: TMsg;
 begin
-  while PeekMessage(AMsg, AWndHandle, AMessage, AMessage, PM_REMOVE) do ;
+  while PeekMessage(AMsg{%H-}, AWndHandle, AMessage, AMessage, PM_REMOVE) do ;
 end;
 
 { TACLMessaging }
 
 class constructor TACLMessaging.Create;
 begin
-  FCustomMessages := TACLStringList.Create;
-  FHandlers := TACLList<TACLMessageHandler>.Create;
-  FHandle := WndCreate(WndProc, ClassName, True);
+  EnsureInitialized;
 end;
 
 class destructor TACLMessaging.Destroy;
@@ -171,58 +253,59 @@ end;
 
 class procedure TACLMessaging.HandlerAdd(AHandler: TACLMessageHandler);
 begin
-  TMonitor.Enter(FHandlers);
-  try
-    TACLList<TACLMessageHandler>(FHandlers).Add(AHandler);
-  finally
-    TMonitor.Exit(FHandlers);
-  end;
+  TACLThreadListOf<TACLMessageHandler>(FHandlers).Add(AHandler);
 end;
 
 class procedure TACLMessaging.HandlerRemove(AHandler: TACLMessageHandler);
 begin
-  TMonitor.Enter(FHandlers);
-  try
-    TACLList<TACLMessageHandler>(FHandlers).Remove(AHandler);
-  finally
-    TMonitor.Exit(FHandlers);
-  end;
+  if FHandlers <> nil then
+    TACLThreadListOf<TACLMessageHandler>(FHandlers).Remove(AHandler);
 end;
 
 class procedure TACLMessaging.PostMessage(AMessage: Cardinal; AParamW: WPARAM; AParamL: LPARAM);
 begin
-  Winapi.Windows.PostMessage(FHandle, AMessage, AParamW, AParamL);
+  acPostMessage(FHandle, AMessage, AParamW, AParamL);
 end;
 
 class procedure TACLMessaging.SendMessage(AMessage: Cardinal; AParamW: WPARAM; AParamL: LPARAM);
 begin
-  Winapi.Windows.SendMessage(FHandle, AMessage, AParamW, AParamL);
+  acSendMessage(FHandle, AMessage, AParamW, AParamL);
 end;
 
-class function TACLMessaging.RegisterMessage(const AName: UnicodeString): Cardinal;
+class function TACLMessaging.RegisterMessage(const AName: string): Cardinal;
 var
   AIndex: Integer;
 begin
-  TMonitor.Enter(FHandlers);
+  EnsureInitialized;
+  TACLThreadListOf<TACLMessageHandler>(FHandlers).LockList;
   try
     AIndex := TACLStringList(FCustomMessages).IndexOf(AName);
     if AIndex < 0 then
       AIndex := TACLStringList(FCustomMessages).Add(AName);
     Result := WM_USER + AIndex + 1;
   finally
-    TMonitor.Exit(FHandlers);
+    TACLThreadListOf<TACLMessageHandler>(FHandlers).UnlockList;
+  end;
+end;
+
+class procedure TACLMessaging.EnsureInitialized;
+begin
+  if FCustomMessages = nil then
+  begin
+    FCustomMessages := TACLStringList.Create;
+    FHandlers := TACLThreadListOf<TACLMessageHandler>.Create;
+    FHandle := WndCreate(WndProc, ClassName, True);
   end;
 end;
 
 class procedure TACLMessaging.WndProc(var AMessage: TMessage);
 var
   AHandled: Boolean;
-  AHandlers: TACLList<TACLMessageHandler>;
+  AHandlers: TACLListOf<TACLMessageHandler>;
   I: Integer;
 begin
-  TMonitor.Enter(FHandlers);
+  AHandlers := TACLThreadListOf<TACLMessageHandler>(FHandlers).LockList;
   try
-    AHandlers := TACLList<TACLMessageHandler>(FHandlers);
     for I := AHandlers.Count - 1 downto 0 do
     begin
       AHandled := False;
@@ -231,7 +314,7 @@ begin
     end;
     WndDefaultProc(FHandle, AMessage);
   finally
-    TMonitor.Exit(FHandlers);
+    TACLThreadListOf<TACLMessageHandler>(FHandlers).UnlockList;
   end;
 end;
 

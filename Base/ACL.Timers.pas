@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*    Standard and High-Resolution Timers    *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Timers
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Timers;
 
 {$I ACL.Config.inc}
@@ -16,18 +18,37 @@ unit ACL.Timers;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+  LMessages,
+  Messages,
+{$ELSE}
   Winapi.Messages,
+  Winapi.Windows,
+{$ENDIF}
   // System
-  System.Classes,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // ACL
   ACL.Classes.Collections;
+
+{$IFDEF FPC}
+const
+  WM_TIMER = LM_TIMER;
+type
+  TWMTimer = TLMTimer;
+{$ENDIF}
 
 type
 
   { TACLTimer }
 
   TACLTimer = class(TComponent)
+  public const
+    DefaultInterval = 1000;
   strict private
     FEnabled: Boolean;
     FHighResolution: Boolean;
@@ -47,24 +68,24 @@ type
     procedure Timer; virtual;
   public
     constructor Create(AOwner: TComponent); override;
-    constructor CreateEx(ATimerEvent: TNotifyEvent; AInterval: Cardinal = 1000;
+    constructor CreateEx(ATimerEvent: TNotifyEvent; AInterval: Cardinal = DefaultInterval;
       AEnabled: Boolean = False; AHighResolution: Boolean = False);
     procedure BeforeDestruction; override;
     procedure Restart;
   published
     property Enabled: Boolean read FEnabled write SetEnabled default True;
-    property Interval: Cardinal read FInterval write SetInterval default 1000;
+    property Interval: Cardinal read FInterval write SetInterval default DefaultInterval;
     property HighResolution: Boolean read FHighResolution write SetHighResolution default False;
     property OnTimer: TNotifyEvent read FOnTimer write SetOnTimer;
   end;
 
   { TACLTimerList }
 
-  TACLTimerList<T> = class(TACLTimer)
+  TACLTimerListOf<T> = class(TACLTimer)
   strict private
     procedure CheckState;
   protected
-    FList: TACLList<T>;
+    FList: TACLListOf<T>;
 
     procedure DoAdding(const AObject: T); virtual;
     procedure DoRemoving(const AObject: T); virtual;
@@ -83,30 +104,24 @@ type
 function GetExactTickCount: Int64;
 function TickCountToTime(const ATicks: Int64): Cardinal;
 function TimeToTickCount(const ATime: Cardinal): Int64;
-
 implementation
 
 uses
-  System.Math,
-  System.SysUtils,
-  // ACL
   ACL.Classes,
-  ACL.Utils.Messaging,
-  ACL.Classes.StringList,
-  ACL.Math,
   ACL.Threading,
-  ACL.Utils.Common;
+  ACL.Utils.Common,
+  ACL.Utils.Messaging;
 
 type
-  NTSTATUS = type ULONG32;
-
-  TACLTimerManagerHighResolutionThread = class;
 
   { TACLTimerManager }
 
   TACLTimerManager = class
   strict private
+    FLock: TACLCriticalSection;
+  {$IFDEF MSWINDOWS}
     FSystemTimerResolution: Integer;
+  {$ENDIF}
 
     function AlignToSystemTimerResolution(AInterval: Cardinal): Cardinal;
     function GetSystemTimerResolution: Integer;
@@ -115,10 +130,11 @@ type
     procedure SafeUpdateHighResolutionThread;
   protected
     FHandle: HWND;
-    FHighResolutionThread: TACLTimerManagerHighResolutionThread;
-    FHighResolutionTimers: TACLThreadList<TACLTimer>;
-    FTimers: TACLList<TACLTimer>;
+    FHighResolutionThread: TACLPauseableThread;
+    FHighResolutionTimers: TThreadList;
+    FTimers: TList;
 
+    procedure SafeCallTimerProcs(AList: TList);
     property SystemTimerResolution: Integer read GetSystemTimerResolution;
   public
     constructor Create;
@@ -139,31 +155,47 @@ type
   end;
 
 var
-  FPerformanceCounterFrequency: Int64 = 0;
   FTimerManager: TACLTimerManager;
 
-function NtQueryTimerResolution(out MaximumResolution, MinimumResolution, ActualResolution: ULONG): NTSTATUS; stdcall; external 'ntdll.dll';
+{$IFDEF MSWINDOWS}
+var
+  FPerformanceCounterFrequency: Int64 = 0;
+
+function NtQueryTimerResolution(out Maximum, Minimum, Actual: ULONG): ULONG32; stdcall; external 'ntdll.dll';
+{$ENDIF}
 
 function GetExactTickCount: Int64;
 begin
+{$IFDEF MSWINDOWS}
   //# https://docs.microsoft.com/ru-ru/windows/win32/api/profileapi/nf-profileapi-queryperformancecounter?redirectedfrom=MSDN
   //# On systems that run Windows XP or later, the function will always succeed and will thus never return zero.
   if not QueryPerformanceCounter(Result) then
     Result := GetTickCount;
+{$ELSE}
+  Result := GetTickCount64; // in milliseconds
+{$ENDIF}
 end;
 
 function TickCountToTime(const ATicks: Int64): Cardinal;
 begin
+{$IFDEF MSWINDOWS}
   if FPerformanceCounterFrequency = 0 then
     QueryPerformanceFrequency(FPerformanceCounterFrequency);
   Result := (ATicks * 1000) div FPerformanceCounterFrequency;
+{$ELSE}
+  Result := ATicks;
+{$ENDIF}
 end;
 
 function TimeToTickCount(const ATime: Cardinal): Int64;
 begin
+{$IFDEF MSWINDOWS}
   if FPerformanceCounterFrequency = 0 then
     QueryPerformanceFrequency(FPerformanceCounterFrequency);
   Result := (Int64(ATime) * FPerformanceCounterFrequency) div 1000;
+{$ELSE}
+  Result := ATime;
+{$ENDIF}
 end;
 
 { TACLTimer }
@@ -171,11 +203,12 @@ end;
 constructor TACLTimer.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FInterval := DefaultInterval;
   FEnabled := True;
-  FInterval := 1000;
 end;
 
-constructor TACLTimer.CreateEx(ATimerEvent: TNotifyEvent; AInterval: Cardinal = 1000;
+constructor TACLTimer.CreateEx(ATimerEvent: TNotifyEvent;
+  AInterval: Cardinal = DefaultInterval;
   AEnabled: Boolean = False; AHighResolution: Boolean = False);
 begin
   Create(nil);
@@ -253,19 +286,19 @@ end;
 
 { TACLTimerList }
 
-constructor TACLTimerList<T>.Create;
+constructor TACLTimerListOf<T>.Create;
 begin
   inherited Create(nil);
-  FList := TACLList<T>.Create;
+  FList := TACLListOf<T>.Create;
 end;
 
-destructor TACLTimerList<T>.Destroy;
+destructor TACLTimerListOf<T>.Destroy;
 begin
   FreeAndNil(FList);
   inherited Destroy;
 end;
 
-procedure TACLTimerList<T>.Add(const AObject: T);
+procedure TACLTimerListOf<T>.Add(const AObject: T);
 begin
   if FList.IndexOf(AObject) < 0 then
   begin
@@ -275,12 +308,12 @@ begin
   end;
 end;
 
-function TACLTimerList<T>.Contains(const AObject: T): Boolean;
+function TACLTimerListOf<T>.Contains(const AObject: T): Boolean;
 begin
   Result := FList.Contains(AObject);
 end;
 
-procedure TACLTimerList<T>.Remove(const AObject: T);
+procedure TACLTimerListOf<T>.Remove(const AObject: T);
 var
   AIndex: Integer;
 begin
@@ -293,22 +326,22 @@ begin
   end;
 end;
 
-procedure TACLTimerList<T>.DoAdding(const AObject: T);
+procedure TACLTimerListOf<T>.DoAdding(const AObject: T);
 begin
   // do nothing
 end;
 
-procedure TACLTimerList<T>.DoRemoving(const AObject: T);
+procedure TACLTimerListOf<T>.DoRemoving(const AObject: T);
 begin
   // do nothing
 end;
 
-function TACLTimerList<T>.CanSetTimer: Boolean;
+function TACLTimerListOf<T>.CanSetTimer: Boolean;
 begin
   Result := Enabled and (Interval > 0);
 end;
 
-procedure TACLTimerList<T>.Timer;
+procedure TACLTimerListOf<T>.Timer;
 var
   I: Integer;
 begin
@@ -316,7 +349,7 @@ begin
     TimerObject(FList.List[I]);
 end;
 
-procedure TACLTimerList<T>.CheckState;
+procedure TACLTimerListOf<T>.CheckState;
 begin
   Enabled := FList.Count > 0;
 end;
@@ -325,23 +358,25 @@ end;
 
 constructor TACLTimerManager.Create;
 begin
+  FLock := TACLCriticalSection.Create;
+  FTimers := TList.Create;
   FHandle := WndCreate(HandleMessage, ClassName, True);
-  FTimers := TACLList<TACLTimer>.Create;
-  FHighResolutionTimers := TACLThreadList<TACLTimer>.Create;
+  FHighResolutionTimers := TThreadList.Create;
 end;
 
 destructor TACLTimerManager.Destroy;
 begin
+  WndFree(FHandle);
   FreeAndNil(FHighResolutionThread);
   FreeAndNil(FHighResolutionTimers);
   FreeAndNil(FTimers);
-  WndFree(FHandle);
+  FreeAndNil(FLock);
   inherited Destroy;
 end;
 
 procedure TACLTimerManager.RegisterTimer(ATimer: TACLTimer);
 begin
-  TMonitor.Enter(Self);
+  FLock.Enter;
   try;
     FTimers.Add(ATimer);
     if ATimer.HighResolution and (ATimer.Interval < 1000) then
@@ -352,13 +387,13 @@ begin
     else
       SetTimer(FHandle, NativeUInt(ATimer), AlignToSystemTimerResolution(ATimer.Interval), nil);
   finally
-    TMonitor.Exit(Self);
+    FLock.Leave;
   end;
 end;
 
 procedure TACLTimerManager.UnregisterTimer(ATimer: TACLTimer);
 begin
-  TMonitor.Enter(Self);
+  FLock.Enter;
   try
     if FTimers.Remove(ATimer) >= 0 then
       KillTimer(FHandle, NativeUInt(ATimer));
@@ -371,30 +406,18 @@ begin
       FHighResolutionTimers.UnlockList;
     end;
   finally
-    TMonitor.Exit(Self);
+    FLock.Leave;
   end;
 end;
 
 procedure TACLTimerManager.HandleMessage(var AMessage: TMessage);
-var
-  AList: TList;
 begin
-  case AMessage.Msg of
-    WM_TIMER:
-      begin
-        SafeCallTimerProc(TACLTimer(AMessage.WParam));
-        Exit;
-      end;
-
-    WM_USER:
-      begin
-        AList := TList(AMessage.LParam);
-        for var I := 0 to AList.Count - 1 do
-          SafeCallTimerProc(AList.List[I]);
-        Exit;
-      end;
-  end;
-  WndDefaultProc(FHandle, AMessage);
+  if AMessage.Msg = WM_TIMER then
+    SafeCallTimerProc(TACLTimer(AMessage.WParam))
+  else if AMessage.Msg = WM_USER then
+    SafeCallTimerProcs(TList(AMessage.LParam))
+  else
+    WndDefaultProc(FHandle, AMessage);
 end;
 
 function TACLTimerManager.AlignToSystemTimerResolution(AInterval: Cardinal): Cardinal;
@@ -408,19 +431,23 @@ begin
 end;
 
 function TACLTimerManager.GetSystemTimerResolution: Integer;
+{$IFDEF MSWINDOWS}
 var
-  AActualResolution: ULONG;
-  AMaximumResolution: ULONG;
-  AMinimumResolution: ULONG;
+  LActual, LMax, LMin: ULONG;
 begin
   if FSystemTimerResolution = 0 then
   begin
-    if NtQueryTimerResolution(AMaximumResolution, AMinimumResolution, AActualResolution) = 0 then
-      FSystemTimerResolution := Round(AActualResolution / 1000);
+    if NtQueryTimerResolution(LMax, LMin, LActual) = 0 then
+      FSystemTimerResolution := Round(LActual / 1000);
     FSystemTimerResolution := Max(FSystemTimerResolution, 1);
   end;
   Result := FSystemTimerResolution;
 end;
+{$ELSE}
+begin
+  Result := 1; // todo - check it
+end;
+{$ENDIF}
 
 procedure TACLTimerManager.SafeCallTimerProc(ATimer: TACLTimer);
 begin
@@ -435,7 +462,7 @@ end;
 
 procedure TACLTimerManager.SafeUpdateHighResolutionThread;
 var
-  AList: TACLList<TACLTimer>;
+  AList: TList;
 begin
   AList := FHighResolutionTimers.LockList;
   try
@@ -455,6 +482,14 @@ begin
   end;
 end;
 
+procedure TACLTimerManager.SafeCallTimerProcs(AList: TList);
+var
+  I: Integer;
+begin
+  for I := 0 to AList.Count - 1 do
+    SafeCallTimerProc(AList.List[I]);
+end;
+
 { TACLTimerManagerHighResolutionThread }
 
 constructor TACLTimerManagerHighResolutionThread.Create(AOwner: TACLTimerManager);
@@ -465,7 +500,7 @@ end;
 
 procedure TACLTimerManagerHighResolutionThread.Execute;
 var
-  AList: TACLList<TACLTimer>;
+  AList: TList;
   ANextTick: Int64;
   ASleepTime: Integer;
   ATicked: TList;
@@ -473,7 +508,9 @@ var
   ATimer: TACLTimer;
   I: Integer;
 begin
+{$IFDEF ACL_THREADING_DEBUG}
   NameThreadForDebugging('HighResolutionTimer');
+{$ENDIF}
 
   ATicked := TList.Create;
   try
@@ -501,7 +538,11 @@ begin
 
       if ATicked.Count > 0 then
       begin
+      {$IFDEF FPC}
+        Synchronize(procedure begin FOwner.SafeCallTimerProcs(ATicked); end);
+      {$ELSE}
         SendMessage(FOwner.FHandle, WM_USER, 0, LPARAM(ATicked));
+      {$ENDIF}
         ATicks := GetExactTickCount;
       end;
 

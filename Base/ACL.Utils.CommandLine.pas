@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*          Command Line Processor           *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   High-level command line switch processor
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Utils.CommandLine;
 
 {$I ACL.Config.inc}
@@ -16,10 +18,10 @@ unit ACL.Utils.CommandLine;
 interface
 
 uses
-  Winapi.Windows,
-  // System
-  System.SysUtils,
-  System.Generics.Collections,
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}Math,
+  {System.}SysUtils,
   // ACL
   ACL.Classes.Collections,
   ACL.Classes.StringList,
@@ -45,7 +47,9 @@ type
 
   TACLCommandLineProcessor = class
   public type
+    TCommandMultipleParamsMethod = procedure (const AParams: TACLStringList) of object;
     TCommandMultipleParamsProc = reference to procedure (const AParams: TACLStringList);
+    TCommandSingleParamMethod = procedure (const AParam: string) of object;
     TCommandSingleParamProc = reference to procedure (const AParam: string);
   protected type
   {$REGION 'InternalTypes'}
@@ -66,7 +70,7 @@ type
       Name: string;
     end;
 
-    TCommands = class(TACLObjectList<TCommand>)
+    TCommands = class(TACLObjectListOf<TCommand>)
     public
       function ToString: string; override;
     end;
@@ -92,9 +96,18 @@ type
     class procedure BeginUpdate;
     class procedure EndUpdate;
 
-    class procedure Register(const ACommand: string; AProc: TCommandMultipleParamsProc; AFlags: Cardinal = 0); overload;
-    class procedure Register(const ACommand: string; AProc: TCommandSingleParamProc; AFlags: Cardinal = 0); overload;
-    class procedure Register(const ACommand: string; AProc: TProc; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TCommandMultipleParamsProc; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TCommandSingleParamProc; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TProc; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TCommandMultipleParamsMethod; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TCommandSingleParamMethod; AFlags: Cardinal = 0); overload;
+    class procedure Register(const ACommand: string;
+      AProc: TThreadMethod; AFlags: Cardinal = 0); overload;
     class procedure Unregister(const ACommand: string);
   end;
 
@@ -125,22 +138,46 @@ type
     procedure Parse(ATarget: TACLCommandLineProcessor.TCommands);
   end;
 
-function FindSwitch(const ACmdLine, ASwitch: UnicodeString): Boolean; overload;
-function FindSwitch(const ACmdLine, ASwitch: UnicodeString; out ASwitchParam: UnicodeString): Boolean; overload;
+function FindSwitch(const ACmdLine, ASwitch: string): Boolean; overload;
+function FindSwitch(const ACmdLine, ASwitch: string; out ASwitchParam: string): Boolean; overload;
+function GetCommandLine: string;
 function GetCommandLineParams: string;
 implementation
 
+{$IFDEF MSWINDOWS}
 uses
-  System.Math;
+  Windows;
+{$ENDIF}
 
-function FindSwitch(const ACmdLine, ASwitch: UnicodeString): Boolean;
+{$IFNDEF MSWINDOWS}
+function CombineParams(ASkipAppName: Boolean): string;
 var
-  X: UnicodeString;
+  I: Integer;
+  S: TACLStringBuilder;
+begin
+  S := TACLStringBuilder.Create;
+  try
+    for I := Ord(ASkipAppName) to ParamCount do
+    begin
+      if S.Length > 0 then
+        S.Append(' ');
+      S.Append(ParamStr(I));
+    end;
+    Result := S.ToString;
+  finally
+    S.Free;
+  end;
+end;
+{$ENDIF}
+
+function FindSwitch(const ACmdLine, ASwitch: string): Boolean;
+var
+  X: string;
 begin
   Result := FindSwitch(ACmdLine, ASwitch, X);
 end;
 
-function FindSwitch(const ACmdLine, ASwitch: UnicodeString; out ASwitchParam: UnicodeString): Boolean;
+function FindSwitch(const ACmdLine, ASwitch: string; out ASwitchParam: string): Boolean;
 var
   ACommands: TACLCommandLineProcessor.TCommands;
   I: Integer;
@@ -159,7 +196,17 @@ begin
   end;
 end;
 
+function GetCommandLine: string;
+begin
+{$IFDEF MSWINDOWS}
+  Result := Windows.GetCommandLineW;
+{$ELSE}
+  Result := CombineParams(False);
+{$ENDIF}
+end;
+
 function GetCommandLineParams: string;
+{$IFDEF MSWINDOWS}
 var
   AParser: TACLParser;
   AToken: TACLParserToken;
@@ -182,6 +229,10 @@ begin
   finally
     AParser.Free;
   end;
+{$ELSE}
+begin
+  Result := CombineParams(True);
+{$ENDIF}
 end;
 
 { TACLCommandLineProcessor }
@@ -268,6 +319,32 @@ begin
   FCommands.AddOrSetValue(ACommand, TCommandHandler.Create(AProc, nil, nil, AFlags));
 end;
 
+class procedure TACLCommandLineProcessor.Register(
+  const ACommand: string; AProc: TCommandMultipleParamsMethod; AFlags: Cardinal);
+begin
+  Register(ACommand,
+    procedure (const AParams: TACLStringList)
+    begin
+      AProc(AParams)
+    end, AFlags);
+end;
+
+class procedure TACLCommandLineProcessor.Register(
+  const ACommand: string; AProc: TCommandSingleParamMethod; AFlags: Cardinal);
+begin
+  Register(ACommand,
+    procedure (const AParam: string)
+    begin
+      AProc(AParam)
+    end, AFlags);
+end;
+
+class procedure TACLCommandLineProcessor.Register(
+  const ACommand: string; AProc: TThreadMethod; AFlags: Cardinal);
+begin
+  Register(ACommand, procedure begin AProc(); end, AFlags);
+end;
+
 class procedure TACLCommandLineProcessor.Unregister(const ACommand: string);
 var
   I: Integer;
@@ -288,7 +365,10 @@ begin
   begin
     if FCommands.TryGetValue(FPendingToExecute.First.Name, ACommand) then
       ACommand.Execute(FPendingToExecute.First);
-    FPendingToExecute.Delete(0);
+    if FPendingToExecute.Count > 0 then // такое может произойти, если во время
+                                        // обработки команды протолкнется QuitMessage
+                                        // и приложение начнет завершение
+      FPendingToExecute.Delete(0);
   end;
 end;
 
@@ -417,7 +497,7 @@ end;
 
 procedure TACLCommandLineParser.HandlerNone(const AToken: TACLParserToken);
 var
-  S: UnicodeString;
+  S: string;
 begin
   case AToken.TokenType of
     acTokenSpace:
@@ -473,7 +553,9 @@ begin
   if (AToken.TokenType = acTokenDelimiter) and (AToken.Data^ = '/') then
     FState := sWaitingForCommandName
   else
-    if (AToken.TokenType = acTokenDelimiter) and (AToken.Data^ = '-') and ((FTarget.Count > 0) or (FParamBuffer.Length = 0)) then
+    if (AToken.TokenType = acTokenDelimiter) and (AToken.Data^ = '-') and
+      ((FTarget.Count > 0) or (FParamBuffer.Length = 0))
+    then
       FState := sWaitingForCommandName
     else
     begin

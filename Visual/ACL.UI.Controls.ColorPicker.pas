@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*           Advanced Color Picker           *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Color Picker
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.ColorPicker;
 
 {$I ACL.Config.inc}
@@ -16,24 +18,30 @@ unit ACL.UI.Controls.ColorPicker;
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
+  {System.}Classes,
+  {System.}Character,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
-  System.Types,
-  System.SysUtils,
-  System.Classes,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Geometry,
+  ACL.Geometry.Utils,
   ACL.Graphics,
-  ACL.Graphics.Ex.Gdip,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.Buttons,
   ACL.UI.Controls.CompoundControl,
   ACL.UI.Controls.CompoundControl.SubClass,
@@ -240,7 +248,7 @@ type
     function GetStyleHatch: TACLStyleHatch;
     function GetSubClass: TACLColorPickerSubClass;
     procedure SetBorders(const Value: TACLBorders);
-    procedure SetColor(const Value: TAlphaColor);
+    procedure SetColor(const Value: TAlphaColor); reintroduce;
     procedure SetOnColorChanged(const Value: TNotifyEvent);
     procedure SetOptions(const Value: TACLColorPickerOptions);
     procedure SetStyle(const Value: TACLStyleContent);
@@ -248,13 +256,12 @@ type
     procedure SetStyleEditButton(const Value: TACLStyleButton);
     procedure SetStyleHatch(const Value: TACLStyleHatch);
   protected
+    function CanAutoSize(var NewWidth, NewHeight: Integer): Boolean; override;
     function CreateSubClass: TACLCompoundControlSubClass; override;
-    procedure DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect); override;
     function GetContentOffset: TRect; override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     procedure Paint; override;
-    procedure PaintWindow(DC: HDC); override;
-    //
+    procedure UpdateTransparency; override;
+    //# Properties
     property Borders: TACLBorders read FBorders write SetBorders default acAllBorders;
     property Options: TACLColorPickerOptions read GetOptions write SetOptions;
     property Style: TACLStyleContent read GetStyle write SetStyle;
@@ -262,12 +269,11 @@ type
     property StyleEditButton: TACLStyleButton read GetStyleEditButton write SetStyleEditButton;
     property StyleHatch: TACLStyleHatch read GetStyleHatch write SetStyleHatch;
     property SubClass: TACLColorPickerSubClass read GetSubClass;
-    //
+    //# Events
     property OnColorChanged: TNotifyEvent read GetOnColorChanged write SetOnColorChanged;
   public
     constructor Create(AOwner: TComponent); override;
-    procedure SetBounds(ALeft, ATop, AWidth, AHeight: Integer); override;
-    //
+    //# Properties
     property Color: TAlphaColor read GetColor write SetColor;
   end;
 
@@ -305,12 +311,15 @@ type
 implementation
 
 uses
-  System.Math,
-  System.Character;
+{$IFDEF FPC}
+  ACL.Graphics.Ex.Cairo;
+{$ELSE}
+  ACL.Graphics.Ex.Gdip,
+  ACL.Graphics.SkinImageSet;
+{$ENDIF}
 
 type
   TACLCustomEditAccess = class(TACLCustomEdit);
-  TComponentAccess = class(TComponent);
 
 const
   accpSliderArrowWidth = 5;
@@ -333,7 +342,7 @@ type
 
   TACLColorPickerVisualColorModifierCell = class(TACLColorPickerColorModifierCell)
   strict private
-    FContentCache: TACLBitmap;
+    FContentCache: TACLDib;
     FCursorPosition: TPoint;
 
     procedure SetCursorPosition(const AValue: TPoint);
@@ -351,7 +360,7 @@ type
     procedure UpdateEditValue; override;
   public
     destructor Destroy; override;
-    //
+    //# Properties
     property ContentBounds: TRect read GetContentBounds;
     property ContentFrameRect: TRect read GetContentFrameRect;
     property CursorPosition: TPoint read FCursorPosition write SetCursorPosition;
@@ -704,7 +713,7 @@ end;
 
 procedure TACLColorPickerVisualColorModifierCell.DrawContent(ACanvas: TCanvas);
 begin
-  ACanvas.Draw(ContentBounds.Left, ContentBounds.Top, FContentCache);
+  FContentCache.DrawCopy(ACanvas, ContentBounds.TopLeft);
 end;
 
 procedure TACLColorPickerVisualColorModifierCell.FlushContentCache;
@@ -732,7 +741,7 @@ end;
 procedure TACLColorPickerVisualColorModifierCell.UpdateContentCache;
 begin
   FlushContentCache;
-  FContentCache := TACLBitmap.CreateEx(ContentBounds, pf32bit, True);
+  FContentCache := TACLDib.Create(ContentBounds);
   UpdateContentCache(FContentCache.Canvas, FContentCache.Width, FContentCache.Height);
 end;
 
@@ -1044,14 +1053,14 @@ procedure TACLColorPickerGamutCell.UpdateContentCache(ACanvas: TCanvas; AWidth, 
 var
   I: Integer;
 begin
-  GpPaintCanvas.BeginPaint(ACanvas.Handle);
+  GpPaintCanvas.BeginPaint(ACanvas);
   try
     for I := 0 to AWidth - 1 do
     begin
       GpPaintCanvas.FillRectangleByGradient(
         TAlphaColor.FromColor(TACLColors.HSLToRGB(I / AWidth, 1, 0.5)),
         TAlphaColor.FromColor(TACLColors.HSLToRGB(I / AWidth, 0, 0.5)),
-        Rect(I, 0, I + 1, AHeight), gmVertical);
+        Rect(I, 0, I + 1, AHeight), True);
     end;
   finally
     GpPaintCanvas.EndPaint;
@@ -1073,7 +1082,7 @@ var
   LLine: TRect;
   LRect: TRect;
 begin
-  LRect := System.Classes.Bounds(
+  LRect := {System.}Classes.Bounds(
     CursorPosition.X - AreaSize div 2,
     CursorPosition.Y - AreaSize div 2, AreaSize, AreaSize);
   LRect.Offset(ContentBounds.TopLeft);
@@ -1151,11 +1160,11 @@ end;
 procedure TACLColorPickerAlphaSliderCell.UpdateContentCache(ACanvas: TCanvas; AWidth, AHeight: Integer);
 begin
   Painter.StyleHatch.Draw(ACanvas, Rect(0, 0, AWidth, AHeight), 2);
-  GpPaintCanvas.BeginPaint(ACanvas.Handle);
+  GpPaintCanvas.BeginPaint(ACanvas);
   try
     GpPaintCanvas.FillRectangleByGradient(0,
       TAlphaColor.FromColor(ColorInfo.Color),
-      Rect(0, 0, AWidth, AHeight), gmVertical);
+      Rect(0, 0, AWidth, AHeight), True);
   finally
     GpPaintCanvas.EndPaint;
   end;
@@ -1179,11 +1188,11 @@ procedure TACLColorPickerLightnessSliderCell.UpdateContentCache(ACanvas: TCanvas
 var
   AColor: TAlphaColor;
 begin
-  GpPaintCanvas.BeginPaint(ACanvas.Handle);
+  GpPaintCanvas.BeginPaint(ACanvas);
   try
     AColor := TAlphaColor.FromColor(TACLColors.HSLtoRGB(ColorInfo.H, ColorInfo.S, 0.5));
-    GpPaintCanvas.FillRectangleByGradient($FFFFFFFF, AColor, Rect(0, 0, AWidth, AHeight div 2), gmVertical);
-    GpPaintCanvas.FillRectangleByGradient(AColor, $FF000000, Rect(0, AHeight div 2, AWidth, AHeight), gmVertical);
+    GpPaintCanvas.FillRectangleByGradient($FFFFFFFF, AColor, Rect(0, 0, AWidth, AHeight div 2), True);
+    GpPaintCanvas.FillRectangleByGradient(AColor, $FF000000, Rect(0, AHeight div 2, AWidth, AHeight), True);
   finally
     GpPaintCanvas.EndPaint;
   end;
@@ -1199,7 +1208,7 @@ begin
   Painter.DrawBorder(ACanvas, R);
   R.Inflate(-Painter.BorderSize);
   Painter.StyleHatch.Draw(ACanvas, R, 2);
-  acFillRect(ACanvas.Handle, R, ColorInfo.AlphaColor);
+  acFillRect(ACanvas, R, ColorInfo.AlphaColor);
 end;
 
 function TACLColorPickerPreviewCell.MeasureSize: TSize;
@@ -1218,10 +1227,11 @@ constructor TACLColorPickerCustomEditCell.Create(ASubClass: TACLCompoundControlS
 begin
   inherited Create(ASubClass);
   FEdit := CreateEdit;
+  FEdit.Align := alCustom;
   FEdit.Parent := SubClass.Container.GetControl;
   TACLCustomEditAccess(FEdit).SetTargetDPI(SubClass.TargetDPI);
   if csDesigning in SubClass.Container.GetControl.ComponentState then
-    TComponentAccess(FEdit).SetDesigning(True);
+    TACLCustomEditAccess(FEdit).SetDesigning(True);
 end;
 
 destructor TACLColorPickerCustomEditCell.Destroy;
@@ -1252,7 +1262,8 @@ end;
 
 function TACLColorPickerCustomEditCell.MeasureSize: TSize;
 begin
-  Result.cx := acTextSize(SubClass.Font, GetCaption).cx + dpiApply(accpIndentBetweenElements, CurrentDpi) + MeasureEditWidth;
+  Result.cx := acTextSize(SubClass.Font, GetCaption).cx +
+    dpiApply(accpIndentBetweenElements, CurrentDpi) + MeasureEditWidth;
   Result.cy := FEdit.Height;
 end;
 
@@ -1416,16 +1427,9 @@ begin
   AutoSize := True;
 end;
 
-procedure TACLCustomColorPicker.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
-var
-  AMinWidth, AMinHeight: Integer;
+function TACLCustomColorPicker.CanAutoSize(var NewWidth, NewHeight: Integer): Boolean;
 begin
-  if not AutoSize and SubClass.CalculateAutoSize(AMinWidth, AMinHeight) then
-  begin
-    AHeight := Max(AHeight, AMinHeight);
-    AWidth := Max(AWidth, AMinWidth);
-  end;
-  inherited SetBounds(ALeft, ATop, AWidth, AHeight);
+  Result := SubClass.CalculateAutoSize(NewWidth, NewHeight);
 end;
 
 function TACLCustomColorPicker.CreateSubClass: TACLCompoundControlSubClass;
@@ -1433,24 +1437,10 @@ begin
   Result := TACLColorPickerSubClass.Create(Self);
 end;
 
-procedure TACLCustomColorPicker.DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect);
-begin
-  Style.DrawContent(ACanvas, R);
-end;
-
 procedure TACLCustomColorPicker.Paint;
 begin
-  Style.DrawBorder(Canvas, ClientRect, Borders);
+  Style.Draw(Canvas, ClientRect, Transparent, Borders);
   inherited Paint;
-end;
-
-procedure TACLCustomColorPicker.PaintWindow(DC: HDC);
-var
-  I: Integer;
-begin
-  for I := 0 to ControlCount - 1 do
-    acExcludeFromClipRegion(DC, Controls[I].BoundsRect);
-  inherited PaintWindow(DC);
 end;
 
 function TACLCustomColorPicker.GetColor: TAlphaColor;
@@ -1463,17 +1453,6 @@ end;
 function TACLCustomColorPicker.GetContentOffset: TRect;
 begin
   Result := dpiApply(acBorderOffsets, FCurrentPPI) * Borders;
-end;
-
-function TACLCustomColorPicker.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  if Transparent then
-    Result := cbsTransparent
-  else
-    if Style.IsTransparentBackground then
-      Result := cbsSemitransparent
-    else
-      Result := cbsOpaque;
 end;
 
 function TACLCustomColorPicker.GetOnColorChanged: TNotifyEvent;
@@ -1555,6 +1534,14 @@ end;
 procedure TACLCustomColorPicker.SetStyleHatch(const Value: TACLStyleHatch);
 begin
   SubClass.StyleHatch.Assign(Value);
+end;
+
+procedure TACLCustomColorPicker.UpdateTransparency;
+begin
+  if Transparent or Style.IsTransparentBackground then
+    ControlStyle := ControlStyle - [csOpaque]
+  else
+    ControlStyle := ControlStyle + [csOpaque];
 end;
 
 end.

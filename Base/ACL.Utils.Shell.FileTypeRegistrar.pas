@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*              Common Classes               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2021                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Registration for file types
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       NotImplemented
+//
 unit ACL.Utils.Shell.FileTypeRegistrar;
 
 // Refer to the http://msdn.microsoft.com/en-us/library/windows/desktop/cc144154(v=vs.85).aspx for more details
@@ -246,7 +248,7 @@ end;
 
 procedure TACLFileTypeIconLibrary.Load(const LibFileName: UnicodeString; const DefaultMap: AnsiString = '');
 var
-  AHandle: THandle;
+  AHandle: HMODULE;
   AXmlDoc: TACLXMLDocument;
 begin
   AHandle := acLoadLibrary(LibFileName, LOAD_LIBRARY_AS_DATAFILE);
@@ -277,7 +279,7 @@ begin
       AXmlDoc.Free;
     end;
   finally
-    FreeLibrary(AHandle);
+    acFreeLibrary(AHandle);
   end;
 end;
 
@@ -371,7 +373,7 @@ var
   AResult: Boolean;
 begin
   AResult := False;
-  if not IsWin10OrLater then
+  if not acOSCheckVersion(10, 0) then
   begin
     if CreateComObject(CLSID_ApplicationAssociationRegistrationUI, IApplicationAssociationRegistrationUI, AIntf) then
       AResult := Succeeded(AIntf.LaunchAdvancedAssociationUI(PChar(AppName)))
@@ -379,9 +381,9 @@ begin
 
   if not AResult then
   begin
-    if IsWin10OrLater and (TOSVersion.Build >= 19045) then
+    if acOSCheckVersion(10, 0, 19045) then
       ShellExecute('ms-settings:defaultapps?registeredAppMachine=' + AppName)
-    else if IsWinVistaOrLater then
+    else if acOSCheckVersion(6, 0) then
       ShellExecute('control.exe', '/NAME Microsoft.DefaultPrograms /PAGE pageDefaultProgram')
     else
       ShellExecute('control.exe', 'appwiz.cpl,,3');
@@ -604,7 +606,7 @@ begin
   if GetRegistered then
   begin
     RegisterApplication(Value);
-    UpdateShellCache;
+    ShellFlushCache;
   end;
 end;
 
@@ -617,7 +619,7 @@ begin
     else
       UnregisterApplication;
 
-    UpdateShellCache;
+    ShellFlushCache;
   end;
 end;
 

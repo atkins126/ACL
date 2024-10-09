@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             TreeList Control              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   TreeList Core
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.TreeList.SubClass;
 
 {$I ACL.Config.inc}
@@ -16,53 +18,54 @@ unit ACL.UI.Controls.TreeList.SubClass;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
-  Winapi.ActiveX,
-  // Vcl
-  Vcl.ImgList,
-  Vcl.Controls,
-  Vcl.StdCtrls,
-  Vcl.Graphics,
-  Vcl.Forms,
-  Vcl.Menus,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}ActiveX,
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Classes,
-  System.Types,
-  System.Generics.Defaults,
-  System.Generics.Collections,
-  System.SysUtils,
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}Generics.Collections,
+  {System.}Math,
+  {System.}Types,
+  {System.}SysUtils,
   System.UITypes,
+  // Vcl
+  {Vcl.}ImgList,
+  {Vcl.}Controls,
+  {Vcl.}StdCtrls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
+  {Vcl.}Menus,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
   ACL.FileFormats.INI,
   ACL.Geometry,
+  ACL.Geometry.Utils,
   ACL.Graphics,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
+  ACL.Math,
   ACL.Threading,
-  ACL.UI.Controls.BaseControls,
+  ACL.Threading.Sorting,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.Buttons,
-  ACL.UI.Controls.Category,
   ACL.UI.Controls.CompoundControl.SubClass,
-  ACL.UI.Controls.GroupBox,
-  ACL.UI.Controls.Labels,
-  ACL.UI.Controls.Panel,
   ACL.UI.Controls.TextEdit,
   ACL.UI.Controls.TreeList.Options,
   ACL.UI.Controls.TreeList.Types,
-  ACL.UI.DropSource,
   ACL.UI.DropTarget,
   ACL.UI.HintWindow,
   ACL.UI.ImageList,
   ACL.UI.Menus,
   ACL.UI.Resources,
   ACL.Utils.Common,
-  ACL.Utils.DPIAware,
-  ACL.Utils.Desktop;
+  ACL.Utils.DPIAware;
 
 const
   // HitTest codes
@@ -105,7 +108,7 @@ type
     procedure DrawHeader(ACanvas: TCanvas; const R: TRect; ABorders: TACLBorders);
     procedure DrawHeaderSortingArrow(ACanvas: TCanvas; const R: TRect; ADirection, AEnabled: Boolean);
     procedure DrawRowExpandButton(ACanvas: TCanvas; const R: TRect; AExpanded, ASelected: Boolean);
-    //
+    //# Colors
     property RowColors[Odd: Boolean]: TAlphaColor read GetRowColor;
     property RowColorsSelected[Focused: Boolean]: TAlphaColor read GetRowColorSelected;
     property RowColorsSelectedText[Focused: Boolean]: TColor read GetRowColorSelectedText;
@@ -144,6 +147,7 @@ type
     property RowColorDisabledText: TACLResourceColor index 20 read GetColor write SetColor stored IsColorStored;
     property RowColorText: TACLResourceColor index 21 read GetColor write SetColor stored IsColorStored;
     property RowContentOffsets: TACLResourceMargins index 1 read GetMargins write SetMargins stored IsMarginsStored;
+    property RowCornerRadius: TACLResourceInteger index 0 read GetInteger write SetInteger stored IsIntegerStored;
     property RowExpandButton: TACLResourceTexture index 4 read GetTexture write SetTexture stored IsTextureStored;
   end;
 
@@ -260,6 +264,20 @@ type
     property SubClass: TACLTreeListSubClass read GetSubClass;
   end;
 
+  { TACLTreeListNodeCustomDraw }
+
+  TACLTreeListNodeCustomDrawData = record
+    Bounds: TRect;
+    Column: TACLTreeListColumn;
+    ColumnViewInfo: TACLTreeListColumnViewInfo;
+    Node: TACLTreeListNode;
+    NodeViewInfo: TACLTreeListNodeViewInfo;
+    Value: string;
+    ValueAlignment: TAlignment;
+    ValueIndex: Integer;
+    procedure Init;
+  end;
+
   { TACLTreeListContentCell }
 
   TACLTreeListContentCell = class(TACLCompoundControlBaseContentCell, IACLHotTrackObject)
@@ -279,7 +297,7 @@ type
   public
     constructor Create(AOwner: TACLTreeListContentViewInfo);
     function IsFocused: Boolean;
-    //
+    //# Properties
     property Owner: TACLTreeListContentViewInfo read FOwner;
     property SubClass: TACLTreeListSubClass read FSubClass;
   end;
@@ -307,7 +325,7 @@ type
     procedure Calculate(AWidth, AHeight: Integer); override;
     function CalculateAutoHeight: Integer; virtual;
     procedure Initialize(AData: TObject); override;
-    //
+    //# Properties
     property BackgroundBounds: TRect read FBackgroundBounds;
     property CheckBoxState: TACLButtonState read GetCheckBoxState;
     property Group: TACLTreeListGroup read GetGroup;
@@ -329,7 +347,6 @@ type
     function GetNode: TACLTreeListNode; inline;
     function GetOptionsNodes: TACLTreeListOptionsViewNodes; inline;
 
-    function IsFirstColumn(AColumnViewInfo: TACLTreeListColumnViewInfo): Boolean; inline;
     function PlaceLeftAlignedElement(ASize: TSize; AVisible: Boolean): TRect;
     procedure SetLevel(AValue: Integer);
   protected
@@ -355,13 +372,11 @@ type
     function IsCheckBoxEnabled: Boolean; override;
 
     function DoCustomDraw(ACanvas: TCanvas): Boolean;
-    function DoCustomDrawCell(ACanvas: TCanvas; const R: TRect; AColumn: TACLTreeListColumn): Boolean;
     procedure DoDraw(ACanvas: TCanvas); override;
     procedure DoDrawCell(ACanvas: TCanvas; const R: TRect; AColumnViewInfo: TACLTreeListColumnViewInfo);
     procedure DoDrawCellContent(ACanvas: TCanvas; const R: TRect; AColumnViewInfo: TACLTreeListColumnViewInfo); virtual;
     procedure DoDrawCellImage(ACanvas: TCanvas; const ABounds: TRect); virtual;
-    procedure DoDrawCellValue(ACanvas: TCanvas; const ABounds: TRect;
-      const AValue: string; AValueIndex: Integer; AAlignment: TAlignment); virtual;
+    procedure DoDrawCellValue(ACanvas: TCanvas; var AData: TACLTreeListNodeCustomDrawData); virtual;
 
     // IACLDraggableObject
     function CreateDragObject(const AHitTestInfo: TACLHitTestInfo): TACLCompoundControlDragObject;
@@ -591,8 +606,8 @@ type
     procedure InitializeParams(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
     function GetContentViewInfo: TACLTreeListContentViewInfo; inline;
     function GetSubClass: TACLTreeListSubClass; inline;
-    function GetValue: UnicodeString;
-    procedure SetValue(const AValue: UnicodeString);
+    function GetValue: string;
+    procedure SetValue(const AValue: string);
   protected
     procedure Close(AChanges: TIntegerSet = []; AAccepted: Boolean = False);
     procedure EditApplyHandler(Sender: TObject); virtual;
@@ -600,7 +615,7 @@ type
     procedure EditKeyDownHandler(Sender: TObject; var Key: Word; Shift: TShiftState); virtual;
     //# Properties
     property ContentViewInfo: TACLTreeListContentViewInfo read GetContentViewInfo;
-    property Value: UnicodeString read GetValue write SetValue;
+    property Value: string read GetValue write SetValue;
   public
     destructor Destroy; override;
     //# States
@@ -670,7 +685,7 @@ type
     function GetRootNode: TACLTreeListNode; inline;
   protected
     // Groupping
-    function GetGroupName(ANode: TACLTreeListNode): UnicodeString;
+    function GetGroupName(ANode: TACLTreeListNode): string;
     function IsCustomGroupping: Boolean;
     function IsGroupMode: Boolean;
     procedure ReorderNodesByGroupsPosition;
@@ -717,10 +732,8 @@ type
   TACLTreeListColumnClickEvent = procedure (Sender: TObject; AIndex: Integer; var AHandled: Boolean) of object;
   TACLTreeListCustomDrawNodeEvent = procedure (Sender: TObject; ACanvas: TCanvas; const R: TRect;
     ANode: TACLTreeListNode; var AHandled: Boolean) of object;
-  TACLTreeListCustomDrawNodeCellEvent = procedure (Sender: TObject; ACanvas: TCanvas; const R: TRect;
-    ANode: TACLTreeListNode; AColumn: TACLTreeListColumn; var AHandled: Boolean) of object;
-  TACLTreeListCustomDrawNodeCellValueEvent = procedure (Sender: TObject; ACanvas: TCanvas; const R: TRect;
-    ANode: TACLTreeListNode; const ADisplayValue: UnicodeString; AValueIndex: Integer; AValueAlignment: TAlignment; var AHandled: Boolean) of object;
+  TACLTreeListCustomDrawNodeCellEvent = procedure (Sender: TObject; ACanvas: TCanvas;
+    var AData: TACLTreeListNodeCustomDrawData; var AHandled: Boolean) of object;
 
   TACLTreeListEditCreateEvent = function (Sender: TObject; const AParams: TACLInplaceInfo; var AHandled: Boolean): TComponent of object;
   TACLTreeListEditedEvent = procedure (Sender: TObject; AColumnIndex, ARowIndex: Integer) of object;
@@ -769,7 +782,7 @@ type
     FOnCustomDrawColumnBar: TACLCustomDrawEvent;
     FOnCustomDrawNode: TACLTreeListCustomDrawNodeEvent;
     FOnCustomDrawNodeCell: TACLTreeListCustomDrawNodeCellEvent;
-    FOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellValueEvent;
+    FOnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellEvent;
     FOnDragSorting: TNotifyEvent;
     FOnDragSortingNodeDrop: TACLTreeListDragSortingNodeDrop;
     FOnDragSortingNodeOver: TACLTreeListDragSortingNodeOver;
@@ -853,7 +866,7 @@ type
     function CreateStyle: TACLStyleTreeList; virtual;
     function CreateViewInfo: TACLCompoundControlCustomViewInfo; override;
 
-    function GetCaptionForPath(ANode: TACLTreeListNode): UnicodeString; virtual;
+    function GetCaptionForPath(ANode: TACLTreeListNode): string; virtual;
 
     // Events
     function DoCanDeleteSelected: Boolean; virtual;
@@ -867,7 +880,7 @@ type
       var Target: TObject; var Mode: TACLTreeListDropTargetInsertMode; var Allow: Boolean); virtual;
     procedure DoFocusedColumnChanged; virtual;
     procedure DoFocusedNodeChanged; virtual;
-    procedure DoGetNodeCellDisplayText(ANode: TACLTreeListNode; AValueIndex: Integer; var AText: UnicodeString); virtual;
+    procedure DoGetNodeCellDisplayText(ANode: TACLTreeListNode; AValueIndex: Integer; var AText: string); virtual;
     procedure DoGetNodeCellStyle(AFont: TFont; ANode: TACLTreeListNode; AColumn: TACLTreeListColumn; out ATextAlignment: TAlignment); virtual;
     procedure DoGetNodeChildren(ANode: TACLTreeListNode); virtual;
     procedure DoGetNodeClass(var ANodeClass: TACLTreeListNodeClass); virtual;
@@ -882,14 +895,15 @@ type
     // CustomDraw Events
     function DoCustomDrawColumnBar(ACanvas: TCanvas; const R: TRect): Boolean; virtual;
     function DoCustomDrawNode(ACanvas: TCanvas; const R: TRect; ANode: TACLTreeListNode): Boolean; virtual;
-    function DoCustomDrawNodeCell(ACanvas: TCanvas; const R: TRect; ANode: TACLTreeListNode; AColumn: TACLTreeListColumn): Boolean; virtual;
-    function DoCustomDrawNodeCellValue(ACanvas: TCanvas; const R: TRect; ANode: TACLTreeListNode;
-      const AText: UnicodeString; AValueIndex: Integer; ATextAlignment: TAlignment): Boolean; virtual;
+    function DoCustomDrawNodeCell(ACanvas: TCanvas;
+      var AData: TACLTreeListNodeCustomDrawData): Boolean; virtual;
+    function DoCustomDrawNodeCellValue(ACanvas: TCanvas;
+      var AData: TACLTreeListNodeCustomDrawData): Boolean; virtual;
 
     // InplaceEdit Events
     function DoEditCreate(const AParams: TACLInplaceInfo): TComponent; virtual;
     procedure DoEdited(ARow, AColumn: Integer); virtual;
-    procedure DoEditing(ARow, AColumn: Integer; var AValue: UnicodeString); virtual;
+    procedure DoEditing(ARow, AColumn: Integer; var AValue: string); virtual;
     procedure DoEditInitialize(const AParams: TACLInplaceInfo; AEdit: TComponent); virtual;
     procedure DoEditKeyDown(var AKey: Word; AShiftState: TShiftState); virtual;
 
@@ -909,7 +923,7 @@ type
 
     // Incremental Search
     function CheckIncSearchColumn: Boolean;
-    function GetHighlightBounds(const AText: UnicodeString;
+    function GetHighlightBounds(const AText: string;
       AAbsoluteColumnIndex: Integer; out AHighlightStart, AHighlightFinish: Integer): Boolean;
     procedure IncSearchChanged(Sender: TObject);
     function IncSearchContains(ANode: TACLTreeListNode): Boolean;
@@ -924,9 +938,9 @@ type
     function GetPrevColumn(out AColumn: TACLTreeListColumn): Boolean;
     function IsMultiSelectOperation(AShift: TShiftState): Boolean;
     procedure NavigateTo(AObject: TObject; AShift: TShiftState);
-    procedure ProcessKeyDown(AKey: Word; AShift: TShiftState); override;
-    procedure ProcessKeyPress(AKey: Char); override;
-    procedure ProcessKeyUp(AKey: Word; AShift: TShiftState); override;
+    procedure ProcessKeyDown(var AKey: Word; AShift: TShiftState); override;
+    procedure ProcessKeyPress(var AKey: WideChar); override;
+    procedure ProcessKeyUp(var AKey: Word; AShift: TShiftState); override;
 
     // Mouse
     procedure ProcessContextPopup(var AHandled: Boolean); override;
@@ -980,8 +994,8 @@ type
     procedure Localize(const ASection: string); override;
 
     // Customized Settings
-    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString); virtual;
-    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString); virtual;
+    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string); virtual;
+    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string); virtual;
 
     // Editing
     procedure StartEditing(ANode: TACLTreeListNode; AColumn: TACLTreeListColumn = nil);
@@ -1012,24 +1026,30 @@ type
       AResetPrevSortingParams: Boolean = False); overload;
 
     // Paths
-    function FindByPath(APath: UnicodeString; AIgnoreCase: Boolean = True; AExactMatch: Boolean = False): TACLTreeListNode;
-    function GetPath(ANode: TACLTreeListNode): UnicodeString;
-    procedure SetPath(const APath: UnicodeString); virtual;
+    function FindByPath(APath: string; AIgnoreCase: Boolean = True;
+      AExactMatch: Boolean = False): TACLTreeListNode;
+    function GetPath(ANode: TACLTreeListNode): string;
+    procedure SetPath(const APath: string); virtual;
 
     // Selection
     procedure SelectAll; virtual;
-    procedure SelectInvert; virtual;
-    procedure SelectNone; virtual;
+    procedure SelectInvert;
+    procedure SelectNone;
     procedure SelectObject(AObject: TObject; AMode: TACLSelectionMode; AIsMedium: Boolean); virtual;
     procedure SelectOnMouseDown(AButton: TMouseButton; AShift: TShiftState); virtual;
-    procedure SelectRange(AFirstObject, ALastObject, AObjectToFocus: TObject; AMakeVisible, ADropSelection: Boolean; AMode: TACLSelectionMode); overload;
-    procedure SelectRange(AFirstObject, ALastObject: TObject; AMakeVisible, ADropSelection: Boolean; AMode: TACLSelectionMode); overload;
-    procedure SelectRange(AFirstObject, ALastObject: TObject; AShift: TShiftState); overload;
+    procedure SelectRange(AFirstObject, ALastObject, AObjectToFocus: TObject;
+      AMakeVisible, ADropSelection: Boolean; AMode: TACLSelectionMode); overload;
+    procedure SelectRange(AFirstObject, ALastObject: TObject;
+      AMakeVisible, ADropSelection: Boolean; AMode: TACLSelectionMode); overload;
+    procedure SelectRange(AFirstObject, ALastObject: TObject;
+      AShift: TShiftState); overload;
 
     // Styles
-    function StyleGetNodeBackgroundColor(AOdd: Boolean; ANode: TACLTreeListNode = nil): TAlphaColor; virtual;
+    function StyleGetNodeBackgroundColor(AOdd: Boolean;
+      ANode: TACLTreeListNode = nil): TAlphaColor; virtual;
     function StyleGetNodeTextColor(ANode: TACLTreeListNode = nil): TColor; virtual;
-    procedure StylePrepareFont(ACanvas: TCanvas; AFontIndex: Integer = -1; ASuperscript: Boolean = False); virtual;
+    procedure StylePrepareFont(ACanvas: TCanvas;
+      AFontIndex: Integer = -1; ASuperscript: Boolean = False); virtual;
 
     // Data Properties
     property AbsoluteVisibleNodes: TACLTreeListNodeList read GetAbsoluteVisibleNodes;
@@ -1077,7 +1097,7 @@ type
     property OnCustomDrawColumnBar: TACLCustomDrawEvent read FOnCustomDrawColumnBar write FOnCustomDrawColumnBar;
     property OnCustomDrawNode: TACLTreeListCustomDrawNodeEvent read FOnCustomDrawNode write FOnCustomDrawNode;
     property OnCustomDrawNodeCell: TACLTreeListCustomDrawNodeCellEvent read FOnCustomDrawNodeCell write FOnCustomDrawNodeCell;
-    property OnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellValueEvent read FOnCustomDrawNodeCellValue write FOnCustomDrawNodeCellValue;
+    property OnCustomDrawNodeCellValue: TACLTreeListCustomDrawNodeCellEvent read FOnCustomDrawNodeCellValue write FOnCustomDrawNodeCellValue;
     property OnDragSorting: TNotifyEvent read FOnDragSorting write FOnDragSorting;
     property OnDragSortingNodeDrop: TACLTreeListDragSortingNodeDrop read FOnDragSortingNodeDrop write FOnDragSortingNodeDrop;
     property OnDragSortingNodeOver: TACLTreeListDragSortingNodeOver read FOnDragSortingNodeOver write FOnDragSortingNodeOver;
@@ -1109,16 +1129,12 @@ type
 implementation
 
 uses
-  System.Character,
-  System.Math,
-  // ACL
-  ACL.Graphics.Ex.Gdip,
-  ACL.Math,
-  ACL.Threading.Sorting,
+{$IFNDEF FPC}
+  ACL.Graphics.SkinImageSet,
+{$ENDIF}
   ACL.UI.Controls.TreeList.SubClass.DragAndDrop,
   ACL.Utils.FileSystem,
   ACL.Utils.Messaging,
-  ACL.Utils.Stream,
   ACL.Utils.Strings;
 
 const
@@ -1127,20 +1143,12 @@ const
 
 type
   TACLTreeListColumnAccess = class(TACLTreeListColumn);
-  TACLTreeListGroupAccess = class(TACLTreeListGroup);
   TACLTreeListNodeAccess = class(TACLTreeListNode);
-  TCanvasAccess = class(TCanvas);
-
-  { TACLTreeListColumnCustomizationPopup }
-
-  TACLTreeListColumnCustomizationPopup = class(TACLPopupMenu)
-  public
-    procedure AfterConstruction; override;
-  end;
 
 { TACLStyleTreeList }
 
-procedure TACLStyleTreeList.DrawBackground(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean; ABorders: TACLBorders);
+procedure TACLStyleTreeList.DrawBackground(ACanvas: TCanvas;
+  const R: TRect; AEnabled: Boolean; ABorders: TACLBorders);
 var
   AColor: TAlphaColor;
 begin
@@ -1149,51 +1157,55 @@ begin
   else
     AColor := BackgroundColorDisabled.Value;
 
-  acFillRect(ACanvas.Handle, R, AColor);
-  acDrawFrameEx(ACanvas.Handle, R, BorderColor.Value, ABorders);
+  acFillRect(ACanvas, R, AColor);
+  acDrawFrameEx(ACanvas, R, BorderColor.Value, ABorders);
 end;
 
 procedure TACLStyleTreeList.DrawCheckMark(ACanvas: TCanvas;
   const R: TRect; AState: TACLButtonState; ACheckBoxState: TCheckBoxState);
 begin
   if not R.IsEmpty then
-    CheckMark.Draw(ACanvas.Handle, R, Ord(ACheckBoxState) * 5 + Ord(AState));
+    CheckMark.Draw(ACanvas, R, Ord(ACheckBoxState) * 5 + Ord(AState));
 end;
 
-procedure TACLStyleTreeList.DrawGridline(ACanvas: TCanvas; const R: TRect; ASide: TACLBorder);
+procedure TACLStyleTreeList.DrawGridline(
+  ACanvas: TCanvas; const R: TRect; ASide: TACLBorder);
 begin
-  acDrawFrameEx(ACanvas.Handle, R, GridColor.Value, [ASide]);
+  acDrawFrameEx(ACanvas, R, GridColor.AsColor, [ASide]);
 end;
 
-procedure TACLStyleTreeList.DrawGroupExpandButton(ACanvas: TCanvas; const R: TRect; AExpanded: Boolean);
+procedure TACLStyleTreeList.DrawGroupExpandButton(
+  ACanvas: TCanvas; const R: TRect; AExpanded: Boolean);
 begin
-  GroupHeaderExpandButton.Draw(ACanvas.Handle, R, Ord(AExpanded));
+  GroupHeaderExpandButton.Draw(ACanvas, R, Ord(AExpanded));
 end;
 
 procedure TACLStyleTreeList.DrawGroupHeader(ACanvas: TCanvas; const R: TRect; ABorders: TACLBorders);
 begin
-  acFillRect(ACanvas.Handle, R, GroupHeaderColor.Value);
-  acDrawFrameEx(ACanvas.Handle, R, GroupHeaderColorBorder.Value, ABorders);
+  acFillRect(ACanvas, R, GroupHeaderColor.Value);
+  acDrawFrameEx(ACanvas, R, GroupHeaderColorBorder.Value, ABorders);
 end;
 
 procedure TACLStyleTreeList.DrawHeader(ACanvas: TCanvas; const R: TRect; ABorders: TACLBorders);
 begin
-  ColumnHeader.Draw(ACanvas.Handle, R, 0, ABorders);
+  ColumnHeader.Draw(ACanvas, R, 0, ABorders);
 end;
 
-procedure TACLStyleTreeList.DrawHeaderSortingArrow(ACanvas: TCanvas; const R: TRect; ADirection, AEnabled: Boolean);
+procedure TACLStyleTreeList.DrawHeaderSortingArrow(
+  ACanvas: TCanvas; const R: TRect; ADirection, AEnabled: Boolean);
 begin
-  ColumnHeaderSortingArrow.Draw(ACanvas.Handle, R, Ord(ADirection) * 2 + Ord(AEnabled));
+  ColumnHeaderSortingArrow.Draw(ACanvas, R, Ord(ADirection) * 2 + Ord(AEnabled));
 end;
 
-procedure TACLStyleTreeList.DrawRowExpandButton(ACanvas: TCanvas; const R: TRect; AExpanded, ASelected: Boolean);
+procedure TACLStyleTreeList.DrawRowExpandButton(
+  ACanvas: TCanvas; const R: TRect; AExpanded, ASelected: Boolean);
 var
   AIndex: Integer;
 begin
   AIndex := Ord(AExpanded);
   if RowExpandButton.FrameCount >= 4 then
     Inc(AIndex, 2 * Ord(ASelected));
-  RowExpandButton.Draw(ACanvas.Handle, R, AIndex);
+  RowExpandButton.Draw(ACanvas, R, AIndex);
 end;
 
 procedure TACLStyleTreeList.InitializeResources;
@@ -1231,6 +1243,7 @@ begin
   RowColorSelectedText.InitailizeDefaults('TreeList.Colors.RowSelectedText');
   RowColorSelectedTextInactive.InitailizeDefaults('TreeList.Colors.RowSelectedTextInactive');
   RowContentOffsets.InitailizeDefaults('TreeList.Margins.RowContentOffsets', Rect(4, 4, 4, 4));
+  RowCornerRadius.InitailizeDefaults('TreeList.Margins.RowCornerRadius', 0);
   RowExpandButton.InitailizeDefaults('TreeList.Textures.RowExpandButton');
 
   FocusRectColor.InitailizeDefaults('', clDefault);
@@ -1383,7 +1396,8 @@ begin
   if AHasText then
   begin
     FImageRect.CenterVert(LImageSize.cY);
-    Inc(R.Left, LImageSize.cX + IfThen(LImageSize.cx > 0, dpiApply(acIndentBetweenElements, CurrentDpi)));
+    FImageRect.Width := LImageSize.cx;
+    Inc(R.Left, GetElementWidthIncludeOffset(ImageRect, SubClass.CurrentDpi));
   end
   else
   begin
@@ -1439,7 +1453,7 @@ end;
 
 procedure TACLTreeListColumnViewInfo.DoDraw(ACanvas: TCanvas);
 var
-  ASavedClipRegion: HRGN;
+  ASavedClipRegion: TRegionHandle;
 begin
   ASavedClipRegion := acSaveClipRegion(ACanvas.Handle);
   try
@@ -1464,7 +1478,7 @@ begin
     SubClass.StylePrepareFont(ACanvas, TACLStyleTreeList.IndexColumnHeaderFont, True);
     SubClass.Style.DrawHeaderSortingArrow(ACanvas, SortArrowRect, Column.SortDirection <> sdDescending, True);
     if not SortArrowIndexRect.IsEmpty then
-      acTextOut(ACanvas, SortArrowIndexRect.Left, SortArrowIndexRect.Top, IntToStr(SortByIndex + 1), 0);
+      acTextOut(ACanvas, SortArrowIndexRect.Left, SortArrowIndexRect.Top, IntToStr(SortByIndex + 1));
   end;
 end;
 
@@ -1720,6 +1734,13 @@ begin
   Result := inherited SubClass as TACLTreeListSubClass;
 end;
 
+{ TACLTreeListNodeCustomDrawData }
+
+procedure TACLTreeListNodeCustomDrawData.Init;
+begin
+  FillChar(Self, SizeOf(Self), 0);
+end;
+
 { TACLTreeListContentCell }
 
 procedure TACLTreeListContentCell.OnHotTrack(Action: TACLHotTrackAction);
@@ -1807,11 +1828,11 @@ end;
 
 procedure TACLTreeListGroupViewInfo.DoDraw(ACanvas: TCanvas);
 begin
-  SubClass.StylePrepareFont(ACanvas, TACLStyleTreeList.IndexGroupHeaderFont);
   SubClass.Style.DrawGroupHeader(ACanvas, BackgroundBounds);
   SubClass.Style.DrawCheckMark(ACanvas, CheckBoxRect, CheckBoxState, Group.CheckBoxState);
   if ExpandButtonVisible then
     SubClass.Style.DrawGroupExpandButton(ACanvas, ExpandButtonRect, Group.Expanded);
+  SubClass.StylePrepareFont(ACanvas, TACLStyleTreeList.IndexGroupHeaderFont);
   acTextDraw(ACanvas, Group.Caption, TextRect, taLeftJustify, taVerticalCenter, True);
 end;
 
@@ -1873,8 +1894,9 @@ begin
   Result := acFontHeight(MeasureCanvas) + GetContentOffsets.MarginsHeight;
 end;
 
-function TACLTreeListNodeViewInfo.CalculateCellAutoWidth(ACanvas: TCanvas;
-  ANode: TACLTreeListNode; AColumnIndex: Integer; AColumnViewInfo: TACLTreeListColumnViewInfo = nil): Integer;
+function TACLTreeListNodeViewInfo.CalculateCellAutoWidth(
+  ACanvas: TCanvas; ANode: TACLTreeListNode; AColumnIndex: Integer;
+  AColumnViewInfo: TACLTreeListColumnViewInfo = nil): Integer;
 var
   AText: string;
   ATextAlign: TAlignment;
@@ -2031,7 +2053,7 @@ end;
 
 function TACLTreeListNodeViewInfo.GetCellTextExtends(AColumn: TACLTreeListColumnViewInfo): TRect;
 begin
-  Result := FTextExtends[IsFirstColumn(AColumn)];
+  Result := FTextExtends[(AColumn = nil) or AColumn.IsFirst];
 end;
 
 function TACLTreeListNodeViewInfo.GetCheckBoxState: TACLButtonState;
@@ -2075,19 +2097,15 @@ begin
   Result := (Node <> nil) and SubClass.DoCustomDrawNode(ACanvas, Bounds, Node);
 end;
 
-function TACLTreeListNodeViewInfo.DoCustomDrawCell(
-  ACanvas: TCanvas; const R: TRect; AColumn: TACLTreeListColumn): Boolean;
-begin
-  Result := (Node <> nil) and SubClass.DoCustomDrawNodeCell(ACanvas, R, Node, AColumn);
-end;
-
 procedure TACLTreeListNodeViewInfo.DoDraw(ACanvas: TCanvas);
 var
   I: Integer;
 begin
-  acFillRect(ACanvas.Handle, Bounds, SubClass.StyleGetNodeBackgroundColor(Odd(AbsoluteNodeIndex), Node));
+  acFillRect(ACanvas, Bounds,
+    SubClass.StyleGetNodeBackgroundColor(Odd(AbsoluteNodeIndex), Node),
+    SubClass.Style.RowCornerRadius.Value);
   if IsFocused and (SubClass.FocusedColumn <> nil) and SubClass.Focused then
-    acFillRect(ACanvas.Handle, GetFocusRect, SubClass.Style.RowColorFocused.Value);
+    acFillRect(ACanvas, GetFocusRect, SubClass.Style.RowColorFocused.Value);
   if HasHorzSeparators then
     SubClass.Style.DrawGridline(ACanvas, GetBottomSeparatorRect, mBottom);
 
@@ -2104,9 +2122,9 @@ end;
 procedure TACLTreeListNodeViewInfo.DoDrawCell(
   ACanvas: TCanvas; const R: TRect; AColumnViewInfo: TACLTreeListColumnViewInfo);
 var
-  ASaveIndex: HRGN;
+  ASaveIndex: TRegionHandle;
 begin
-  if acRectVisible(ACanvas.Handle, R) then
+  if acRectVisible(ACanvas, R) then
   begin
     if Node <> nil then
     begin
@@ -2126,13 +2144,18 @@ end;
 procedure TACLTreeListNodeViewInfo.DoDrawCellContent(
   ACanvas: TCanvas; const R: TRect; AColumnViewInfo: TACLTreeListColumnViewInfo);
 var
-  AAlignment: TAlignment;
-  AValue: UnicodeString;
-  AValueIndex: Integer;
+  LData: TACLTreeListNodeCustomDrawData;
 begin
-  if not DoCustomDrawCell(ACanvas, R, GetColumnForViewInfo(AColumnViewInfo)) then
+  LData.Init;
+  LData.Bounds := R;
+  LData.Node := Node;
+  LData.NodeViewInfo := Self;
+  LData.Column := GetColumnForViewInfo(AColumnViewInfo);
+  LData.ColumnViewInfo := AColumnViewInfo;
+  LData.ValueIndex := GetColumnAbsoluteIndex(AColumnViewInfo);
+  if (Node = nil) or not SubClass.DoCustomDrawNodeCell(ACanvas, LData) then
   begin
-    if IsFirstColumn(AColumnViewInfo) then
+    if (AColumnViewInfo = nil) or AColumnViewInfo.IsFirst then
     begin
       if ExpandButtonVisible then
         SubClass.Style.DrawRowExpandButton(ACanvas, ExpandButtonRect, Node.Expanded, Node.Selected);
@@ -2141,11 +2164,12 @@ begin
       if not ImageRect.IsEmpty then
         DoDrawCellImage(ACanvas, ImageRect);
     end;
-    AValueIndex := GetColumnAbsoluteIndex(AColumnViewInfo);
-    AValue := Node.Values[AValueIndex];
-    SubClass.DoGetNodeCellDisplayText(Node, AValueIndex, AValue);
-    SubClass.DoGetNodeCellStyle(ACanvas.Font, Node, GetColumnForViewInfo(AColumnViewInfo), AAlignment);
-    DoDrawCellValue(ACanvas, R.Split(CellTextExtends[AColumnViewInfo]), AValue, AValueIndex, AAlignment);
+    LData.Bounds := R.Split(CellTextExtends[AColumnViewInfo]);
+    LData.Value := Node.Values[LData.ValueIndex];
+    ACanvas.Brush.Style := bsClear;
+    SubClass.DoGetNodeCellDisplayText(Node, LData.ValueIndex, LData.Value);
+    SubClass.DoGetNodeCellStyle(ACanvas.Font, Node, LData.Column, LData.ValueAlignment);
+    DoDrawCellValue(ACanvas, LData);
   end;
 end;
 
@@ -2154,19 +2178,24 @@ begin
   acDrawImage(ACanvas, ABounds, OptionsNodes.Images, Node.ImageIndex);
 end;
 
-procedure TACLTreeListNodeViewInfo.DoDrawCellValue(ACanvas: TCanvas;
-  const ABounds: TRect; const AValue: string; AValueIndex: Integer; AAlignment: TAlignment);
+procedure TACLTreeListNodeViewInfo.DoDrawCellValue(
+  ACanvas: TCanvas; var AData: TACLTreeListNodeCustomDrawData);
 var
-  AHighlightStart, AHighlightFinish: Integer;
+  LHighlightFinish: Integer;
+  LHighlightStart: Integer;
 begin
-  if not SubClass.DoCustomDrawNodeCellValue(ACanvas, ABounds, Node, AValue, AValueIndex, AAlignment) then
+  if not SubClass.DoCustomDrawNodeCellValue(ACanvas, AData) then
   begin
-    if IsFocused and SubClass.GetHighlightBounds(AValue, AValueIndex, AHighlightStart, AHighlightFinish) then
-      acTextDrawHighlight(ACanvas, AValue, ABounds, AAlignment,
-        taVerticalCenter, True, AHighlightStart, AHighlightFinish,
-        SubClass.Style.IncSearchColor.AsColor, SubClass.Style.IncSearchColorText.AsColor)
+    if IsFocused and SubClass.GetHighlightBounds(AData.Value,
+      AData.ValueIndex, LHighlightStart, LHighlightFinish)
+    then
+      acTextDrawHighlight(ACanvas,
+        AData.Value, AData.Bounds, AData.ValueAlignment,
+        taVerticalCenter, True, LHighlightStart, LHighlightFinish,
+        SubClass.Style.IncSearchColor.AsColor,
+        SubClass.Style.IncSearchColorText.AsColor)
     else
-      acTextDraw(ACanvas, AValue, ABounds, AAlignment, taVerticalCenter, True);
+      acTextDraw(ACanvas, AData.Value, AData.Bounds, AData.ValueAlignment, taVerticalCenter, True);
   end;
 end;
 
@@ -2243,11 +2272,6 @@ end;
 function TACLTreeListNodeViewInfo.GetOptionsNodes: TACLTreeListOptionsViewNodes;
 begin
   Result := SubClass.OptionsView.Nodes;
-end;
-
-function TACLTreeListNodeViewInfo.IsFirstColumn(AColumnViewInfo: TACLTreeListColumnViewInfo): Boolean;
-begin
-  Result := (AColumnViewInfo = nil) or AColumnViewInfo.IsFirst;
 end;
 
 function TACLTreeListNodeViewInfo.MeasureHeight: Integer;
@@ -2339,9 +2363,9 @@ begin
   begin
     AColor := Owner.SubClass.Style.RowColorText.Value;
     if FInsertMode = dtimOver then
-      acDrawFrame(ACanvas.Handle, Bounds, AColor, MeasureHeight)
+      acDrawFrame(ACanvas, Bounds, AColor, MeasureHeight)
     else
-      acFillRect(ACanvas.Handle, Bounds, AColor);
+      acFillRect(ACanvas, Bounds, AColor);
   end;
 end;
 
@@ -2388,7 +2412,7 @@ begin
     dtimAfter:
       FBounds := FBounds.Split(srBottom, 0);
     dtimInto:
-      FBounds := Rect(FBounds.Left + 2 * Owner.GetLevelIndent, FBounds.Bottom, FBounds.Right, FBounds.Bottom);
+      FBounds := Rect(FBounds.Left + 4 * Owner.GetLevelIndent, FBounds.Bottom, FBounds.Right, FBounds.Bottom);
     dtimOver:
       Exit;
   end;
@@ -2819,7 +2843,7 @@ end;
 
 procedure TACLTreeListContentViewInfo.DoDrawSelectionRect(ACanvas: TCanvas; const R: TRect);
 begin
-  acDrawSelectionRect(ACanvas.Handle, R, SubClass.Style.SelectionRectColor.Value);
+  acDrawSelectionRect(ACanvas, R, SubClass.Style.SelectionRectColor.Value);
 end;
 
 function TACLTreeListContentViewInfo.GetFirstVisibleNode: TACLTreeListNode;
@@ -3074,8 +3098,13 @@ procedure TACLTreeListEditingController.Close(AChanges: TIntegerSet = []; AAccep
 begin
   if IsEditing and not IsLocked then
   begin
-    TACLMainThread.RunPostponed(FEdit.Free, Self);
     FEditIntf := nil;
+    if csDestroying in SubClass.ComponentState then
+    begin
+      FreeAndNil(FEdit);
+      Exit;
+    end;
+    TACLMainThread.RunPostponed(FEdit.Free, Self);
     FEdit := nil;
 
     if AAccepted then // Sent notification after closing the editor to re-sort and re-group the list
@@ -3141,19 +3170,19 @@ begin
   Result := TACLTreeListSubClass(inherited SubClass);
 end;
 
-function TACLTreeListEditingController.GetValue: UnicodeString;
+function TACLTreeListEditingController.GetValue: string;
 begin
   Result := SubClass.AbsoluteVisibleNodes[FParams.RowIndex].Values[FParams.ColumnIndex];
 end;
 
-procedure TACLTreeListEditingController.SetValue(const AValue: UnicodeString);
+procedure TACLTreeListEditingController.SetValue(const AValue: string);
 begin
   SubClass.AbsoluteVisibleNodes[FParams.RowIndex].Values[FParams.ColumnIndex] := AValue;
 end;
 
 procedure TACLTreeListEditingController.EditApplyHandler(Sender: TObject);
 var
-  ATempValue: UnicodeString;
+  ATempValue: string;
 begin
   if not IsLocked and (Sender = Edit) then
   try
@@ -3249,7 +3278,8 @@ end;
 
 { TACLTreeListHintController }
 
-function TACLTreeListHintController.CanShowHint(AHintOwner: TObject; const AHintData: TACLHintData): Boolean;
+function TACLTreeListHintController.CanShowHint(
+  AHintOwner: TObject; const AHintData: TACLHintData): Boolean;
 begin
   Result := inherited CanShowHint(AHintOwner, AHintData);
   if Result then
@@ -3261,10 +3291,11 @@ end;
 
 { TACLTreeListSortByList }
 
-procedure TACLTreeListSortByList.Notify(const Item: TACLTreeListColumn; Action: TCollectionNotification);
+procedure TACLTreeListSortByList.Notify(
+  const Item: TACLTreeListColumn; Action: TCollectionNotification);
 begin
   if Action = cnRemoved then
-    TACLTreeListColumnAccess(Item).FSortDirection := sdAscending;
+    TACLTreeListColumnAccess(Item).FSortDirection := sdDefault;
 end;
 
 { TACLTreeListSorter }
@@ -3372,9 +3403,10 @@ begin
   Result := acCompareStrings(ALeft.Group.Caption, ARight.Group.Caption, False)
 end;
 
-function TACLTreeListSorter.GetGroupName(ANode: TACLTreeListNode): UnicodeString;
+function TACLTreeListSorter.GetGroupName(ANode: TACLTreeListNode): string;
 var
   ABuilder: TACLStringBuilder;
+  I: Integer;
 begin
   if IsCustomGroupping then
   begin
@@ -3390,7 +3422,7 @@ begin
 
   ABuilder := TACLStringBuilder.Get;
   try
-    for var I := 0 to GroupBy.Count - 1 do
+    for I := 0 to GroupBy.Count - 1 do
     begin
       if I > 0 then
         ABuilder.Append(' / ');
@@ -3482,12 +3514,14 @@ begin
 end;
 
 function TACLTreeListSorter.Compare(const ALeft, ARight: TACLTreeListNode): Integer;
+var
+  I: Integer;
 begin
   Result := 0;
   if IsCustomSorting then
     SubClass.OnCompare(SubClass, ALeft, ARight, Result)
   else
-    for var I := 0 to SortBy.Count - 1 do
+    for I := 0 to SortBy.Count - 1 do
     begin
       Result := CompareByColumn(ALeft, ARight, SortBy[I]);
       if Result <> 0 then
@@ -3509,6 +3543,8 @@ begin
 end;
 
 procedure TACLTreeListSorter.SortNodes(ANodeList: TACLTreeListNodeList);
+var
+  I: Integer;
 begin
   if (ANodeList <> nil) and AreSortingParametersDefined then
   begin
@@ -3521,7 +3557,7 @@ begin
       end,
       SubClass.OptionsBehavior.SortingUseMultithreading);
 
-    for var I := 0 to ANodeList.Count - 1 do
+    for I := 0 to ANodeList.Count - 1 do
       SortNodes(TACLTreeListNodeAccess(ANodeList.List[I]).FSubNodes);
   end;
 end;
@@ -3603,7 +3639,7 @@ end;
 
 procedure TACLTreeListSubClass.ReloadData;
 var
-  AStoredPath: UnicodeString;
+  AStoredPath: string;
 begin
   BeginUpdate;
   try
@@ -3662,14 +3698,14 @@ begin
   end;
 end;
 
-procedure TACLTreeListSubClass.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLTreeListSubClass.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   Columns.ConfigLoad(AConfig, ASection, AItem + '.ColumnsData');
   if OptionsBehavior.SortingMode = tlsmDisabled then
     ResetSortingParams;
 end;
 
-procedure TACLTreeListSubClass.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLTreeListSubClass.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   Columns.ConfigSave(AConfig, ASection, AItem + '.ColumnsData');
 end;
@@ -3807,7 +3843,8 @@ begin
   OnCompare := nil;
 end;
 
-procedure TACLTreeListSubClass.SortBy(AColumn: TACLTreeListColumn; ADirection: TACLSortDirection; AResetPrevSortingParams: Boolean);
+procedure TACLTreeListSubClass.SortBy(AColumn: TACLTreeListColumn;
+  ADirection: TACLSortDirection; AResetPrevSortingParams: Boolean);
 var
   ASortByList: TACLTreeListColumnList;
 begin
@@ -3839,12 +3876,12 @@ begin
   end;
 end;
 
-function TACLTreeListSubClass.FindByPath(APath: UnicodeString;
+function TACLTreeListSubClass.FindByPath(APath: string;
   AIgnoreCase: Boolean = True; AExactMatch: Boolean = False): TACLTreeListNode;
 
-  function TryFindSubPath(var ANode: TACLTreeListNode; var APath: UnicodeString): Boolean;
+  function TryFindSubPath(var ANode: TACLTreeListNode; var APath: string): Boolean;
   var
-    ACaption: UnicodeString;
+    ACaption: string;
     ACaptionLength: Integer;
     AChildNode: TACLTreeListNode;
     APathLength: Integer;
@@ -3858,7 +3895,7 @@ function TACLTreeListSubClass.FindByPath(APath: UnicodeString;
       ACaption := GetCaptionForPath(AChildNode);
       ACaptionLength := Length(ACaption);
       if (APathLength > ACaptionLength) and CharInSet(APath[ACaptionLength + 1], ['\', '/']) and
-        (acCompareStrings(PWideChar(APath), PWideChar(ACaption), ACaptionLength, ACaptionLength, AIgnoreCase) = 0) then
+        (acCompareStrings(PChar(APath), PChar(ACaption), ACaptionLength, ACaptionLength, AIgnoreCase) = 0) then
       begin
         ANode := AChildNode;
         APath := Copy(APath, ACaptionLength + 2, MaxInt);
@@ -3886,7 +3923,7 @@ begin
     Result := nil;
 end;
 
-function TACLTreeListSubClass.GetPath(ANode: TACLTreeListNode): UnicodeString;
+function TACLTreeListSubClass.GetPath(ANode: TACLTreeListNode): string;
 begin
   if (ANode <> RootNode) and (ANode <> nil) then
     Result := GetPath(ANode.Parent) + GetCaptionForPath(ANode) + PathDelim
@@ -3894,7 +3931,7 @@ begin
     Result := '';
 end;
 
-procedure TACLTreeListSubClass.SetPath(const APath: UnicodeString);
+procedure TACLTreeListSubClass.SetPath(const APath: string);
 begin
   FocusedNode := FindByPath(APath);
 end;
@@ -3908,7 +3945,8 @@ begin
     AObjectToFocus := FocusedObject;
     if AObjectToFocus = nil then
       AObjectToFocus := AbsoluteVisibleNodes.First;
-    SelectRange(AbsoluteVisibleNodes.First, AbsoluteVisibleNodes.Last, AObjectToFocus, True, False, smSelect);
+    SelectRange(AbsoluteVisibleNodes.First,
+      AbsoluteVisibleNodes.Last, AObjectToFocus, True, False, smSelect);
   end;
 end;
 
@@ -4001,6 +4039,7 @@ begin
       end
       else
         SetFocusCore(True);
+  else;
   end;
 end;
 
@@ -4024,7 +4063,8 @@ var
   ALastCell: TACLCompoundControlBaseContentCell;
   I: Integer;
 begin
-  if ContentViewInfo.ViewItems.Find(AFirstObject, AFirstCell) and ContentViewInfo.ViewItems.Find(ALastObject, ALastCell) then
+  if ContentViewInfo.ViewItems.Find(AFirstObject, AFirstCell) and
+     ContentViewInfo.ViewItems.Find(ALastObject, ALastCell) then
   begin
     AIndex1 := ContentViewInfo.ViewItems.IndexOf(AFirstCell);
     AIndex2 := ContentViewInfo.ViewItems.IndexOf(ALastCell);
@@ -4090,13 +4130,14 @@ begin
   end;
 end;
 
-procedure TACLTreeListSubClass.StylePrepareFont(ACanvas: TCanvas; AFontIndex: Integer; ASuperscript: Boolean);
+procedure TACLTreeListSubClass.StylePrepareFont(
+  ACanvas: TCanvas; AFontIndex: Integer; ASuperscript: Boolean);
 begin
   ACanvas.Refresh;
   ACanvas.Brush.Style := bsSolid;
 
   if AFontIndex < 0 then
-    ACanvas.Font := Font
+    ACanvas.SetScaledFont(Font)
   else
     ACanvas.Font.Assign(Style.GetFont(AFontIndex));
 
@@ -4189,7 +4230,7 @@ begin
   Result := TACLTreeListViewInfo.Create(Self);
 end;
 
-function TACLTreeListSubClass.GetCaptionForPath(ANode: TACLTreeListNode): UnicodeString;
+function TACLTreeListSubClass.GetCaptionForPath(ANode: TACLTreeListNode): string;
 begin
   Result := ANode.Caption;
 end;
@@ -4237,14 +4278,16 @@ begin
   CallNotifyEvent(Self, OnDragSorting);
 end;
 
-function TACLTreeListSubClass.DoDragSortingDrop(ANode: TACLTreeListNode; AMode: TACLTreeListDropTargetInsertMode): Boolean;
+function TACLTreeListSubClass.DoDragSortingDrop(
+  ANode: TACLTreeListNode; AMode: TACLTreeListDropTargetInsertMode): Boolean;
 begin
   Result := False;
   if Assigned(OnDragSortingNodeDrop) then
     OnDragSortingNodeDrop(Self, ANode, AMode, Result);
 end;
 
-function TACLTreeListSubClass.DoDragSortingOver(ANode: TACLTreeListNode; AMode: TACLTreeListDropTargetInsertMode): Boolean;
+function TACLTreeListSubClass.DoDragSortingOver(
+  ANode: TACLTreeListNode; AMode: TACLTreeListDropTargetInsertMode): Boolean;
 begin
   Result := True;
   if Assigned(OnDragSortingNodeOver) then
@@ -4258,8 +4301,9 @@ begin
     OnDrop(Self, Data, Action, Target, Mode);
 end;
 
-procedure TACLTreeListSubClass.DoDropOver(Data: TACLDropTarget; var Action: TACLDropAction;
-  var Target: TObject; var Mode: TACLTreeListDropTargetInsertMode; var Allow: Boolean);
+procedure TACLTreeListSubClass.DoDropOver(Data: TACLDropTarget;
+  var Action: TACLDropAction; var Target: TObject;
+  var Mode: TACLTreeListDropTargetInsertMode; var Allow: Boolean);
 begin
   if Assigned(OnDropOver) then
     OnDropOver(Self, Data, Action, Target, Mode, Allow);
@@ -4288,14 +4332,15 @@ begin
 end;
 
 procedure TACLTreeListSubClass.DoGetNodeCellDisplayText(
-  ANode: TACLTreeListNode; AValueIndex: Integer; var AText: UnicodeString);
+  ANode: TACLTreeListNode; AValueIndex: Integer; var AText: string);
 begin
   if Assigned(OnGetNodeCellDisplayText) then
     OnGetNodeCellDisplayText(Self, ANode, AValueIndex, AText);
 end;
 
-procedure TACLTreeListSubClass.DoGetNodeCellStyle(AFont: TFont;
-  ANode: TACLTreeListNode; AColumn: TACLTreeListColumn; out ATextAlignment: TAlignment);
+procedure TACLTreeListSubClass.DoGetNodeCellStyle(
+  AFont: TFont; ANode: TACLTreeListNode; AColumn: TACLTreeListColumn;
+  out ATextAlignment: TAlignment);
 var
   AFontStyles: TFontStyles;
 begin
@@ -4366,20 +4411,20 @@ begin
     OnCustomDrawNode(Self, ACanvas, R, ANode, Result);
 end;
 
-function TACLTreeListSubClass.DoCustomDrawNodeCell(ACanvas: TCanvas;
-  const R: TRect; ANode: TACLTreeListNode; AColumn: TACLTreeListColumn): Boolean;
+function TACLTreeListSubClass.DoCustomDrawNodeCell(
+  ACanvas: TCanvas; var AData: TACLTreeListNodeCustomDrawData): Boolean;
 begin
   Result := False;
   if Assigned(OnCustomDrawNodeCell) then
-    OnCustomDrawNodeCell(Self, ACanvas, R, ANode, AColumn, Result);
+    OnCustomDrawNodeCell(Self, ACanvas, AData, Result);
 end;
 
-function TACLTreeListSubClass.DoCustomDrawNodeCellValue(ACanvas: TCanvas; const R: TRect;
-  ANode: TACLTreeListNode; const AText: UnicodeString; AValueIndex: Integer; ATextAlignment: TAlignment): Boolean;
+function TACLTreeListSubClass.DoCustomDrawNodeCellValue(
+  ACanvas: TCanvas; var AData: TACLTreeListNodeCustomDrawData): Boolean;
 begin
   Result := False;
   if Assigned(OnCustomDrawNodeCellValue) then
-    OnCustomDrawNodeCellValue(Self, ACanvas, R, ANode, AText, AValueIndex, ATextAlignment, Result);
+    OnCustomDrawNodeCellValue(Self, ACanvas, AData, Result);
 end;
 
 procedure TACLTreeListSubClass.DoEditKeyDown(var AKey: Word; AShiftState: TShiftState);
@@ -4394,7 +4439,7 @@ begin
     OnEdited(Self, AColumn, ARow);
 end;
 
-procedure TACLTreeListSubClass.DoEditing(ARow, AColumn: Integer; var AValue: UnicodeString);
+procedure TACLTreeListSubClass.DoEditing(ARow, AColumn: Integer; var AValue: string);
 begin
   if Assigned(OnEditing) then
     OnEditing(Self, AColumn, ARow, AValue);
@@ -4510,14 +4555,16 @@ function TACLTreeListSubClass.GetColumnCustomizationMenu: TACLPopupMenu;
 var
   AColumn: TACLTreeListColumn;
   AMenuItem: TMenuItem;
+  I: Integer;
 begin
   if FColumnsCustomizationMenu = nil then
-    FColumnsCustomizationMenu := TACLTreeListColumnCustomizationPopup.Create(Self);
+    FColumnsCustomizationMenu := TACLPopupMenu.Create(Self);
   Result := FColumnsCustomizationMenu;
+  Result.Options.CloseMenuOnItemCheck := False;
   Result.Style.Assign(StyleMenu);
   Result.Style.Collection := StyleMenu.Collection;
   Result.Items.Clear;
-  for var I := 0 to Columns.Count - 1 do
+  for I := 0 to Columns.Count - 1 do
   begin
     AColumn := Columns.ItemsByDrawingIndex[I];
     AMenuItem := Result.Items.AddItem(AColumn.Caption, AColumn.Index, ColumnSetVisibilityHandler);
@@ -4605,7 +4652,7 @@ begin
   Result := IncSearchColumnIndex >= 0;
 end;
 
-function TACLTreeListSubClass.GetHighlightBounds(const AText: UnicodeString;
+function TACLTreeListSubClass.GetHighlightBounds(const AText: string;
   AAbsoluteColumnIndex: Integer; out AHighlightStart, AHighlightFinish: Integer): Boolean;
 begin
   Result := (AAbsoluteColumnIndex = IncSearchColumnIndex) and
@@ -4639,6 +4686,7 @@ end;
 
 procedure TACLTreeListSubClass.ProcessGesture(const AEventInfo: TGestureEventInfo; var AHandled: Boolean);
 begin
+{$IFNDEF FPC}
   if AEventInfo.GestureID = igiPan then
   begin
     if gfBegin in AEventInfo.Flags then
@@ -4647,6 +4695,7 @@ begin
     FTapLocation := AEventInfo.Location;
     AHandled := True;
   end;
+{$ENDIF}
 end;
 
 procedure TACLTreeListSubClass.IncSearchFindCore(Sender: TObject; var AFound: Boolean);
@@ -4831,6 +4880,7 @@ end;
 procedure TACLTreeListSubClass.ToggleGroupExpanded(AGroup: TACLTreeListGroup; AShift: TShiftState);
 var
   AState: Boolean;
+  I: Integer;
 begin
   if ssAlt in AShift then
   begin
@@ -4838,7 +4888,7 @@ begin
     BeginUpdate;
     try
       AState := AGroup.Expanded;
-      for var I := 0 to Groups.Count - 1 do
+      for I := 0 to Groups.Count - 1 do
         Groups[I].Expanded := AState;
     finally
       EndUpdate;
@@ -4860,7 +4910,7 @@ begin
   end;
 end;
 
-procedure TACLTreeListSubClass.ProcessKeyDown(AKey: Word; AShift: TShiftState);
+procedure TACLTreeListSubClass.ProcessKeyDown(var AKey: Word; AShift: TShiftState);
 var
   AColumn: TACLTreeListColumn;
   AExpandable: IACLExpandableObject;
@@ -4908,6 +4958,7 @@ begin
           EndUpdate;
         end;
         UpdateHotTrack;
+        AKey := 0;
       end;
 
     VK_LEFT:
@@ -4916,10 +4967,13 @@ begin
         if OptionsSelection.FocusCell and GetPrevColumn(AColumn) then
           FocusedColumn := AColumn
         else
-          if Supports(FocusedObject, IACLExpandableObject, AExpandable) and AExpandable.CanToggle and AExpandable.Expanded then
+          if Supports(FocusedObject, IACLExpandableObject, AExpandable) and
+            AExpandable.CanToggle and AExpandable.Expanded
+          then
             AExpandable.Expanded := False
           else
             NavigateTo(GetObjectParent(FocusedObject), AShift);
+        AKey := 0;
       end;
 
     VK_RIGHT:
@@ -4928,10 +4982,13 @@ begin
         if OptionsSelection.FocusCell and GetNextColumn(AColumn) then
           FocusedColumn := AColumn
         else
-          if Supports(FocusedObject, IACLExpandableObject, AExpandable) and AExpandable.CanToggle and not AExpandable.Expanded then
+          if Supports(FocusedObject, IACLExpandableObject, AExpandable) and
+            AExpandable.CanToggle and not AExpandable.Expanded
+          then
             AExpandable.Expanded := True
           else
             NavigateTo(GetObjectChild(FocusedObject), AShift);
+        AKey := 0;
       end;
   else
     IncSearch.ProcessKey(AKey, AShift);
@@ -4939,14 +4996,14 @@ begin
   inherited ProcessKeyDown(AKey, AShift);
 end;
 
-procedure TACLTreeListSubClass.ProcessKeyPress(AKey: Char);
+procedure TACLTreeListSubClass.ProcessKeyPress(var AKey: WideChar);
 begin
   if OptionsBehavior.IncSearchColumnIndex >= 0 then
     IncSearch.ProcessKey(AKey);
   inherited ProcessKeyPress(AKey);
 end;
 
-procedure TACLTreeListSubClass.ProcessKeyUp(AKey: Word; AShift: TShiftState);
+procedure TACLTreeListSubClass.ProcessKeyUp(var AKey: Word; AShift: TShiftState);
 begin
   case AKey of
     VK_SHIFT:
@@ -4969,11 +5026,12 @@ procedure TACLTreeListSubClass.ProcessMouseClick(AButton: TMouseButton; AShift: 
 begin
   if HitTest.HitAtColumn then
     ProcessMouseClickAtColumn(AButton, AShift, HitTest.Column)
+  else if HitTest.HitAtGroup then
+    ProcessMouseClickAtGroup(AButton, AShift, HitTest.Group)
+  else if HitTest.HitAtNode and HitTest.IsExpandable and (ssAlt in AShift) and (AButton = mbLeft) then
+    RootNode.ExpandCollapseChildren(not HitTest.Node.Expanded, False)
   else
-    if HitTest.HitAtGroup then
-      ProcessMouseClickAtGroup(AButton, AShift, HitTest.Group)
-    else
-      inherited ProcessMouseClick(AButton, AShift);
+    inherited ProcessMouseClick(AButton, AShift);
 end;
 
 procedure TACLTreeListSubClass.ProcessMouseClickAtColumn(
@@ -4981,7 +5039,6 @@ procedure TACLTreeListSubClass.ProcessMouseClickAtColumn(
 begin
   if AButton <> mbLeft then
     Exit;
-
   if HitTest.IsCheckable then
     RootNode.ChildrenCheckState := TCheckBoxState.Create(RootNode.ChildrenCheckState <> cbChecked)
   else
@@ -5066,8 +5123,13 @@ begin
     if Supports(HitTest.HitObject, IACLSelectableObject) then
       SelectOnMouseDown(AButton, AShift)
     else
-      if HitTest.HitAtContentArea and (AButton = mbLeft) then
-        SelectNone;
+      if (AButton = mbLeft) and HitTest.HitAtContentArea then
+      begin
+        if OptionsBehavior.AllowDefocus then
+          SelectNone
+        else
+          SetFocusedObject(FocusedObject, True, False);
+      end;
   end;
 end;
 
@@ -5474,14 +5536,6 @@ end;
 procedure TACLTreeListSubClass.SetViewportY(const Value: Integer);
 begin
   ViewInfo.Content.ViewportY := Value;
-end;
-
-{ TACLTreeListColumnCustomizationPopup }
-
-procedure TACLTreeListColumnCustomizationPopup.AfterConstruction;
-begin
-  inherited;
-  Options.CloseMenuOnItemCheck := False;
 end;
 
 end.

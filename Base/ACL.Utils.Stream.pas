@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*              Stream Utilities             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Stream Utilities
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Utils.Stream;
 
 {$I ACL.Config.inc}
@@ -20,10 +22,10 @@ uses
   Winapi.Windows,
 {$ENDIF}
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
-  System.Variants,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Types,
+  {System.}Variants,
   // ACL
   ACL.Classes,
   ACL.Classes.ByteBuffer,
@@ -32,6 +34,7 @@ uses
   ACL.Utils.Strings;
 
 type
+  TACLStreamMethod = procedure (AStream: TStream) of object;
   TACLStreamProc = reference to procedure (AStream: TStream);
 
   { EACLCannotModifyReadOnlyStream }
@@ -85,10 +88,12 @@ type
     destructor Destroy; override;
 
     function Read(var Buffer; Count: Longint): Longint; override;
-    function Read(Buffer: TBytes; Offset, Count: Longint): Longint; override; final;
     function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; override;
-    function Write(const Buffer; Count: LongInt): LongInt; override;
+    function Write(const {%H-}Buffer; Count: LongInt): LongInt; override;
+  {$IFDEF DELPHI}
+    function Read(Buffer: TBytes; Offset, Count: Longint): Longint; override; final;
     function Write(const Buffer: TBytes; Offset, Count: Longint): Longint; override; final;
+  {$ENDIF}
 
     class function Unwrap(AStream: TStream): TStream;
   end;
@@ -122,6 +127,7 @@ type
 
   TACLSubStream = class(TACLStreamWrapper)
   strict private
+    FLock: TACLCriticalSection;
     FOffset: Int64;
     FPosition: Int64;
     FSize: Int64;
@@ -129,13 +135,14 @@ type
     function GetSize: Int64; override;
     procedure SetSize(const NewSize: Int64); override;
   public
-    constructor Create(
-      ASource: TStream; const AOffset, ASize: Int64;
+    constructor Create(ASource: TStream; AOffset, ASize: Int64;
       ASourceOwnership: TStreamOwnership = soReference); reintroduce;
+    destructor Destroy; override;
     function Read(var Buffer; Count: Longint): Longint; override;
     function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; override;
     function Write(const Buffer; Count: Longint): Longint; override;
-    //
+    //# Properties
+    property Lock: TACLCriticalSection read FLock;
     property Offset: Int64 read FOffset;
     property Size: Int64 read FSize;
   end;
@@ -159,6 +166,12 @@ type
   { TACLStreamHelper }
 
   TACLStreamHelper = class helper for TStream
+  strict private type
+    // FPC has different order of TValueType elements, so redefine correct one here
+    TValueType = (vaNull, vaList, vaInt8, vaInt16, vaInt32, vaExtended,
+      vaString, vaIdent, vaFalse, vaTrue, vaBinary, vaSet, vaLString,
+      vaNil, vaCollection, vaSingle, vaCurrency, vaDate, vaWString,
+      vaInt64, vaUTF8String, vaDouble);
   public
     procedure Assign(ASource: TStream);
 
@@ -184,8 +197,9 @@ type
     function ReadRect: TRect; inline;
     function ReadSingle: Single; inline;
     function ReadSize: TSize; inline;
-    function ReadString(ALength: Integer): UnicodeString;
+    function ReadString(ALength: Integer): string;
     function ReadStringA(ALength: Integer): AnsiString;
+    function ReadStringU(ALength: Integer): UnicodeString;
     function ReadStringWithLength: UnicodeString;
     function ReadStringWithLengthA: AnsiString;
     function ReadVariant: Variant;
@@ -206,7 +220,10 @@ type
     procedure WriteRect(const AValue: TRect); inline;
     procedure WriteSingle(const AValue: Single); inline;
     procedure WriteSize(const AValue: TSize); inline;
-    function WriteString(const S: UnicodeString; AEncoding: TEncoding = nil): Integer;
+  {$IFNDEF UNICODE}
+    function WriteString(const S: string; AEncoding: TEncoding = nil): Integer; overload;
+  {$ENDIF}
+    function WriteString(const S: UnicodeString; AEncoding: TEncoding = nil): Integer; overload;
     function WriteStringA(const S: AnsiString): Integer;
     function WriteStringWithLength(const S: UnicodeString): Word;
     function WriteStringWithLengthA(const S: AnsiString): Word;
@@ -241,7 +258,9 @@ type
   strict private
     FData: AnsiString;
   protected
-  {$IFDEF DELPHI110ALEXANDRIA}
+  {$IF DEFINED(FPC)}
+    function Realloc(var ANewCapacity: SizeInt): Pointer; override;
+  {$ELSEIF DEFINED(DELPHI110ALEXANDRIA)}
     function Realloc(var ANewCapacity: NativeInt): Pointer; override;
   {$ELSE}
     function Realloc(var ANewCapacity: Integer): Pointer; override;
@@ -261,20 +280,21 @@ procedure StreamCopy(ATargetStream, ASourceStream: TStream; ASize: Int64); overl
 procedure StreamCopy(ATargetStream, ASourceStream: TStream; const AOffset, ASize: Int64); overload;
 
 // I/O Tools
-function StreamCreateReader(const AFileName: UnicodeString): TStream; overload;
-function StreamCreateReader(const AFileName: UnicodeString; out AStream: TStream): Boolean; overload;
-function StreamCreateWriter(const AFileName: UnicodeString): TStream; overload;
-function StreamCreateWriter(const AFileName: UnicodeString; out AStream: TStream): Boolean; overload;
-procedure StreamLoad(AEvent: TACLStreamProc; AStreamContainer: IACLStreamContainer); overload; inline;
-procedure StreamLoad(AEvent: TACLStreamProc; AStream: TStream; AFreeStream: Boolean = True); overload; inline;
-function StreamLoadFromFile(AStream: TStream; const AFileName: UnicodeString): Boolean;
-function StreamResourceExists(AInstance: HINST; const AResourceName: UnicodeString; AResourceType: PWideChar): Boolean;
-function StreamSaveToFile(const AStream: IACLStreamContainer; const AFileName: UnicodeString): Boolean; overload;
-function StreamSaveToFile(const AStream: TStream; const AFileName: UnicodeString): Boolean; overload;
+function StreamCreateReader(const AFileName: string): TStream; overload;
+function StreamCreateReader(const AFileName: string; out AStream: TStream): Boolean; overload;
+function StreamCreateWriter(const AFileName: string): TStream; overload;
+function StreamCreateWriter(const AFileName: string; out AStream: TStream): Boolean; overload;
+procedure StreamLoad(AProc: TACLStreamMethod; AStreamContainer: IACLStreamContainer); overload; inline;
+procedure StreamLoad(AProc: TACLStreamProc; AStreamContainer: IACLStreamContainer); overload; inline;
+procedure StreamLoad(AProc: TACLStreamProc; AStream: TStream; AFreeStream: Boolean = True); overload; inline;
+function StreamLoadFromFile(AStream: TStream; const AFileName: string): Boolean;
+function StreamResourceExists(AInstance: HModule; const AResourceName: string; AResourceType: PChar): Boolean;
+function StreamSaveToFile(const AStream: IACLStreamContainer; const AFileName: string): Boolean; overload;
+function StreamSaveToFile(const AStream: TStream; const AFileName: string): Boolean; overload;
 implementation
 
 uses
-  System.Math,
+  {System.}Math,
   // ACL
   ACL.Math,
   ACL.FastCode,
@@ -395,7 +415,7 @@ end;
 // I/O Tools
 // ---------------------------------------------------------------------------------------------------------------------
 
-function StreamCreateReader(const AFileName: UnicodeString; out AStream: TStream): Boolean; overload;
+function StreamCreateReader(const AFileName: string; out AStream: TStream): Boolean; overload;
 begin
   try
     AStream := StreamCreateReader(AFileName);
@@ -405,17 +425,17 @@ begin
   end;
 end;
 
-function StreamCreateReader(const AFileName: UnicodeString): TStream; overload;
+function StreamCreateReader(const AFileName: string): TStream; overload;
 begin
   Result := TACLBufferedFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
 end;
 
-function StreamCreateWriter(const AFileName: UnicodeString): TStream;
+function StreamCreateWriter(const AFileName: string): TStream;
 begin
   Result := TACLBufferedFileStream.Create(AFileName, fmCreate or fmShareDenyNone);
 end;
 
-function StreamCreateWriter(const AFileName: UnicodeString; out AStream: TStream): Boolean;
+function StreamCreateWriter(const AFileName: string; out AStream: TStream): Boolean;
 begin
   try
     AStream := StreamCreateWriter(AFileName);
@@ -425,31 +445,43 @@ begin
   end;
 end;
 
-procedure StreamLoad(AEvent: TACLStreamProc; AStreamContainer: IACLStreamContainer);
+procedure StreamLoad(AProc: TACLStreamMethod; AStreamContainer: IACLStreamContainer);
 var
-  AStream: TStream;
+  LStream: TStream;
 begin
-  AStream := AStreamContainer.Lock;
+  LStream := AStreamContainer.Lock;
   try
-    AEvent(AStream);
+    AProc(LStream);
   finally
     AStreamContainer.Unlock;
   end;
 end;
 
-procedure StreamLoad(AEvent: TACLStreamProc; AStream: TStream; AFreeStream: Boolean = True);
+procedure StreamLoad(AProc: TACLStreamProc; AStreamContainer: IACLStreamContainer);
+var
+  LStream: TStream;
 begin
-  AEvent(AStream);
+  LStream := AStreamContainer.Lock;
+  try
+    AProc(LStream);
+  finally
+    AStreamContainer.Unlock;
+  end;
+end;
+
+procedure StreamLoad(AProc: TACLStreamProc; AStream: TStream; AFreeStream: Boolean = True);
+begin
+  AProc(AStream);
   if AFreeStream then
     AStream.Free;
 end;
 
-function StreamResourceExists(AInstance: HINST; const AResourceName: UnicodeString; AResourceType: PWideChar): Boolean;
+function StreamResourceExists(AInstance: HModule; const AResourceName: string; AResourceType: PChar): Boolean;
 begin
-  Result := FindResource(AInstance, PWideChar(AResourceName), AResourceType) <> 0;
+  Result := FindResource(AInstance, PChar(AResourceName), AResourceType) <> 0;
 end;
 
-function StreamLoadFromFile(AStream: TStream; const AFileName: UnicodeString): Boolean;
+function StreamLoadFromFile(AStream: TStream; const AFileName: string): Boolean;
 var
   AFileStream: TStream;
 begin
@@ -463,7 +495,7 @@ begin
   end;
 end;
 
-function StreamSaveToFile(const AStream: IACLStreamContainer; const AFileName: UnicodeString): Boolean; overload;
+function StreamSaveToFile(const AStream: IACLStreamContainer; const AFileName: string): Boolean; overload;
 var
   S: TStream;
 begin
@@ -475,7 +507,7 @@ begin
   end;
 end;
 
-function StreamSaveToFile(const AStream: TStream; const AFileName: UnicodeString): Boolean;
+function StreamSaveToFile(const AStream: TStream; const AFileName: string): Boolean;
 var
   AFileStream: TStream;
 begin
@@ -506,7 +538,7 @@ constructor TACLStreamContainer.Create(const AStream: TStream; ASize: Integer);
 begin
   Create;
   if ASize < 0 then
-    ASize := AStream.Size - AStream.Position;
+    ASize := AStream.Available;
   FData.Size := ASize;
   AStream.ReadBuffer(FData.Memory^, ASize);
 end;
@@ -580,11 +612,6 @@ begin
   Result := Source.Read(Buffer, Count);
 end;
 
-function TACLStreamWrapper.Read(Buffer: TBytes; Offset, Count: Longint): Longint;
-begin
-  Result := Read(Buffer[Offset], Count);
-end;
-
 function TACLStreamWrapper.Seek(const Offset: Int64; Origin: TSeekOrigin): Int64;
 begin
   Result := Source.Seek(Offset, Origin);
@@ -595,10 +622,17 @@ begin
   Result := Source.Write(Buffer, Count);
 end;
 
+{$IFDEF DELPHI}
+function TACLStreamWrapper.Read(Buffer: TBytes; Offset, Count: Longint): Longint;
+begin
+  Result := Read(Buffer[Offset], Count);
+end;
+
 function TACLStreamWrapper.Write(const Buffer: TBytes; Offset, Count: Longint): Longint;
 begin
   Result := Write(Buffer[Offset], Count);
 end;
+{$ENDIF}
 
 function TACLStreamWrapper.GetSize: Int64;
 begin
@@ -729,14 +763,22 @@ end;
 
 { TACLSubStream }
 
-constructor TACLSubStream.Create(ASource: TStream; const AOffset, ASize: Int64; ASourceOwnership: TStreamOwnership = soReference);
+constructor TACLSubStream.Create(ASource: TStream;
+  AOffset, ASize: Int64; ASourceOwnership: TStreamOwnership);
 var
   ARealSize: Int64;
 begin
   inherited Create(ASource, ASourceOwnership);
+  FLock := TACLCriticalSection.Create;
   ARealSize := Source.Size;
   FOffset := Min(AOffset, ARealSize);
   FSize := Min(ASize, ARealSize - FOffset);
+end;
+
+destructor TACLSubStream.Destroy;
+begin
+  FreeAndNil(FLock);
+  inherited Destroy;
 end;
 
 function TACLSubStream.GetSize: Int64;
@@ -746,14 +788,14 @@ end;
 
 function TACLSubStream.Read(var Buffer; Count: Longint): Longint;
 begin
-  TMonitor.Enter(Source);
+  FLock.Enter;
   try
     Source.Position := FPosition + FOffset;
     Result := Source.Read(Buffer, Min(Count, FSize - FPosition));
     if Result > 0 then
       Inc(FPosition, Result);
   finally
-    TMonitor.Exit(Source);
+    FLock.Leave;
   end;
 end;
 
@@ -778,6 +820,9 @@ end;
 
 function TACLSubStream.Write(const Buffer; Count: Longint): Longint;
 begin
+{$IFDEF FPC}
+  Result := 0;
+{$ENDIF}
   raise EACLCannotModifyReadOnlyStream.Create;
 end;
 
@@ -811,17 +856,17 @@ end;
 
 function TACLStreamHelper.ReadBoolean: Boolean;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadByte: Byte;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadDouble: Double;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadDoubleBE: Double;
@@ -834,12 +879,12 @@ end;
 
 function TACLStreamHelper.ReadGuid: TGUID;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadInt32: Integer;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadInt32BE: Integer;
@@ -849,7 +894,7 @@ end;
 
 function TACLStreamHelper.ReadInt64: Int64;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadInt64BE: Int64;
@@ -859,53 +904,49 @@ end;
 
 function TACLStreamHelper.ReadRect: TRect;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadSingle: Single;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadSize: TSize;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
-function TACLStreamHelper.ReadString(ALength: Integer): UnicodeString;
+function TACLStreamHelper.ReadString(ALength: Integer): string;
 begin
-  if ALength > 0 then
-  begin
-    SetLength(Result, ALength);
-    ReadBuffer(Result[1], SizeOf(WideChar) * ALength);
-  end
-  else
-    Result := EmptyStr;
+  Result := acString(ReadStringU(ALength)); // Unicode-based, for backward compatibility
 end;
 
 function TACLStreamHelper.ReadStringA(ALength: Integer): AnsiString;
 begin
   if ALength > 0 then
   begin
-    SetLength(Result, ALength);
+    SetLength(Result{%H-}, ALength);
     ReadBuffer(Result[1], ALength);
   end
   else
-    Result := EmptyAnsiStr;
+    Result := acEmptyStrA;
+end;
+
+function TACLStreamHelper.ReadStringU(ALength: Integer): UnicodeString;
+begin
+  if ALength > 0 then
+  begin
+    SetLength(Result{%H-}, ALength);
+    ReadBuffer(Result[1], SizeOf(WideChar) * ALength);
+  end
+  else
+    Result := acEmptyStrU;
 end;
 
 function TACLStreamHelper.ReadStringWithLength: UnicodeString;
-var
-  ALength: Word;
 begin
-  ALength := ReadWord;
-  if ALength > 0 then
-  begin
-    SetLength(Result, ALength);
-    ReadBuffer(PWideChar(Result)^, 2 * ALength);
-  end
-  else
-    Result := EmptyStr;
+  Result := ReadStringU(ReadWord);
 end;
 
 function TACLStreamHelper.ReadStringWithLengthA: AnsiString;
@@ -917,17 +958,18 @@ function TACLStreamHelper.ReadVariant: Variant;
 const
   ValTtoVarT: array[TValueType] of Integer =
   (
-    varNull, varError, varShortInt, varSmallInt, varInteger, varDouble, varString, varError, varBoolean,
-    varBoolean, varError, varError, varString, varEmpty, varError, varSingle, varCurrency, varDate, varOleStr,
-    varInt64, varError, varDouble
+    varNull, varError, varShortInt, varSmallInt, varInteger, varDouble, varString,
+    varError, varBoolean, varBoolean, varError, varError, varString, varEmpty,
+    varError, varSingle, varCurrency, varDate, varOleStr, varInt64, varError, varDouble
   );
 var
-  ASize: Integer;
-  AValueType: TValueType;
+  LSize: Integer;
+  LValueType: TValueType;
+  I: Integer;
 begin
-  VarClear(Result);
-  AValueType := TValueType(ReadByte);
-  case AValueType of
+  VarClear(Result{%H-});
+  LValueType := TValueType(ReadByte);
+  case LValueType of
     vaNil:
       Exit;
     vaNull:
@@ -949,26 +991,26 @@ begin
     vaDate:
       TVarData(Result).VDate := ReadDouble;
     vaFalse, vaTrue:
-      TVarData(Result).VBoolean := AValueType = vaTrue;
+      TVarData(Result).VBoolean := LValueType = vaTrue;
     vaString:
       Exit(ReadStringWithLength);
     vaList:
       begin
-        ASize := ReadVariant;
-        Result := VarArrayCreate([0, ASize - 1], varVariant);
-        for var I := 0 to ASize - 1 do
+        LSize := ReadVariant;
+        Result := VarArrayCreate([0, LSize - 1], varVariant);
+        for I := 0 to LSize - 1 do
           Result[I] := ReadVariant;
         Exit;
       end;
   else
     raise EReadError.Create(sErrorUnsupportedVariantType);
   end;
-  TVarData(Result).VType := ValTtoVarT[AValueType];
+  TVarData(Result).VType := ValTtoVarT[LValueType];
 end;
 
 function TACLStreamHelper.ReadWord: Word;
 begin
-  ReadBuffer(Result, SizeOf(Result));
+  ReadBuffer(Result{%H-}, SizeOf(Result));
 end;
 
 function TACLStreamHelper.ReadWordBE: Word;
@@ -1329,6 +1371,16 @@ begin
     WriteBuffer(S[1], Result);
   Inc(Result, SizeOf(Result));
 end;
+
+{$IFNDEF UNICODE}
+function TACLStreamHelper.WriteString(const S: string; AEncoding: TEncoding = nil): Integer;
+begin
+  if acIsNativeStringEncoding(AEncoding) then
+    Result := WriteStringA(S)
+  else
+    Result := WriteString(acUString(S), AEncoding);
+end;
+{$ENDIF}
 
 procedure TACLStreamHelper.WriteVariant(const AValue: Variant);
 

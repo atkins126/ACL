@@ -1,37 +1,42 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*       Material Design like Palette        *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Material Design like Palette
+//  Based on:
+//             https://android.googlesource.com/platform/frameworks/base.git/+/master/packages/SystemUI/src/com/android/systemui/statusbar/notification/MediaNotificationProcessor.java
+//             https://developer.android.com/training/material/palette-colors#extract-color-profiles
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Graphics.Palette;
 
 {$I ACL.Config.inc}
-
-// Based on:
-// https://android.googlesource.com/platform/frameworks/base.git/+/master/packages/SystemUI/src/com/android/systemui/statusbar/notification/MediaNotificationProcessor.java
-// https://developer.android.com/training/material/palette-colors#extract-color-profiles
 
 {.$DEFINE DEBUG_DUMP_ACCENT_PALETTE_QUANTANIZER}
 
 interface
 
 uses
-  Winapi.Windows,
+{$IFDEF MSWINDOWS}
+  Windows,
+{$ELSE}
+  LCLType,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Collections,
-  System.Generics.Defaults,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Generics.Collections,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // VCL
-  Vcl.Graphics,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes.Collections,
   ACL.Graphics,
@@ -85,7 +90,7 @@ type
     QuantizeMaskL = (MaxByte shr QuantizeFactorL) shl QuantizeFactorL;
     QuantizeMaskS = (MaxByte shr QuantizeFactorS) shl QuantizeFactorS;
   strict private type
-    TFilterFunc = reference to function (const S: TACLPaletteSwatch): Boolean;
+    TFilterFunc = reference to function (const A: TACLPaletteSwatch): Boolean;
   {$REGION 'Private Types'}
     TTarget = record
       LMax: Byte;
@@ -109,20 +114,24 @@ type
   protected
     FSwatches: array[TACLPaletteSwatchType] of TACLPaletteSwatch;
 
-    procedure CalculateBackground(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch);
-    procedure CalculateDominant(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch; AFilterProc: TFilterFunc = nil);
-    procedure CalculateForeground(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch);
-    procedure CalculateTarget(ASwatches: TACLPaletteSwatches; ATarget: TTarget; var ASwatch: TACLPaletteSwatch);
-    procedure GenerateCore(AColors: PRGBQuad; ACount: Integer);
+    procedure CalculateBackground(ASwatches: TACLPaletteSwatches;
+      out ASwatch: TACLPaletteSwatch);
+    procedure CalculateDominant(ASwatches: TACLPaletteSwatches;
+      out ASwatch: TACLPaletteSwatch; AFilterProc: TFilterFunc = nil);
+    procedure CalculateForeground(ASwatches: TACLPaletteSwatches;
+      out ASwatch: TACLPaletteSwatch);
+    procedure CalculateTarget(ASwatches: TACLPaletteSwatches;
+      const ATarget: TTarget; out ASwatch: TACLPaletteSwatch);
+    procedure GenerateCore(AColors: PACLPixel32; ACount: Integer);
     function HasEnoughPopulation(const ASwatch: TACLPaletteSwatch): Boolean;
     function IsBlackOrWhite(const ASwatch: TACLPaletteSwatch): Boolean; inline;
     function IsContrastWithBackground(const ASwatch: TACLPaletteSwatch): Boolean;
-    function QuantizeColors(AColors: PRGBQuad; ACount: Integer): TACLPaletteSwatches;
+    function QuantizeColors(AColors: PACLPixel32; ACount: Integer): TACLPaletteSwatches;
     function SelectMutedCandidate(const S1, S2: TACLPaletteSwatch): TACLPaletteSwatch;
     function SelectVibrantCandidate(const S1, S2: TACLPaletteSwatch): TACLPaletteSwatch;
   public
     procedure Generate(ABitmap: TBitmap); overload;
-    procedure Generate(ALayer: TACLBitmapLayer); overload;
+    procedure Generate(ALayer: TACLDib); overload;
     procedure Generate(DC: HDC; const R: TRect); overload;
     procedure Reset;
 
@@ -205,7 +214,7 @@ begin
   Generate(ABitmap.Canvas.Handle, Rect(0, 0, ABitmap.Width, ABitmap.Height));
 end;
 
-procedure TACLPalette.Generate(ALayer: TACLBitmapLayer);
+procedure TACLPalette.Generate(ALayer: TACLDib);
 begin
   Generate(ALayer.Handle, ALayer.ClientRect);
 end;
@@ -223,7 +232,9 @@ begin
     AWorkLayer := TACLBitmapLayer.Create(Min(BufferSize, R.Width), Min(BufferSize, R.Height));
 //  {$ENDIF}
     try
+    {$IFDEF MSWINDOWS}
       SetStretchBltMode(AWorkLayer.Handle, HALFTONE);
+    {$ENDIF}
       acStretchBlt(AWorkLayer.Handle, DC, AWorkLayer.ClientRect, R);
       GenerateCore(@AWorkLayer.Colors^[0], AWorkLayer.ColorCount);
 
@@ -250,7 +261,8 @@ begin
     FSwatches[I].Population := 0;
 end;
 
-procedure TACLPalette.CalculateBackground(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch);
+procedure TACLPalette.CalculateBackground(
+  ASwatches: TACLPaletteSwatches; out ASwatch: TACLPaletteSwatch);
 var
   AIndex: TACLPaletteSwatch;
   AMaxPopulation: Integer;
@@ -276,7 +288,8 @@ begin
   end;
 end;
 
-procedure TACLPalette.CalculateDominant(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch; AFilterProc: TFilterFunc = nil);
+procedure TACLPalette.CalculateDominant(ASwatches: TACLPaletteSwatches;
+  out ASwatch: TACLPaletteSwatch; AFilterProc: TFilterFunc = nil);
 var
   AIndex: TACLPaletteSwatch;
   AMaxPopulation: Integer;
@@ -294,7 +307,8 @@ begin
   end;
 end;
 
-procedure TACLPalette.CalculateForeground(ASwatches: TACLPaletteSwatches; var ASwatch: TACLPaletteSwatch);
+procedure TACLPalette.CalculateForeground(
+  ASwatches: TACLPaletteSwatches; out ASwatch: TACLPaletteSwatch);
 const
   MutedMap: array[Boolean] of TACLPaletteSwatchType = (pstDarkMuted, pstLightMuted);
   VibrantMap: array[Boolean] of TACLPaletteSwatchType = (pstDarkVibrant, pstLightVibrant);
@@ -321,7 +335,8 @@ begin
   end;
 end;
 
-procedure TACLPalette.CalculateTarget(ASwatches: TACLPaletteSwatches; ATarget: TTarget; var ASwatch: TACLPaletteSwatch);
+procedure TACLPalette.CalculateTarget(ASwatches: TACLPaletteSwatches;
+  const ATarget: TTarget; out ASwatch: TACLPaletteSwatch);
 var
   AIndex: TACLPaletteSwatch;
   AMaxPopulation: Word;
@@ -342,8 +357,8 @@ begin
 
     AScore :=
       0.24 * (AIndex.Population / AMaxPopulation) +
-      0.52 * (MaxByte - FastAbs(AIndex.L - ATarget.LTarget)) +
-      0.24 * (MaxByte - FastAbs(AIndex.S - ATarget.STarget));
+      0.52 * (MaxByte - FastAbs(Integer(AIndex.L - ATarget.LTarget))) +
+      0.24 * (MaxByte - FastAbs(Integer(AIndex.S - ATarget.STarget)));
 
     if AScore > AMaxScore then
     begin
@@ -353,7 +368,7 @@ begin
   end;
 end;
 
-procedure TACLPalette.GenerateCore(AColors: PRGBQuad; ACount: Integer);
+procedure TACLPalette.GenerateCore(AColors: PACLPixel32; ACount: Integer);
 var
   ASwatches: TACLPaletteSwatches;
 begin
@@ -378,7 +393,7 @@ begin
   end;
 end;
 
-function TACLPalette.QuantizeColors(AColors: PRGBQuad; ACount: Integer): TACLPaletteSwatches;
+function TACLPalette.QuantizeColors(AColors: PACLPixel32; ACount: Integer): TACLPaletteSwatches;
 var
   H, S, L: Byte;
 begin
@@ -386,7 +401,7 @@ begin
   while ACount > 0 do
   begin
     with AColors^ do
-      TACLColors.RGBtoHSLi(rgbRed, rgbGreen, rgbBlue, H, S, L);
+      TACLColors.RGBtoHSLi(R, G, B, H, S, L);
 
     H := H and QuantizeMaskH;
     L := L and QuantizeMaskL;
@@ -395,7 +410,7 @@ begin
     Result.Add(H, S, L);
   {$IFDEF DEBUG_DUMP_ACCENT_PALETTE_QUANTANIZER}
     with AColors^ do
-      TACLColors.HSLtoRGBi(H, S, L, rgbRed, rgbGreen, rgbBlue);
+      TACLColors.HSLtoRGBi(H, S, L, R, G, B);
   {$ENDIF}
 
     Inc(AColors);
@@ -420,7 +435,8 @@ end;
 
 function TACLPalette.IsContrastWithBackground(const ASwatch: TACLPaletteSwatch): Boolean;
 begin
-  Result := not IsBlackOrWhite(ASwatch) and (FastAbs(ASwatch.H - FSwatches[pstBackground].H) > 7); // 7 = 10°/360° * 255
+  Result := not IsBlackOrWhite(ASwatch) and
+    (FastAbs(Integer(ASwatch.H - FSwatches[pstBackground].H)) > 7); // 7 = 10°/360° * 255
 end;
 
 function TACLPalette.SelectMutedCandidate(const S1, S2: TACLPaletteSwatch): TACLPaletteSwatch;

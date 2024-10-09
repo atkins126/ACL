@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             Editors Controls              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2024                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   CheckComboBox
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.CheckComboBox;
 
 {$I ACL.Config.inc}
@@ -16,22 +18,20 @@ unit ACL.UI.Controls.CheckComboBox;
 interface
 
 uses
-  System.Classes,
-  System.Types,
+  {System.}Classes,
+  {System.}SysUtils,
+  {System.}Types,
   // VCL
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.StdCtrls,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}StdCtrls,
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
-  ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.SkinImage,
   ACL.MUI,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
-  ACL.UI.Controls.Buttons,
   ACL.UI.Controls.ComboBox,
   ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Controls.TreeList,
@@ -52,16 +52,16 @@ type
   strict private
     FChecked: Boolean;
     FTag: NativeInt;
-    FText: UnicodeString;
+    FText: string;
 
     procedure SetChecked(AChecked: Boolean);
-    procedure SetText(const Value: UnicodeString);
+    procedure SetText(const Value: string);
   public
     procedure Assign(Source: TPersistent); override;
   published
     property Checked: Boolean read FChecked write SetChecked default False;
     property Tag: NativeInt read FTag write FTag default 0;
-    property Text: UnicodeString read FText write SetText;
+    property Text: string read FText write SetText;
   end;
 
   { TACLCheckComboBoxItems }
@@ -80,10 +80,10 @@ type
     procedure UpdateCore(Item: TCollectionItem); override;
   public
     constructor Create(ACombo: TACLCheckComboBox);
-    function Add(const AText: UnicodeString; AChecked: Boolean): TACLCheckComboBoxItem;
+    function Add(const AText: string; AChecked: Boolean): TACLCheckComboBoxItem;
     procedure EnumChecked(AProc: TACLCheckComboBoxItemsEnumProc);
     function FindByTag(const ATag: NativeInt; out AItem: TACLCheckComboBoxItem): Boolean;
-    function FindByText(const AText: UnicodeString; out AItem: TACLCheckComboBoxItem): Boolean;
+    function FindByText(const AText: string; out AItem: TACLCheckComboBoxItem): Boolean;
     //# Properties
     property Items[Index: Integer]: TACLCheckComboBoxItem read GetItem; default;
     property State: TCheckBoxState read GetState write SetState;
@@ -116,7 +116,7 @@ type
   TACLCheckComboBox = class(TACLCustomComboBox)
   strict private
     FItems: TACLCheckComboBoxItems;
-    FSeparator: WideChar;
+    FSeparator: Char;
 
     FOnGetDisplayItemGroupName: TACLCheckComboBoxGetItemDisplayTextEvent;
     FOnGetDisplayItemName: TACLCheckComboBoxGetItemDisplayTextEvent;
@@ -125,7 +125,7 @@ type
     function GetCount: Integer;
     function IsSeparatorStored: Boolean;
     procedure SetItems(AValue: TACLCheckComboBoxItems);
-    procedure SetSeparator(AValue: WideChar);
+    procedure SetSeparator(AValue: Char);
   protected
     function CreateDropDownWindow: TACLPopupWindow; override;
     procedure DoGetDisplayText(AItem: TACLCheckComboBoxItem; var AText: string); virtual;
@@ -140,7 +140,7 @@ type
   published
     property Borders;
     property Items: TACLCheckComboBoxItems read FItems write SetItems;
-    property Separator: WideChar read FSeparator write SetSeparator stored IsSeparatorStored;
+    property Separator: Char read FSeparator write SetSeparator stored IsSeparatorStored;
     property ResourceCollection;
     property Style;
     property StyleButton;
@@ -166,10 +166,6 @@ type
 
 implementation
 
-uses
-  System.Math,
-  System.SysUtils;
-
 { TACLCheckComboBoxItem }
 
 procedure TACLCheckComboBoxItem.Assign(Source: TPersistent);
@@ -192,7 +188,7 @@ begin
   end;
 end;
 
-procedure TACLCheckComboBoxItem.SetText(const Value: UnicodeString);
+procedure TACLCheckComboBoxItem.SetText(const Value: string);
 begin
   if FText <> Value then
   begin
@@ -209,7 +205,7 @@ begin
   inherited Create(TACLCheckComboBoxItem);
 end;
 
-function TACLCheckComboBoxItems.Add(const AText: UnicodeString; AChecked: Boolean): TACLCheckComboBoxItem;
+function TACLCheckComboBoxItems.Add(const AText: string; AChecked: Boolean): TACLCheckComboBoxItem;
 begin
   BeginUpdate;
   try
@@ -247,7 +243,7 @@ begin
   Result := False;
 end;
 
-function TACLCheckComboBoxItems.FindByText(const AText: UnicodeString; out AItem: TACLCheckComboBoxItem): Boolean;
+function TACLCheckComboBoxItems.FindByText(const AText: string; out AItem: TACLCheckComboBoxItem): Boolean;
 var
   I: Integer;
 begin
@@ -280,10 +276,11 @@ end;
 function TACLCheckComboBoxItems.GetState: TCheckBoxState;
 var
   AHasChecked, AHasUnchecked: Boolean;
+  I: Integer;
 begin
   AHasChecked := False;
   AHasUnchecked := False;
-  for var I := 0 to Count - 1 do
+  for I := 0 to Count - 1 do
   begin
     if Items[I].Checked then
       AHasChecked := True
@@ -336,13 +333,14 @@ var
   LItem: TACLCheckComboBoxItem;
   LNode: TACLTreeListNode;
   LText: string;
+  I: Integer;
 begin
   if Assigned(Owner.OnGetDisplayItemGroupName) then
   begin
     AList.OnGetNodeGroup := HandlerGetGroupName;
     AList.OptionsBehavior.Groups := True;
   end;
-  for var I := 0 to Owner.Count - 1 do
+  for I := 0 to Owner.Count - 1 do
   begin
     LItem := Owner.Items.Items[I];
     LText := LItem.Text;
@@ -402,12 +400,13 @@ procedure TACLCheckComboBox.SetTextCore(const AText: string);
 var
   LItem: TACLCheckComboBoxItem;
   LStrings: TStringDynArray;
+  I: Integer;
 begin
   Items.BeginUpdate;
   try
     Items.State := cbUnchecked;
     acExplodeString(AText, Separator, LStrings);
-    for var I := 0 to Length(LStrings) - 1 do
+    for I := 0 to Length(LStrings) - 1 do
     begin
       if Items.FindByText(LStrings[I], LItem) then
         LItem.Checked := True;
@@ -466,7 +465,7 @@ begin
   Items.Assign(AValue);
 end;
 
-procedure TACLCheckComboBox.SetSeparator(AValue: WideChar);
+procedure TACLCheckComboBox.SetSeparator(AValue: Char);
 begin
   if FSeparator <> AValue then
   begin
@@ -481,8 +480,9 @@ class procedure TACLCheckComboBoxUIInsightAdapter.GetChildren(
   AObject: TObject; ABuilder: TACLUIInsightSearchQueueBuilder);
 var
   LCheckComboBox: TACLCheckComboBox absolute AObject;
+  I: Integer;
 begin
-  for var I := 0 to LCheckComboBox.Count - 1 do
+  for I := 0 to LCheckComboBox.Count - 1 do
     ABuilder.AddCandidate(LCheckComboBox, LCheckComboBox.Items[I].Text);
 end;
 

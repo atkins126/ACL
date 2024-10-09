@@ -1,27 +1,33 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*              Common Classes               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Raw data containers
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Classes.ByteBuffer;
 
-{$I ACL.Config.INC}
+{$I ACL.Config.inc}
 
 interface
 
 uses
-  System.Classes,
-  System.SysUtils,
+{$IFDEF MSWINDOWS}
+  Windows, // inlining
+{$ENDIF}
+  // System
+  {System.}Classes,
+  {System.}SysUtils,
   // ACL
   ACL.Math,
-  ACL.Utils.Common,
-  ACL.Threading;
+  ACL.Threading,
+  ACL.Utils.Common;
 
 type
 
@@ -39,7 +45,7 @@ type
     constructor Create(AData: PByte; ASize: Integer);
     function Read(ANumBits: Byte = 1): Integer;
     procedure Skip(ANumBits: Byte = 1);
-    //
+    //# Properties
     property Position: Integer read FPosition write SetPosition;
     property Remain: Integer read GetRemain;
     property Size: Integer read FSize;
@@ -64,7 +70,7 @@ type
     destructor Destroy; override;
     function Equals(Obj: TObject): Boolean; override;
     procedure Flush(AZeroMem: Boolean = True); virtual;
-    //
+    //# Properties
     property Data: PByte read FData;
     property DataArr: PByteArray read FDataArr;
     property Size: Integer read FSize write SetSize;
@@ -91,14 +97,13 @@ type
   public
     constructor Create(ASize: Integer);
     destructor Destroy; override;
-    procedure Compact(AMaxSize: Integer);
-    procedure Flush;
-    //
     function BeginRead(out ABuffer: PByte; out ASize: Integer): Boolean;
     procedure BeginWrite(out ABuffer: PByte; out ASize: Integer);
+    procedure Compact(AMaxSize: Integer);
+    procedure Flush;
     procedure EndRead(ASize: Integer);
     procedure EndWrite(ASize: Integer);
-    //
+    //# Properties
     property Data: PByte read FData;
     property DataAmount: Integer read GetDataAmount;
     property HasDataForWrite: Boolean read GetHasDataForWrite;
@@ -110,6 +115,7 @@ type
   ['{FBF02DB8-6F2B-42AC-9F87-FB8A313CDDD7}']
     function GetDataPtr: PByte;
     function GetDataSize: Integer;
+    function GetDataUnsafe: TMemoryStream; // unsafe!!! use LockData instead
     function SetDataSize(AValue: Integer): Boolean;
 
     function LockData: TMemoryStream;
@@ -126,11 +132,12 @@ type
     constructor Create; overload;
     constructor Create(AStream: TStream); overload;
     constructor Create(AStream: TStream; ASize: Integer); overload;
-    constructor Create(const AFileName: UnicodeString); overload;
+    constructor Create(const AFileName: string); overload;
     destructor Destroy; override;
     // IACLDataContainer
     function GetDataPtr: PByte;
     function GetDataSize: Integer;
+    function GetDataUnsafe: TMemoryStream;
     function SetDataSize(AValue: Integer): Boolean;
     function LockData: TMemoryStream;
     procedure UnlockData;
@@ -146,7 +153,7 @@ type
     procedure SetCursor(AValue: Integer);
   public
     procedure Flush(AZeroMem: Boolean = True); override;
-    //
+    //# Properties
     property Available: Integer read GetAvailable;
     property Cursor: Integer read FCursor write SetCursor;
   end;
@@ -159,7 +166,7 @@ type
   public
     function MoveTo(AData: PByte; ADataSize: Integer): Integer;
     procedure Remove(ASize: Integer);
-    //
+    //# Properties
     property Unused: Integer read GetUnused;
   end;
 
@@ -167,12 +174,11 @@ function acCompare(const AContainer1, AContainer2: IACLDataContainer): Boolean;
 implementation
 
 uses
-  System.Math,
-  System.RTLConsts,
+  {System.}Math,
+  {System.}RTLConsts,
   // ACL
   ACL.FastCode,
-  ACL.Utils.FileSystem,
-  ACL.Utils.Stream;
+  ACL.Utils.FileSystem;
 
 function acCompare(const AContainer1, AContainer2: IACLDataContainer): Boolean;
 begin
@@ -470,15 +476,15 @@ begin
   AStream.ReadBuffer(FData.Memory^, ASize);
 end;
 
-constructor TACLDataContainer.Create(const AFileName: UnicodeString);
+constructor TACLDataContainer.Create(const AFileName: string);
 var
-  AStream: TStream;
+  LStream: TStream;
 begin
-  AStream := TACLFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  LStream := TACLFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
   try
-    Create(AStream);
+    Create(LStream);
   finally
-    AStream.Free;
+    LStream.Free;
   end;
 end;
 
@@ -502,6 +508,11 @@ begin
   finally
     FDataLock.Leave;
   end;
+end;
+
+function TACLDataContainer.GetDataUnsafe: TMemoryStream;
+begin
+  Result := FData;
 end;
 
 function TACLDataContainer.SetDataSize(AValue: Integer): Boolean;
@@ -569,3 +580,4 @@ begin
 end;
 
 end.
+

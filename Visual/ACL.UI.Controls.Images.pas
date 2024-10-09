@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*           Image Based Controls            *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2024                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   ImageBox / SubImage Selector
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Images;
 
 {$I ACL.Config.inc}
@@ -16,29 +18,39 @@ unit ACL.UI.Controls.Images;
 interface
 
 uses
-  Winapi.Messages,
-  Winapi.Windows,
-  // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.ImgList,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+  LMessages,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
+  {Winapi.}Messages,
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
+  // Vcl
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}ImgList,
   System.UITypes,
   // ACL
   ACL.Math,
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Geometry,
+  ACL.Geometry.Utils,
   ACL.Graphics,
   ACL.Graphics.Ex,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.ImageList,
-  ACL.UI.Resources;
+  ACL.UI.Resources,
+  ACL.Utils.Common,
+  ACL.Utils.DPIAware;
 
 type
   TACLImagePictureClass = class of TACLImagePicture;
@@ -60,15 +72,15 @@ type
     procedure SetPictureClassName(const Value: string);
   protected
     function CanAutoSize(var NewWidth, NewHeight: Integer): Boolean; override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     procedure Changed;
     procedure Notification(AComponent: TComponent; AOperation: TOperation); override;
     procedure Paint; override;
     procedure SetTargetDPI(AValue: Integer); override;
-    //
+    procedure UpdateTransparency; override;
+    //# Properties
     property PictureRect: TRect read GetPictureRect;
   public
-    class var PictureClasses: TACLList<TACLImagePictureClass>;
+    class var PictureClasses: TACLListOf<TACLImagePictureClass>;
     class constructor Create;
     class destructor Destroy;
     class function GetClassByDescription(const ADesctiption: string): TACLImagePictureClass;
@@ -78,14 +90,14 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    //
+    //# Properties
     property PictureClass: TACLImagePictureClass read GetPictureClass write SetPictureClass;
   published
     property AutoSize;
     property FitMode: TACLFitMode read FFitMode write SetFitMode default afmProportionalStretch;
     property PictureClassName: string read GetPictureClassName write SetPictureClassName; //#AI: before Picture
     property Picture: TACLImagePicture read FPicture write SetPicture;
-    //
+    //# Events
     property OnClick;
     property OnDblClick;
     property OnMouseDown;
@@ -190,7 +202,7 @@ type
     function CalculateHitTest(const P: TPoint): TACLSelectionFrameHitTestCode;
     procedure Draw(ARender: TACL2DRender; ASelectedElement: TACLSelectionFrameHitTestCode = sfeNone); overload;
     procedure Draw(DC: HDC; ASelectedElement: TACLSelectionFrameHitTestCode = sfeNone); overload;
-    //
+    //# Properties
     property AllowedElements: TACLSelectionFrameElements read FAllowedElements write FAllowedElements;
     property Bounds: TRect read FBounds;
     property HandleAlignment: TACLSelectionFrameHandleAlignment read FHandleAlignment write FHandleAlignment;
@@ -227,24 +239,24 @@ type
     procedure SetImageCrop(const Value: TRectF); overload;
     procedure SetImageSize(const Value: TSize);
   protected
+    procedure BoundsChanged; override;
     procedure Calculate;
     procedure Changed;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
     procedure Paint; override;
-    procedure Resize; override;
     procedure SetTargetDPI(AValue: Integer); override;
     procedure UpdateHitTest(X, Y: Integer);
-    // Messages
+    procedure UpdateTransparency; override;
+    //# Messages
     procedure WMGetDlgCode(var AMessage: TWMGetDlgCode); message WM_GETDLGCODE;
-    //
+    //# Properties
     property HitTest: TACLSelectionFrameElement read FHitTest write SetHitTest;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    //
+    //# Properties
     property DisplayImageRect: TRect read FDisplayImageRect;
     property ImageCrop: TRect read GetImageCrop write SetImageCrop;
     property ImageSize: TSize read FImageSize write SetImageSize;
@@ -262,11 +274,37 @@ type
 
 implementation
 
+{$IFNDEF FPC}
 uses
-  System.Math,
-  // ACL
-  ACL.Utils.Common,
-  ACL.Utils.DPIAware;
+  ACL.Graphics.SkinImageSet; // inlining
+{$ENDIF}
+
+procedure acInvertRect(DC: HDC; const R: TRect);
+{$IFDEF FPC}
+var
+  LDib: TACLDib;
+  LPix: PACLPixel32;
+  I: Integer;
+begin
+  LDib := TACLDib.Create(R);
+  try
+    acBitBlt(LDib.handle, DC, LDib.ClientRect, R.TopLeft);
+    for I := 0 to LDib.ColorCount - 1 do
+    begin
+      LPix := @LDib.Colors^[I];
+      LPix^.R := $FF xor LPix^.R;
+      LPix^.G := $FF xor LPix^.G;
+      LPix^.B := $FF xor LPix^.B;
+    end;
+    acBitBlt(DC, LDib.Handle, R, NullPoint);
+  finally
+    LDib.Free;
+  end;
+{$ELSE}
+begin
+  PatBlt(DC, R.Left, R.Top, R.Width, R.Height, PATINVERT);
+{$ENDIF}
+end;
 
 { TACLImageBox }
 
@@ -320,11 +358,6 @@ begin
   end
   else
     Result := NullRect;
-end;
-
-function TACLImageBox.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  Result := cbsTransparent;
 end;
 
 procedure TACLImageBox.Changed;
@@ -397,7 +430,7 @@ end;
 
 class constructor TACLImageBox.Create;
 begin
-  PictureClasses := TACLList<TACLImagePictureClass>.Create;
+  PictureClasses := TACLListOf<TACLImagePictureClass>.Create;
   Register(TACLImagePictureGlyph);
   Register(TACLImagePictureImageList);
 end;
@@ -447,6 +480,11 @@ begin
     PictureClasses.Remove(AClass);
 end;
 
+procedure TACLImageBox.UpdateTransparency;
+begin
+  ControlStyle := ControlStyle - [csOpaque];
+end;
+
 { TACLImagePicture }
 
 constructor TACLImagePicture.Create(AImage: TACLImageBox);
@@ -485,7 +523,7 @@ end;
 
 procedure TACLImagePictureGlyph.Draw(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean);
 begin
-  Glyph.Draw(ACanvas.Handle, R, AEnabled);
+  Glyph.Draw(ACanvas, R, AEnabled);
 end;
 
 class function TACLImagePictureGlyph.GetDescription: string;
@@ -620,6 +658,7 @@ end;
 procedure TACLSelectionFrame.Calculate(const ABounds: TRect; ATargetDpi: Integer);
 var
   ACornerSize: Integer;
+  AElement: TACLSelectionFrameElement;
   ARect: TRect;
   ASideSize: Integer;
 begin
@@ -658,7 +697,7 @@ begin
   FElements[sfeTop] := ARect;
   FElements[sfeTop].Height := ACornerSize;
 
-  for var AElement := Low(TACLSelectionFrameElement) to High(TACLSelectionFrameElement) do
+  for AElement := Low(TACLSelectionFrameElement) to High(TACLSelectionFrameElement) do
   begin
     if not (AElement in AllowedElements) then
       FElements[AElement] := NullRect;
@@ -696,11 +735,13 @@ end;
 procedure TACLSelectionFrame.Draw(ARender: TACL2DRender; ASelectedElement: TACLSelectionFrameHitTestCode);
 
   procedure DrawElements(const AClipRect: TRect);
+  var
+    I: TACLSelectionFrameElement;
+    LClipData: TACL2DRenderRawData;
   begin
-    ARender.SaveClipRegion;
+    if ARender.Clip(AClipRect, LClipData) then
     try
-      ARender.IntersectClipRect(AClipRect);
-      for var I := Low(FElements) to High(FElements) do
+      for I := Low(FElements) to High(FElements) do
       begin
         if I = ASelectedElement then
           ARender.FillHatchRectangle(FElements[I], TAlphaColors.Black, TAlphaColors.White, 1)
@@ -708,7 +749,7 @@ procedure TACLSelectionFrame.Draw(ARender: TACL2DRender; ASelectedElement: TACLS
           ARender.FillRectangle(FElements[I], TAlphaColors.Black);
       end;
     finally
-      ARender.RestoreClipRegion;
+      ARender.ClipRestore(LClipData);
     end;
   end;
 
@@ -745,14 +786,14 @@ procedure TACLSelectionFrame.Draw(DC: HDC; ASelectedElement: TACLSelectionFrameH
       if ASelectedElement = AElement then
         acDrawHatch(DC, R, clWhite, clBlack, 1)
       else
-        PatBlt(DC, R.Left, R.Top, R.Width, R.Height, PATINVERT);
+        acInvertRect(DC, R);
 
       acExcludeFromClipRegion(DC, R.InflateTo(2 * FLineSize));
     end;
   end;
 
 var
-  AClipRgn: HRGN;
+  AClipRgn: TRegionHandle;
   AElement: TACLSelectionFrameElement;
 begin
   AClipRgn := acSaveClipRegion(DC);
@@ -870,7 +911,10 @@ begin
   if not (ssLeft in Shift) then
   begin
     UpdateHitTest(X, Y);
-    Cursor := CursorsMap[CalculateDragMode(Shift)];
+    if PtInRect(DisplayImageRect, Point(X, Y)) then
+      Cursor := CursorsMap[CalculateDragMode(Shift)]
+    else
+      Cursor := crDefault;
     Exit;
   end;
 
@@ -960,11 +1004,6 @@ begin
   SetImageCrop(ARect);
 end;
 
-function TACLSubImageSelector.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  Result := cbsTransparent;
-end;
-
 procedure TACLSubImageSelector.Paint;
 var
   ASaveIndex: Integer;
@@ -987,16 +1026,16 @@ begin
     try
       FSelection.Draw(Canvas.Handle, HitTest);
       acExcludeFromClipRegion(Canvas.Handle, FSelection.Bounds);
-      acFillRect(Canvas.Handle, DisplayImageRect, TAlphaColor.FromColor(clBlack, 160));
+      acFillRect(Canvas, DisplayImageRect, TAlphaColor.FromColor(clBlack, 160));
     finally
       RestoreDC(Canvas.Handle, ASaveIndex);
     end;
   end;
 end;
 
-procedure TACLSubImageSelector.Resize;
+procedure TACLSubImageSelector.BoundsChanged;
 begin
-  inherited Resize;
+  inherited;
   Calculate;
 end;
 
@@ -1009,6 +1048,11 @@ end;
 procedure TACLSubImageSelector.UpdateHitTest(X, Y: Integer);
 begin
   HitTest := FSelection.CalculateHitTest(Point(X, Y));
+end;
+
+procedure TACLSubImageSelector.UpdateTransparency;
+begin
+  ControlStyle := ControlStyle - [csOpaque];
 end;
 
 procedure TACLSubImageSelector.WMGetDlgCode(var AMessage: TWMGetDlgCode);

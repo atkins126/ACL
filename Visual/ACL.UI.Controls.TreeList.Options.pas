@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             TreeList Control              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   TreeList Options
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.TreeList.Options;
 
 {$I ACL.Config.inc}
@@ -16,43 +18,34 @@ unit ACL.UI.Controls.TreeList.Options;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Types,
-  System.Generics.Defaults,
-  System.Generics.Collections,
-  System.SysUtils,
-  System.Classes,
+  {System.}Generics.Defaults,
+  {System.}Classes,
+  {System.}SysUtils,
   System.UITypes,
   // Vcl
-  Vcl.Controls,
-  Vcl.StdCtrls,
-  Vcl.Graphics,
-  Vcl.Forms,
-  Vcl.ImgList,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
+  {Vcl.}ImgList,
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
-  ACL.FileFormats.INI,
   ACL.Geometry,
   ACL.Graphics,
   ACL.ObjectLinks,
   ACL.Threading,
-  ACL.UI.Controls.BaseControls,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
   ACL.UI.Controls.CompoundControl.SubClass,
-  ACL.UI.DropSource,
-  ACL.UI.DropTarget,
-  ACL.UI.Controls.GroupBox,
-  ACL.UI.Controls.Category,
-  ACL.UI.Controls.Panel,
-  ACL.UI.Controls.Labels,
-  ACL.UI.Menus,
-  ACL.UI.Resources,
   ACL.UI.Controls.TreeList.Types,
-  ACL.Utils.Common,
-  ACL.Utils.Desktop;
+  ACL.UI.Resources,
+  ACL.Utils.Common;
 
 type
 
@@ -78,7 +71,7 @@ type
     procedure DoChanged(AChanges: TACLPersistentChanges); override;
   public
     constructor Create(const ATreeList: IACLTreeListOptionsListener); virtual;
-    //
+    //# Properties
     property TreeList: IACLTreeListOptionsListener read FTreeList;
   end;
 
@@ -108,6 +101,7 @@ type
 
   TACLTreeListOptionsBehavior = class(TACLTreeListCustomOptions)
   strict private
+    FAllowDefocus: Boolean;
     FAutoBestFit: Boolean;
     FAutoCheckParents: Boolean;
     FAutoCheckChildren: Boolean;
@@ -148,9 +142,10 @@ type
   public
     constructor Create(const ATreeList: IACLTreeListOptionsListener); override;
   published
+    property AllowDefocus: Boolean read FAllowDefocus write FAllowDefocus default True;
     property AutoBestFit: Boolean read FAutoBestFit write SetAutoBestFit default False;
-    property AutoCheckParents: Boolean read FAutoCheckParents write SetAutoCheckParents default False;
     property AutoCheckChildren: Boolean read FAutoCheckChildren write SetAutoCheckChildren default False;
+    property AutoCheckParents: Boolean read FAutoCheckParents write SetAutoCheckParents default False;
     property CellHints: Boolean read FCellHints write FCellHints default True;
     property Deleting: Boolean read FDeleting write FDeleting default False;
     property DragSorting: Boolean read FDragSorting write FDragSorting default False;
@@ -359,6 +354,7 @@ end;
 constructor TACLTreeListOptionsBehavior.Create(const ATreeList: IACLTreeListOptionsListener);
 begin
   inherited Create(ATreeList);
+  FAllowDefocus := True;
   FIncSearchColumnIndex := -1;
   FSortingMode := tlsmMulti;
   FSortingUseMultithreading := True;
@@ -371,6 +367,7 @@ begin
   inherited DoAssign(Source);
   if Source is TACLTreeListOptionsBehavior then
   begin
+    AllowDefocus := TACLTreeListOptionsBehavior(Source).AllowDefocus;
     AutoBestFit := TACLTreeListOptionsBehavior(Source).AutoBestFit;
     AutoCheckParents := TACLTreeListOptionsBehavior(Source).AutoCheckParents;
     AutoCheckChildren := TACLTreeListOptionsBehavior(Source).AutoCheckChildren;

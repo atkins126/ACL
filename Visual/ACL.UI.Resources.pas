@@ -1,15 +1,16 @@
-﻿
-{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*              Styles Support               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Styling Engine
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Resources;
 
 {$I ACL.Config.inc}
@@ -18,25 +19,28 @@ unit ACL.UI.Resources;
 interface
 
 uses
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
   Winapi.Windows,
+{$ENDIF}
   // System
+  {System.}Classes,
+  {System.}Generics.Defaults,
+  {System.}Generics.Collections,
+  {System.}Variants,
+  {System.}Types,
   System.UITypes,
-  System.Types,
-  System.Variants,
-  System.Classes,
-  System.Generics.Defaults,
-  System.Generics.Collections,
   // VCL
-  Vcl.Graphics,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
   ACL.Classes.StringList,
-  ACL.FastCode,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
-  ACL.Graphics.Ex.Gdip,
   ACL.Graphics.FontCache,
   ACL.Graphics.SkinImage,
   ACL.Graphics.SkinImageSet,
@@ -44,7 +48,12 @@ uses
   ACL.UI.Application,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
+  ACL.Utils.FileSystem,
   ACL.Utils.RTTI;
+
+const
+  crDragRemove = TCursor(-25);
+  crDragLink = TCursor(-26);
 
 type
   TACLGlyph = class;
@@ -415,11 +424,12 @@ type
     function EqualsValuesCore(AResource: TACLResource): Boolean; override;
     procedure Initialize; override;
     procedure LoadFromBitmapResourceCore(AInstance: HINST;
-      const AName: UnicodeString; const AMargins, AContentOffsets: TRect;
+      const AName: string; const AMargins, AContentOffsets: TRect;
       AFrameCount: Integer; ALayout: TACLSkinImageLayout = ilHorizontal;
       AStretchMode: TACLStretchMode = isStretch);
 
-    function GetActualImage(ATargetDPI: Integer; AAllowColoration: TACLBoolean): TACLSkinImageSetItem; virtual;
+    function GetActualImage(ATargetDPI: Integer;
+      AAllowColoration: TACLBoolean): TACLSkinImageSetItem; virtual;
     function GetHitTestMode: TACLSkinImageHitTestMode; virtual;
     function IsTextureStored: Boolean;
     function IsValueStored: Boolean; override;
@@ -430,23 +440,27 @@ type
     destructor Destroy; override;
     procedure Assign(Source: TPersistent); override;
     procedure Clear; inline;
-    procedure Draw(DC: HDC; const R: TRect; AFrameIndex: Integer = 0; AEnabled: Boolean = True; AAlpha: Byte = MaxByte); overload;
-    procedure Draw(DC: HDC; const R: TRect; AFrameIndex: Integer; ABorders: TACLBorders); overload;
-    procedure DrawClipped(DC: HDC; const AClipRect, R: TRect; AFrameIndex: Integer; AAlpha: Byte = MaxByte);
+    procedure Draw(ACanvas: TCanvas; const R: TRect;
+      AFrameIndex: Integer = 0; AEnabled: Boolean = True; AAlpha: Byte = MaxByte); overload;
+    procedure Draw(ACanvas: TCanvas; const R: TRect;
+      AFrameIndex: Integer; ABorders: TACLBorders); overload;
+    procedure DrawClipped(ACanvas: TCanvas; const AClipRect, R: TRect;
+      AFrameIndex: Integer; AAlpha: Byte = MaxByte);
     function HasFrame(AIndex: Integer): Boolean; inline;
     function HitTest(const ABounds: TRect; X, Y: Integer): Boolean; virtual;
-    procedure InitailizeDefaults(const DefaultID: UnicodeString;
-      AInstance: HINST; const AName: UnicodeString; const AMargins, AContentOffsets: TRect;
-      AFrameCount: Integer; ALayout: TACLSkinImageLayout = ilHorizontal; AStretchMode: TACLStretchMode = isStretch); reintroduce; overload;
+    procedure InitailizeDefaults(const DefaultID: string;
+      AInstance: HINST; const AName: string; const AMargins, AContentOffsets: TRect;
+      AFrameCount: Integer; ALayout: TACLSkinImageLayout = ilHorizontal;
+      AStretchMode: TACLStretchMode = isStretch); reintroduce; overload;
     procedure ImportFromImage(const AImage: TBitmap; DPI: Integer = acDefaultDPI);
     procedure ImportFromImageFile(const AFileName: string; DPI: Integer = acDefaultDPI);
     procedure ImportFromImageResource(const AInstance: HINST;
-      const AResName: string; AResType: PWideChar; DPI: Integer = acDefaultDPI);
+      const AResName: string; AResType: PChar; DPI: Integer = acDefaultDPI);
     procedure ImportFromImageStream(const AStream: TStream; DPI: Integer = acDefaultDPI);
     procedure MakeUnique;
     // IACLColorSchema
     procedure ApplyColorSchema(const AValue: TACLColorSchema);
-    //
+    //# Properties
     property ContentOffsets: TRect read GetContentOffsets;
     property Empty: Boolean read GetEmpty;
     property FrameCount: Integer read GetFrameCount;
@@ -457,7 +471,7 @@ type
     property HitTestMode: TACLSkinImageHitTestMode read GetHitTestMode;
     property Margins: TRect read GetMargins;
     property StretchMode: TACLStretchMode read GetStretchMode;
-    //
+    //# State
     property ActualAllowColoration: Boolean read GetActualAllowColoration;
     property ActualColorSchema: TACLColorSchema read GetActualColorSchema;
     property ActualScalable: Boolean read GetActualScalable;
@@ -489,7 +503,8 @@ type
     procedure DoChanged(AChanges: TACLPersistentChanges); override;
     function GetResourceClass: TACLResourceClass; override;
   public
-    procedure Draw(DC: HDC; const R: TRect; AEnabled: Boolean = True; AAlpha: Byte = $FF); reintroduce;
+    procedure Draw(ACanvas: TCanvas; const R: TRect;
+      AEnabled: Boolean = True; AAlpha: Byte = $FF); reintroduce;
   published
     property FrameIndex: Integer read FFrameIndex write SetFrameIndex default 0;
   end;
@@ -693,7 +708,7 @@ type
     function AddResource(AResource: TACLResource; ID: string = ''): TACLResource;
     function AddTexture(const ID: string; ASkinImage: TACLSkinImageSet): TACLResourceTexture; overload;
     function AddTexture(const ID: string;
-      const AResInstance: HINST; const AResName: UnicodeString;
+      const AResInstance: HINST; const AResName: string;
       const AMargins, AContentOffsets: TRect; AFrameCount: Integer;
       const ALayout: TACLSkinImageLayout = ilHorizontal;
       const AStretchMode: TACLStretchMode = isStretch): TACLResourceTexture; overload;
@@ -802,15 +817,13 @@ function acResourceCollectionFieldSet(var AField: TACLCustomResourceCollection; 
 implementation
 
 uses
-  System.TypInfo,
-  System.SysUtils,
-  System.Math,
+  {System.}SysUtils,
+  {System.}TypInfo,
+  {System.}Math,
   // VCL
-  Vcl.Forms,
+  {Vcl.}Forms,
   // ACL
-  ACL.Math,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Forms,
+  ACL.UI.Controls.Base,
   ACL.Utils.Strings;
 
 type
@@ -844,7 +857,7 @@ begin
     for I := 0 to APropCount - 1 do
     begin
       APropInfo := APropList^[I];
-      if APropInfo^.PropType^^.Kind = tkClass then
+      if APropInfo^.PropType^.Kind = tkClass then
       begin
         APropObject := GetObjectProp(AObject, APropInfo);
         if (APropObject = nil) or (APropObject is TComponent) then
@@ -979,11 +992,14 @@ end;
 
 function TACLResource.EqualsValues(AResource: TACLResource): Boolean;
 begin
-  Result := (AResource <> nil) and (GetResourceClass = AResource.GetResourceClass) and EqualsValuesCore(AResource);
+  Result := (AResource <> nil) and
+    (GetResourceClass = AResource.GetResourceClass) and
+    (EqualsValuesCore(AResource));
 end;
 
 procedure TACLResource.DrawPreview(ACanvas: TCanvas; const R: TRect);
 begin
+  ACanvas.Brush.Style := bsClear;
   acTextDraw(ACanvas, ToString, R.InflateTo(-acTextIndent, 0), taLeftJustify, taVerticalCenter, True);
 end;
 
@@ -1164,7 +1180,7 @@ end;
 
 procedure TACLResource.SetTargetDPI(AValue: Integer);
 begin
-  AValue := acCheckDPIValue(AValue);
+  AValue := EnsureRange(AValue, acMinDpi, acMaxDpi);
   if FTargetDPI <> AValue then
   begin
     FTargetDPI := AValue;
@@ -1545,21 +1561,6 @@ begin
   begin
     GetFontInfo.AssignTo(TFont(Dest));
     TFont(Dest).Color := Color.ToColor;
-//    //#AI
-//    //# it lead to call the OnChange event even if font parameters are same
-//    //# TFont(Dest).Handle := 0;
-//    TFont(Dest).Name := Name;
-//    TFont(Dest).Style := Style;
-//    TFont(Dest).Color := Color.ToColor;
-//
-//    //# https://forums.embarcadero.com/thread.jspa?messageID=667590&tstart=0
-//    //# https://github.com/virtual-treeview/virtual-treeview/issues/465
-//    if Quality = fqClearTypeNatural then
-//      TFont(Dest).Quality := fqClearType
-//    else
-//      TFont(Dest).Quality := Quality;
-//
-//    acSetFontHeight(TFont(Dest), Height, TargetDPI);
   end
   else
     inherited AssignTo(Dest);
@@ -1698,7 +1699,7 @@ begin
       Result := TACLResourceFont(Master).Height
     else
       // У нас все размеры определяются для 100% масштаба
-      Result := MulDiv(DefFontData.Height, acDefaultDPI, acGetSystemDpi);
+      Result := MulDiv(TACLApplication.DefaultFont.Height, acDefaultDPI, acGetSystemDpi);
 end;
 
 function TACLResourceFont.GetSize: Integer;
@@ -2000,8 +2001,9 @@ begin
   DoMasterChanged;
 end;
 
-procedure TACLResourceTexture.LoadFromBitmapResourceCore(AInstance: HINST; const AName: UnicodeString;
-  const AMargins, AContentOffsets: TRect; AFrameCount: Integer; ALayout: TACLSkinImageLayout; AStretchMode: TACLStretchMode);
+procedure TACLResourceTexture.LoadFromBitmapResourceCore(
+  AInstance: HINST; const AName: string; const AMargins, AContentOffsets: TRect;
+  AFrameCount: Integer; ALayout: TACLSkinImageLayout; AStretchMode: TACLStretchMode);
 begin
   Overriden := True;
   FImageSet.BeginUpdate;
@@ -2062,12 +2064,14 @@ begin
   Result := Image.HitTest(ABounds, X, Y);
 end;
 
-procedure TACLResourceTexture.Draw(DC: HDC; const R: TRect; AFrameIndex: Integer; AEnabled: Boolean; AAlpha: Byte);
+procedure TACLResourceTexture.Draw(ACanvas: TCanvas;
+  const R: TRect; AFrameIndex: Integer; AEnabled: Boolean; AAlpha: Byte);
 begin
-  Image.Draw(DC, R, AFrameIndex, AEnabled, AAlpha);
+  Image.Draw(ACanvas, R, AFrameIndex, AEnabled, AAlpha);
 end;
 
-procedure TACLResourceTexture.Draw(DC: HDC; const R: TRect; AFrameIndex: Integer; ABorders: TACLBorders);
+procedure TACLResourceTexture.Draw(ACanvas: TCanvas;
+  const R: TRect; AFrameIndex: Integer; ABorders: TACLBorders);
 var
   LClipRect: TRect;
 begin
@@ -2075,31 +2079,34 @@ begin
   begin
     LClipRect := R;
     LClipRect.Inflate(Margins, acAllBorders - ABorders);
-    DrawClipped(DC, R, LClipRect, AFrameIndex)
+    DrawClipped(ACanvas, R, LClipRect, AFrameIndex)
   end
   else
-    Draw(DC, R, AFrameIndex);
+    Draw(ACanvas, R, AFrameIndex);
 end;
 
-procedure TACLResourceTexture.DrawClipped(DC: HDC; const AClipRect, R: TRect; AFrameIndex: Integer; AAlpha: Byte);
+procedure TACLResourceTexture.DrawClipped(ACanvas: TCanvas;
+  const AClipRect, R: TRect; AFrameIndex: Integer; AAlpha: Byte);
 var
-  AClipRegion: HRGN;
+  AClipRegion: TRegionHandle;
 begin
-  AClipRegion := acSaveClipRegion(DC);
+  AClipRegion := acSaveClipRegion(ACanvas.Handle);
   try
-    if acIntersectClipRegion(DC, AClipRect) then
-      Draw(DC, R, AFrameIndex, True, AAlpha);
+    if acIntersectClipRegion(ACanvas.Handle, AClipRect) then
+      Draw(ACanvas, R, AFrameIndex, True, AAlpha);
   finally
-    acRestoreClipRegion(DC, AClipRegion);
+    acRestoreClipRegion(ACanvas.Handle, AClipRegion);
   end;
 end;
 
-procedure TACLResourceTexture.InitailizeDefaults(const DefaultID: UnicodeString;
-  AInstance: HINST; const AName: UnicodeString; const AMargins, AContentOffsets: TRect;
-  AFrameCount: Integer; ALayout: TACLSkinImageLayout = ilHorizontal; AStretchMode: TACLStretchMode = isStretch);
+procedure TACLResourceTexture.InitailizeDefaults(const DefaultID: string;
+  AInstance: HINST; const AName: string; const AMargins, AContentOffsets: TRect;
+  AFrameCount: Integer; ALayout: TACLSkinImageLayout = ilHorizontal;
+  AStretchMode: TACLStretchMode = isStretch);
 begin
   inherited InitailizeDefaults(DefaultID);
-  LoadFromBitmapResourceCore(AInstance, AName, AMargins, AContentOffsets, AFrameCount, ALayout, AStretchMode);
+  LoadFromBitmapResourceCore(AInstance, AName,
+    AMargins, AContentOffsets, AFrameCount, ALayout, AStretchMode);
 end;
 
 procedure TACLResourceTexture.ImportFromImage(const AImage: TBitmap; DPI: Integer = acDefaultDPI);
@@ -2115,7 +2122,7 @@ begin
 end;
 
 procedure TACLResourceTexture.ImportFromImageResource(const AInstance: HINST;
-  const AResName: string; AResType: PWideChar; DPI: Integer = acDefaultDPI);
+  const AResName: string; AResType: PChar; DPI: Integer = acDefaultDPI);
 var
   AStream: TStream;
 begin
@@ -2363,14 +2370,14 @@ end;
 
 { TACLGlyph }
 
-procedure TACLGlyph.Draw(DC: HDC; const R: TRect; AEnabled: Boolean; AAlpha: Byte);
+procedure TACLGlyph.Draw(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean; AAlpha: Byte);
 var
   ALayer: TACLBitmapLayer;
 begin
   ALayer := TACLBitmapLayer.Create(Image.FrameSize);
   try
-    Image.Draw(ALayer.Handle, ALayer.ClientRect, FrameIndex, AEnabled);
-    ALayer.DrawBlend(DC, R, AAlpha, True);
+    Image.Draw(ALayer.Canvas, ALayer.ClientRect, FrameIndex, AEnabled);
+    ALayer.DrawBlend(ACanvas, R, AAlpha, True);
   finally
     ALayer.Free;
   end;
@@ -2464,7 +2471,7 @@ function TACLStyleMap<T>.GetOrCreate(Index: Integer): T;
 begin
   if not TryGetValue(Index, TACLResource(Result)) then
   begin
-    Result := T(TACLResourceClass(T).Create(FOwner));
+    Result := T(TACLResourceClass(T).Create(FOwner){%H-});
     Add(Index, Result);
   end;
 end;
@@ -2574,7 +2581,7 @@ begin
     procedure (const AStyle: TACLStyle)
     begin
       AStyle.Refresh;
-    end, False, [mvPublished]);
+    end, False);
 end;
 
 function TACLStyle.Scale(AValue: Integer): Integer;
@@ -2590,6 +2597,7 @@ begin
     try
       FTargetDPI := AValue;
       DoSetTargetDPI(FTargetDPI);
+      Changed([apcLayout]);
     finally
       EndUpdate;
     end;
@@ -2606,7 +2614,10 @@ begin
     ACollection := AIntf.GetCollection;
   if (ACollection = nil) then
     ACollection := TACLRootResourceCollection.GetInstance;
-  Result := ACollection.GetResource(ID, AResourceClass, ASender);
+  if (ACollection <> nil) then
+    Result := ACollection.GetResource(ID, AResourceClass, ASender)
+  else
+    Result := nil;
 end;
 
 procedure TACLStyle.DoAssign(ASource: TPersistent);
@@ -3004,7 +3015,7 @@ begin
 end;
 
 function TACLResourceCollectionItems.AddTexture(const ID: string;
-  const AResInstance: HINST; const AResName: UnicodeString;
+  const AResInstance: HINST; const AResName: string;
   const AMargins, AContentOffsets: TRect; AFrameCount: Integer;
   const ALayout: TACLSkinImageLayout = ilHorizontal;
   const AStretchMode: TACLStretchMode = isStretch): TACLResourceTexture;
@@ -3163,11 +3174,12 @@ end;
 procedure TACLCustomResourceCollection.EnumResources(AResourceClass: TClass; AList: TStrings);
 var
   ATempList: TACLStringList;
+  I: Integer;
 begin
   ATempList := TACLStringList.Create;
   try
     EnumResources(AResourceClass, ATempList);
-    for var I := 0 to ATempList.Count - 1 do
+    for I := 0 to ATempList.Count - 1 do
       AList.AddObject(ATempList[I], ATempList.Objects[I]);
   finally
     ATempList.Free;
@@ -3175,10 +3187,12 @@ begin
 end;
 
 procedure TACLCustomResourceCollection.ApplyColorSchema(const AColorSchema: TACLColorSchema);
+var
+  I: Integer;
 begin
   BeginUpdate;
   try
-    for var I := 0 to Items.Count - 1 do
+    for I := 0 to Items.Count - 1 do
       acApplyColorSchema(Items[I].Resource, AColorSchema);
   finally
     EndUpdate;
@@ -3220,7 +3234,7 @@ procedure TACLCustomResourceCollection.LoadFromFile(const AFileName: string);
 var
   AStream: TStream;
 begin
-  AStream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  AStream := TACLFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
   try
     LoadFromStream(AStream);
   finally
@@ -3382,28 +3396,33 @@ end;
 
 class procedure TACLRootResourceCollection.InitializeCursors;
 
-  procedure DoSetCursor(ID: Integer; ACursor: HCURSOR);
+  procedure InitCursor(ID: Integer; AInstance: HINST; AName: PChar);
+  var
+    LCursor: HCURSOR;
   begin
-    if ACursor <> 0 then
-      Screen.Cursors[ID] := ACursor;
+    LCursor := LoadCursor(AInstance, AName);
+    if LCursor <> 0 then
+      Screen.Cursors[ID] := LCursor;
   end;
 
 begin
-  DoSetCursor(crNo, LoadCursor(0, IDC_NO));
-  DoSetCursor(crAppStart, LoadCursor(0, IDC_APPSTARTING));
-  DoSetCursor(crHandPoint, LoadCursor(0, IDC_HAND));
-  DoSetCursor(crHourGlass, LoadCursor(0, IDC_WAIT));
-  DoSetCursor(crSizeAll, LoadCursor(0, IDC_SIZEALL));
-  DoSetCursor(crSizeNESW, LoadCursor(0, IDC_SIZENESW));
-  DoSetCursor(crSizeNS, LoadCursor(0, IDC_SIZENS));
-  DoSetCursor(crSizeNWSE, LoadCursor(0, IDC_SIZENWSE));
-  DoSetCursor(crSizeWE, LoadCursor(0, IDC_SIZEWE));
-  DoSetCursor(crNoDrop, LoadCursor(0, IDC_NO));
-  DoSetCursor(crHSplit, LoadCursor(0, IDC_SIZEWE));
-  DoSetCursor(crVSplit, LoadCursor(0, IDC_SIZENS));
-  DoSetCursor(crDrag, LoadCursor(LoadLibrary('ole32.dll'), MakeIntResource(3)));
-  DoSetCursor(crRemove, LoadCursor(HInstance, 'CR_REMOVE'));
-  DoSetCursor(crDragLink, LoadCursor(HInstance, 'CR_DRAGLINK'));
+{$IFDEF MSWINDOWS}
+  InitCursor(crNo, 0, IDC_NO);
+  InitCursor(crAppStart, 0, IDC_APPSTARTING);
+  InitCursor(crDrag, LoadLibrary('ole32.dll'), MakeIntResource(3));
+  InitCursor(crHandPoint, 0, IDC_HAND);
+  InitCursor(crHourGlass, 0, IDC_WAIT);
+  InitCursor(crSizeAll, 0, IDC_SIZEALL);
+  InitCursor(crSizeNESW, 0, IDC_SIZENESW);
+  InitCursor(crSizeNS, 0, IDC_SIZENS);
+  InitCursor(crSizeNWSE, 0, IDC_SIZENWSE);
+  InitCursor(crSizeWE, 0, IDC_SIZEWE);
+  InitCursor(crNoDrop, 0, IDC_NO);
+  InitCursor(crHSplit, 0, IDC_SIZEWE);
+  InitCursor(crVSplit, 0, IDC_SIZENS);
+{$ENDIF}
+  InitCursor(crDragLink, HInstance, 'CR_DRAGLINK');
+  InitCursor(crDragRemove, HInstance, 'CR_DRAGREMOVE');
 end;
 
 { TACLRootResourceCollectionImpl }
@@ -3434,7 +3453,7 @@ begin
   BeginUpdate;
   try
     LoadFromResource(HInstance, 'ACLDEFAULTSKIN' + IfThenW(TACLApplication.IsDarkMode, '_DARK'));
-    if IsWin11OrLater then
+    if acOSCheckVersion(10, 0, 22000) then
     begin
       InheritIfNecessary('Buttons.Textures.Button', '.W11');
       InheritIfNecessary('Popup.Margins.Borders', '.W11');

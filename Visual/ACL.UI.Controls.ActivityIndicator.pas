@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*        Activity Indicator Control         *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Activity Indicator
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.ActivityIndicator;
 
 {$I ACL.Config.inc}
@@ -16,25 +18,24 @@ unit ACL.UI.Controls.ActivityIndicator;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF MSWINDOWS}
+  Windows, // inlining
+{$ENDIF}
   // System
-  System.Classes,
-  System.Generics.Collections,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
-  ACL.Math,
-  ACL.Classes,
-  ACL.Timers,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Ex,
-  ACL.UI.Controls.BaseControls,
+  ACL.Timers,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.Labels,
   ACL.UI.Resources,
   ACL.Utils.DPIAware;
@@ -63,21 +64,20 @@ type
   strict private
     FTimer: TACLTimer;
 
+    procedure HandlerTimer(Sender: TObject);
     function GetActive: Boolean;
+    function GetIndicatorWidth: Integer;
     function GetStyle: TACLStyleActivityIndicator;
-    function GetTextOffset: Integer;
     procedure SetActive(const Value: Boolean);
     procedure SetStyle(const Value: TACLStyleActivityIndicator);
-    //
-    procedure HandlerTimer(Sender: TObject);
   protected
     procedure Calculate(const R: TRect); override;
     function CreateStyle: TACLStyleLabel; override;
     procedure DrawBackground(ACanvas: TCanvas); override;
-    function MeasureSize(AWidth: Integer = 0): TSize; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    function MeasureSize(AWidth: Integer = 0): TSize; override;
   published
     property Align;
     property Active: Boolean read GetActive write SetActive default False;
@@ -86,9 +86,6 @@ type
   end;
 
 implementation
-
-uses
-  System.Math;
 
 { TACLStyleActivityIndicator }
 
@@ -106,7 +103,7 @@ begin
   if not Active then
     ARect.Inflate(-2);
 
-  acFillRect(ACanvas.Handle, ARect, AColor);
+  acFillRect(ACanvas, ARect, AColor);
 end;
 
 procedure TACLStyleActivityIndicator.InitializeResources;
@@ -137,7 +134,7 @@ var
   ARect: TRect;
 begin
   ARect := R;
-  ARect.Right := ARect.Right - GetTextOffset;
+  ARect.Right := ARect.Right - GetIndicatorWidth;
   inherited Calculate(ARect);
 end;
 
@@ -151,6 +148,7 @@ var
   LDotSize: Integer;
   LIndentBetweenDots: Integer;
   LRect: TRect;
+  I: Integer;
 begin
   inherited;
 
@@ -161,7 +159,7 @@ begin
   LRect := ClientRect;
   LRect.CenterVert(LDotSize);
   LRect.Left := LRect.Right - LDotSize;
-  for var I := Style.DotCount - 1 downto 0 do
+  for I := Style.DotCount - 1 downto 0 do
   begin
     Style.DrawDot(Canvas, LRect, I = FTimer.Tag);
     LRect.Offset(-LDotSize - LIndentBetweenDots, 0);
@@ -173,14 +171,16 @@ begin
   Result := FTimer.Enabled;
 end;
 
+function TACLActivityIndicator.GetIndicatorWidth: Integer;
+begin
+  Result := (
+    dpiApply(Style.IndentBetweenDots, FCurrentPPI) +
+    dpiApply(Style.DotSize, FCurrentPPI)) * Style.DotCount;
+end;
+
 function TACLActivityIndicator.GetStyle: TACLStyleActivityIndicator;
 begin
   Result := TACLStyleActivityIndicator(inherited Style);
-end;
-
-function TACLActivityIndicator.GetTextOffset: Integer;
-begin
-  Result := (dpiApply(Style.IndentBetweenDots, FCurrentPPI) + dpiApply(Style.DotSize, FCurrentPPI)) * Style.DotCount;
 end;
 
 procedure TACLActivityIndicator.SetActive(const Value: Boolean);
@@ -201,12 +201,15 @@ begin
 end;
 
 function TACLActivityIndicator.MeasureSize(AWidth: Integer): TSize;
+var
+  LIndicatorWidth: Integer;
 begin
+  LIndicatorWidth := GetIndicatorWidth;
   if AWidth > 0 then
-    Dec(AWidth, GetTextOffset);
+    Dec(AWidth, LIndicatorWidth);
   Result := inherited MeasureSize(AWidth);
   Result.cy := Max(Result.cy, dpiApply(Style.DotSize, FCurrentPPI));
-  Result.cx := Result.cx + GetTextOffset;
+  Result.cx := Result.cx + LIndicatorWidth;
 end;
 
 end.

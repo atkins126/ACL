@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*          Binding Diagram Control          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Binding Diagram
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.BindingDiagram;
 
 {$I ACL.Config.inc}
@@ -16,24 +18,21 @@ unit ACL.UI.Controls.BindingDiagram;
 interface
 
 uses
-  System.Types,
-  System.SysUtils,
-  System.Classes,
+  {System.}Classes,
+  {System.}SysUtils,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
   // ACL
   ACL.Geometry,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Controls.CompoundControl,
-  ACL.UI.Controls.CompoundControl.SubClass,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.BindingDiagram.SubClass,
   ACL.UI.Controls.BindingDiagram.Types,
+  ACL.UI.Controls.CompoundControl,
+  ACL.UI.Controls.CompoundControl.SubClass,
   ACL.UI.Forms,
-  ACL.UI.HintWindow,
   ACL.UI.Resources,
-  ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+  ACL.Utils.Common;
 
 type
 
@@ -73,13 +72,11 @@ type
     procedure SetStyle(const Value: TACLStyleBindingDiagram); inline;
   protected
     function CreateSubClass: TACLCompoundControlSubClass; override;
-    // Drawing
-    procedure DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect); override;
     procedure Paint; override;
   public
     constructor Create(AOwner: TComponent); override;
     procedure DeleteSelectedObject;
-    //
+    //# Properties
     property Data: TACLBindingDiagramData read GetData;
     property SelectedObject: TObject read GetSelectedObject write SetSelectedObject;
     property SelectedObjectAsLink: TACLBindingDiagramLink read GetSelectedObjectAsLink;
@@ -98,7 +95,7 @@ type
     property StyleHint;
     property StyleScrollBox;
     property Transparent;
-    //
+    //# Events
     property OnClick;
     property OnDblClick;
     property OnLinkChanged: TACLBindingDiagramLinkNotifyEvent read GetOnLinkChanged write SetOnLinkChanged;
@@ -132,15 +129,10 @@ begin
   Result := TACLBindingDiagramSubClass.Create(Self);
 end;
 
-procedure TACLBindingDiagram.DrawOpaqueBackground(ACanvas: TCanvas; const R: TRect);
-begin
-  Style.DrawContent(ACanvas, R);
-end;
-
 procedure TACLBindingDiagram.Paint;
 begin
-  Style.DrawBorder(Canvas, ClientRect, Borders);
-  inherited Paint;
+  Style.Draw(Canvas, ClientRect, Transparent, Borders);
+  inherited;
 end;
 
 function TACLBindingDiagram.GetData: TACLBindingDiagramData;

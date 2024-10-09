@@ -1,14 +1,17 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*         Extended Graphic Library          *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             Extended Graphics Library
+//             v6.0
+//
+//  Purpose:   General Classes
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Graphics.Ex;
 
 {$I ACL.Config.inc}
@@ -16,25 +19,31 @@ unit ACL.Graphics.Ex;
 interface
 
 uses
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
   Winapi.GDIPAPI,
   Winapi.Messages,
   Winapi.Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // VCL
-  Vcl.Graphics,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
+  ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.Images,
   ACL.Graphics.SkinImage,
   ACL.Utils.Common,
-  ACL.Utils.FileSystem;
+  ACL.Utils.DPIAware;
 
 type
   // Refer to following articles for more information:
@@ -49,10 +58,10 @@ type
 
   TACLBitmapLayer = class(TACLDib)
   public
-    procedure DrawBlend(DC: HDC; const P: TPoint;
+    procedure DrawBlend(ACanvas: TCanvas; const P: TPoint;
       AMode: TACLBlendMode; AAlpha: Byte = MaxByte); overload;
-    procedure DrawBlend(DC: HDC; const R: TRect;
-      AAlpha: Byte = MaxByte; ASmoothStretch: Boolean = False); overload;
+    procedure DrawBlend(ACanvas: TCanvas; const R: TRect;
+      AAlpha: Byte; ASmoothStretch: Boolean); overload;
   end;
 
   { TACLCacheLayer }
@@ -64,7 +73,7 @@ type
     procedure AfterConstruction; override;
     function CheckNeedUpdate(const R: TRect): Boolean;
     procedure Drop;
-    //
+    //# Properties
     property IsDirty: Boolean read FIsDirty write FIsDirty;
   end;
 
@@ -98,7 +107,7 @@ type
 
   IACLBlurFilterCore = interface
   ['{89DD6E84-C6CB-4367-90EC-3943D5593372}']
-    procedure Apply(LayerDC: HDC; Colors: PACLPixel32; Width, Height: Integer);
+    procedure Apply(Colors: PACLPixel32; Width, Height: Integer);
     function GetSize: Integer;
   end;
 
@@ -124,9 +133,9 @@ type
     class destructor Destroy;
   {$ENDIF}
     constructor Create;
-    procedure Apply(ALayer: TACLBitmapLayer); overload;
-    procedure Apply(ALayerDC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer); overload;
-    //
+    procedure Apply(ALayer: TACLDib); overload;
+    procedure Apply(AColors: PACLPixel32; AWidth, AHeight: Integer); overload;
+    //# Properties
     property Radius: Integer read FRadius write SetRadius;
     property Size: Integer read FSize;
   end;
@@ -144,6 +153,13 @@ type
   IACL2DRenderGdiCompatible = interface
   ['{D4065B50-E628-4E99-AD58-DF771293C551}']
     procedure GdiDraw(Proc: TACL2DRenderGdiDrawProc);
+  end;
+
+  { IACL2DRenderWndBased }
+
+  IACL2DRenderWndBased = interface
+  ['{90451EAC-9428-467B-8702-42035FDF253B}']
+    procedure SetWndHandle(AWndHandle: HWND);
   end;
 
   { TACL2DRenderResource }
@@ -174,8 +190,8 @@ type
 
   TACL2DRenderImageAttributes = class(TACL2DRenderResource)
   strict private
-    FTintColor: TAlphaColor;
     FAlpha: Byte;
+    FTintColor: TAlphaColor;
   protected
     procedure SetAlpha(AValue: Byte); virtual;
     procedure SetTintColor(AValue: TAlphaColor); virtual;
@@ -189,7 +205,8 @@ type
 
   TACL2DRenderPath = class(TACL2DRenderResource)
   public
-    procedure AddArc(CX, CY, RadiusX, RadiusY, StartAngle, SweepAngle: Single); virtual; abstract;
+    procedure AddArc(CenterX, CenterY, RadiusX, RadiusY: Single;
+      StartAngle, SweepAngle: Single); virtual; abstract;
     procedure AddLine(X1, Y1, X2, Y2: Single); virtual; abstract;
     procedure AddRect(const R: TRectF); virtual;
     procedure AddRoundRect(const R: TRectF; RadiusX, RadiusY: Single);
@@ -199,19 +216,29 @@ type
 
   { TACL2DRender }
 
+  TACL2DRenderRawData = type Pointer;
+
   TACL2DRender = class(TACLUnknownObject)
+  protected
+    FOrigin: TPoint;
   public
     procedure BeginPaint(DC: HDC; const BoxRect: TRect); overload;
     procedure BeginPaint(DC: HDC; const BoxRect, UpdateRect: TRect); overload; virtual; abstract;
     procedure EndPaint; virtual; abstract;
 
+    // Resources
     function IsValid(const AResource: TACL2DRenderResource): Boolean; inline;
 
     // Clipping
-    function IntersectClipRect(const R: TRect): Boolean; virtual; abstract;
+    function Clip(const R: TRect; out Data: TACL2DRenderRawData): Boolean; virtual; abstract;
+    procedure ClipRestore(Data: TACL2DRenderRawData); virtual; abstract;
     function IsVisible(const R: TRect): Boolean; virtual; abstract;
-    procedure RestoreClipRegion; virtual; abstract;
-    procedure SaveClipRegion; virtual; abstract;
+
+    // Curve
+    procedure DrawCurve(AColor: TAlphaColor;
+      const APoints: array of TPoint; ATension: Single; APenWidth: Single = 1.0); virtual;
+    procedure FillCurve(AColor: TAlphaColor;
+      const APoints: array of TPoint; ATension: Single); virtual;
 
     // Ellipse
     procedure Ellipse(const R: TRect; Color, StrokeColor: TAlphaColor;
@@ -236,13 +263,17 @@ type
       AlphaFormat: TAlphaFormat = afDefined): TACL2DRenderImage; overload; virtual; abstract;
     function CreateImage(Image: TACLDib): TACL2DRenderImage; overload; virtual;
     function CreateImage(Image: TACLImage): TACL2DRenderImage; overload; virtual;
-    function CreateImageAttributes: TACL2DRenderImageAttributes; virtual; abstract;
-    procedure DrawImage(Image: TACLDib; const TargetRect: TRect; Cache: PACL2DRenderImage = nil); overload;
-    procedure DrawImage(Image: TACL2DRenderImage; const TargetRect: TRect; Alpha: Byte = MaxByte); overload;
+    function CreateImageAttributes: TACL2DRenderImageAttributes; virtual;
+    procedure DrawImage(Image: TACLDib;
+      const TargetRect: TRect; Cache: PACL2DRenderImage = nil); overload;
+    procedure DrawImage(Image: TACL2DRenderImage;
+      const TargetRect: TRect; Alpha: Byte = MaxByte); overload;
     procedure DrawImage(Image: TACL2DRenderImage;
       const TargetRect, SourceRect: TRect; Alpha: Byte = MaxByte); overload; virtual; abstract;
     procedure DrawImage(Image: TACL2DRenderImage;
       const TargetRect, SourceRect: TRect; Attributes: TACL2DRenderImageAttributes); overload; virtual; abstract;
+    procedure TileImage(Image: TACL2DRenderImage;
+      const TargetRect, SourceRect: TRect; Attributes: TACL2DRenderImageAttributes); overload; virtual;
 
     // Rectangles
     procedure Rectangle(const R: TRect; Color, StrokeColor: TAlphaColor;
@@ -274,14 +305,20 @@ type
     procedure FillPolygon(const Points: array of TPoint; Color: TAlphaColor); virtual; abstract;
 
     // World Transform
+    procedure SaveWorldTransform(out State: TACL2DRenderRawData); virtual; abstract;
+    procedure RestoreWorldTransform(State: TACL2DRenderRawData); virtual; abstract;
     procedure ModifyWorldTransform(const XForm: TXForm); virtual; abstract;
-    procedure RestoreWorldTransform; virtual; abstract;
-    procedure SaveWorldTransform; virtual; abstract;
     procedure ScaleWorldTransform(Scale: Single); overload;
     procedure ScaleWorldTransform(ScaleX, ScaleY: Single); overload; virtual;
     procedure SetWorldTransform(const XForm: TXForm); virtual; abstract;
     procedure TransformPoints(Points: PPointF; Count: Integer); virtual; abstract;
     procedure TranslateWorldTransform(OffsetX, OffsetY: Single); virtual;
+
+    // WindowOrg
+    function ModifyOrigin(DeltaX, DeltaY: Integer): TPoint{Previous}; virtual;
+    procedure SetOrigin(const Origin: TPoint); virtual;
+  protected
+    property Origin: TPoint read FOrigin write SetOrigin;
   end;
 
 {$ENDREGION}
@@ -295,17 +332,14 @@ var
 implementation
 
 uses
-  // ACL
   ACL.FastCode,
-  ACL.Geometry,
-  ACL.Graphics.Ex.Gdip,
   ACL.Math,
   ACL.Threading;
 
 type
   TACLImageAccess = class(TACLImage);
 
-{$REGION 'Software-based filters implementation'}
+{$REGION ' Software-based filters implementation '}
 type
 
   { TACLSoftwareImplBlendMode }
@@ -320,7 +354,7 @@ type
       Target: PACLPixel32;
     end;
 
-    TChunks = class(TACLObjectList<TChunk>);
+    TChunks = class(TACLObjectListOf<TChunk>);
 
     TCalculateMatrixProc = function (const Source, Target: Integer): Integer;
   {$ENDREGION}
@@ -400,7 +434,7 @@ type
       procedure ApplyTo(AColors: PACLPixel32; ACount, AStep: Integer); overload;
     end;
 
-    TChunks = class(TACLObjectList<TChunk>);
+    TChunks = class(TACLObjectListOf<TChunk>);
   {$ENDREGION}
   strict private
     FRadius: Double;
@@ -417,7 +451,7 @@ type
     constructor Create(ARadius: Integer);
     class function CreateBlurFilterCore(ARadius: Integer): IACLBlurFilterCore; static;
     // IACLBlurFilterCore
-    procedure Apply(DC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer);
+    procedure Apply(AColors: PACLPixel32; AWidth, AHeight: Integer);
     function GetSize: Integer;
   end;
 
@@ -440,7 +474,7 @@ type
     class function CreateBlurFilterCore(ARadius: Integer): IACLBlurFilterCore; static;
     class procedure Register;
     // IACLBlurFilterCore
-    procedure Apply(DC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer);
+    procedure Apply(AColors: PACLPixel32; AWidth, AHeight: Integer);
     function GetSize: Integer;
   end;
 
@@ -513,7 +547,7 @@ end;
 
 class procedure TACLSoftwareImplBlendMode.DoNormal(ABackgroundLayer, AForegroundLayer: TACLBitmapLayer; AAlpha: Byte);
 begin
-  AForegroundLayer.DrawBlend(ABackgroundLayer.Handle, NullPoint, AAlpha);
+  AForegroundLayer.DrawBlend(ABackgroundLayer.Canvas, NullPoint, AAlpha);
 end;
 
 class procedure TACLSoftwareImplBlendMode.DoOverlay(ABackgroundLayer, AForegroundLayer: TACLBitmapLayer; AAlpha: Byte);
@@ -782,7 +816,7 @@ begin
   Result := FSize;
 end;
 
-procedure TACLSoftwareImplGaussianBlur.Apply(DC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer);
+procedure TACLSoftwareImplGaussianBlur.Apply(AColors: PACLPixel32; AWidth, AHeight: Integer);
 
   function CreateChunks(ACount: Integer): TChunks;
   var
@@ -988,7 +1022,7 @@ begin
   Result := FRadius;
 end;
 
-procedure TACLSoftwareImplStackBlur.Apply(DC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer);
+procedure TACLSoftwareImplStackBlur.Apply(AColors: PACLPixel32; AWidth, AHeight: Integer);
 var
   AColor: PACLPixel32;
   AInputSumA: Integer;
@@ -1244,30 +1278,35 @@ end;
 
 {$ENDREGION}
 
-{$REGION 'Layers'}
+{$REGION ' Layers '}
 
-procedure TACLBitmapLayer.DrawBlend(DC: HDC; const P: TPoint; AMode: TACLBlendMode; AAlpha: Byte = MaxByte);
+procedure TACLBitmapLayer.DrawBlend(ACanvas: TCanvas;
+  const P: TPoint; AMode: TACLBlendMode; AAlpha: Byte = MaxByte);
 var
   ALayer: TACLBitmapLayer;
 begin
   if Empty then
     Exit;
   if AMode = bmNormal then
-    DrawBlend(DC, P, AAlpha)
+    DrawBlend(ACanvas, P, AAlpha)
   else
   begin
     ALayer := TACLBitmapLayer.Create(Width, Height);
     try
-      acBitBlt(ALayer.Handle, DC, ALayer.ClientRect, P);
+      acBitBlt(ALayer.Handle, ACanvas.Handle, ALayer.ClientRect, P);
       FBlendFunctions[AMode](ALayer, Self, AAlpha);
-      ALayer.DrawCopy(DC, P);
+      ALayer.DrawCopy(ACanvas, P);
     finally
       ALayer.Free;
     end;
   end;
 end;
 
-procedure TACLBitmapLayer.DrawBlend(DC: HDC; const R: TRect; AAlpha: Byte = 255; ASmoothStretch: Boolean = False);
+procedure TACLBitmapLayer.DrawBlend(ACanvas: TCanvas;
+  const R: TRect; AAlpha: Byte; ASmoothStretch: Boolean);
+{$IFDEF FPC}
+begin
+{$ELSE}
 var
   AClipBox: TRect;
   AImage: TACLImage;
@@ -1275,9 +1314,9 @@ var
 begin
   if ASmoothStretch and not (Empty or R.EqualSizes(ClientRect)) then
   begin
-    if (GetClipBox(DC, AClipBox) <> NULLREGION) and IntersectRect(AClipBox, AClipBox, R) then
+    if (GetClipBox(ACanvas.Handle, AClipBox) <> NULLREGION) and IntersectRect(AClipBox, AClipBox, R) then
     begin
-      AImage := TACLImage.Create(PRGBQuad(Colors), Width, Height);
+      AImage := TACLImage.Create(PACLPixel32(Colors), Width, Height);
       try
         AImage.StretchQuality := sqLowQuality;
         AImage.PixelOffsetMode := ipomHalf;
@@ -1286,9 +1325,9 @@ begin
         ALayer := TACLDib.Create(AClipBox);
         try
           SetWindowOrgEx(ALayer.Handle, AClipBox.Left, AClipBox.Top, nil);
-          AImage.Draw(ALayer.Handle, R);
+          AImage.Draw(ALayer.Canvas, R);
           SetWindowOrgEx(ALayer.Handle, 0, 0, nil);
-          ALayer.DrawBlend(DC, AClipBox.TopLeft);
+          ALayer.DrawBlend(ACanvas, AClipBox.TopLeft, AAlpha);
         finally
           ALayer.Free;
         end;
@@ -1298,7 +1337,8 @@ begin
     end;
   end
   else
-    acAlphaBlend(DC, Handle, R, ClientRect, AAlpha);
+{$ENDIF}
+    DrawBlend(ACanvas, R, ClientRect, AAlpha);
 end;
 
 { TACLCacheLayer }
@@ -1393,7 +1433,7 @@ begin
     end
     else
     begin
-      AImage.Draw(Handle, ClientRect, AMaskFrameIndex);
+      AImage.Draw(Canvas, ClientRect, AMaskFrameIndex);
       LoadMask;
     end;
   end;
@@ -1496,7 +1536,7 @@ end;
 
 {$ENDREGION}
 
-{$REGION 'Blur'}
+{$REGION ' Blur '}
 
 { TACLBlurFilter }
 
@@ -1520,15 +1560,16 @@ begin
   Radius := 20;
 end;
 
-procedure TACLBlurFilter.Apply(ALayer: TACLBitmapLayer);
-begin
-  Apply(ALayer.Handle, PACLPixel32(ALayer.Colors), ALayer.Width, ALayer.Height);
-end;
-
-procedure TACLBlurFilter.Apply(ALayerDC: HDC; AColors: PACLPixel32; AWidth, AHeight: Integer);
+procedure TACLBlurFilter.Apply(ALayer: TACLDib);
 begin
   if FSize > 0 then
-    FCore.Apply(ALayerDC, AColors, AWidth, AHeight);
+    FCore.Apply(PACLPixel32(ALayer.Colors), ALayer.Width, ALayer.Height);
+end;
+
+procedure TACLBlurFilter.Apply(AColors: PACLPixel32; AWidth, AHeight: Integer);
+begin
+  if FSize > 0 then
+    FCore.Apply(AColors, AWidth, AHeight);
 end;
 
 procedure TACLBlurFilter.SetRadius(AValue: Integer);
@@ -1552,7 +1593,7 @@ end;
 
 {$ENDREGION}
 
-{$REGION 'Abstract 2D Render'}
+{$REGION ' Abstract 2D Render '}
 
 { TACL2DRenderResource }
 
@@ -1610,6 +1651,11 @@ begin
 end;
 
 function TACL2DRender.CreateImage(Image: TACLImage): TACL2DRenderImage;
+{$IFDEF FPC}
+begin
+  if not Image.Empty then
+    Result := CreateImage(TACLImageAccess(Image).Handle)
+{$ELSE}
 var
   AData: TBitmapData;
   AFormat: TAlphaFormat;
@@ -1634,8 +1680,14 @@ begin
   finally
     TACLImageAccess(Image).EndLock(AData);
   end
+{$ENDIF}
   else
     Result := nil;
+end;
+
+function TACL2DRender.CreateImageAttributes: TACL2DRenderImageAttributes;
+begin
+  Result := TACL2DRenderImageAttributes.Create(Self);
 end;
 
 function TACL2DRender.CreateImage(Image: TACLDib): TACL2DRenderImage;
@@ -1670,22 +1722,73 @@ begin
   end;
 end;
 
-procedure TACL2DRender.DrawImage(Image: TACL2DRenderImage; const TargetRect: TRect; Alpha: Byte);
+procedure TACL2DRender.DrawImage(
+  Image: TACL2DRenderImage; const TargetRect: TRect; Alpha: Byte);
 begin
   DrawImage(Image, TargetRect, Image.ClientRect, Alpha);
 end;
 
-procedure TACL2DRender.DrawEllipse(const R: TRect; Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
+procedure TACL2DRender.TileImage(Image: TACL2DRenderImage;
+  const TargetRect, SourceRect: TRect; Attributes: TACL2DRenderImageAttributes);
+var
+  LClipData: TACL2DRenderRawData;
+  R: TRect;
+  W, H: Integer;
+  X, XCount: Integer;
+  Y, YCount: Integer;
+begin
+  W := SourceRect.Width;
+  H := SourceRect.Height;
+  XCount := acCalcPatternCount(TargetRect.Width, W);
+  YCount := acCalcPatternCount(TargetRect.Height, H);
+
+  if Clip(TargetRect, LClipData) then
+  try
+    R := TargetRect.Split(srTop, H);
+    for Y := 1 to YCount do
+    begin
+      R.Left := TargetRect.Left;
+      R.Right := TargetRect.Left + W;
+      for X := 1 to XCount do
+      begin
+        DrawImage(Image, R, SourceRect, Attributes);
+        Inc(R.Right, W);
+        Inc(R.Left, W);
+      end;
+      Inc(R.Bottom, H);
+      Inc(R.Top, H);
+    end;
+  finally
+    ClipRestore(LClipData);
+  end;
+end;
+
+procedure TACL2DRender.DrawEllipse(const R: TRect;
+  Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
 begin
   DrawEllipse(R.Left, R.Top, R.Right, R.Bottom, Color, Width, Style);
 end;
 
-procedure TACL2DRender.DrawRectangle(const R: TRect; Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
+procedure TACL2DRender.DrawRectangle(const R: TRect;
+  Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
 begin
   DrawRectangle(R.Left, R.Top, R.Right, R.Bottom, Color, Width, Style)
 end;
 
-procedure TACL2DRender.Ellipse(const R: TRect; Color, StrokeColor: TAlphaColor; StrokeWidth: Single; StrokeStyle: TACL2DRenderStrokeStyle);
+procedure TACL2DRender.DrawCurve(AColor: TAlphaColor;
+  const APoints: array of TPoint; ATension, APenWidth: Single);
+begin
+  Line(APoints, AColor, APenWidth);
+end;
+
+procedure TACL2DRender.FillCurve(AColor: TAlphaColor;
+  const APoints: array of TPoint; ATension: Single);
+begin
+  FillPolygon(APoints, AColor);
+end;
+
+procedure TACL2DRender.Ellipse(const R: TRect;
+  Color, StrokeColor: TAlphaColor; StrokeWidth: Single; StrokeStyle: TACL2DRenderStrokeStyle);
 begin
   FillEllipse(R, Color);
   DrawEllipse(R, StrokeColor, StrokeWidth, StrokeStyle);
@@ -1701,7 +1804,8 @@ begin
   FillRectangle(R.Left, R.Top, R.Right, R.Bottom, Color);
 end;
 
-procedure TACL2DRender.Line(const Points: array of TPoint; Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
+procedure TACL2DRender.Line(const Points: array of TPoint;
+  Color: TAlphaColor; Width: Single; Style: TACL2DRenderStrokeStyle);
 var
   L: Integer;
 begin
@@ -1737,6 +1841,17 @@ end;
 procedure TACL2DRender.TranslateWorldTransform(OffsetX, OffsetY: Single);
 begin
   ModifyWorldTransform(TXForm.CreateTranslateMatrix(OffsetX, OffsetY));
+end;
+
+function TACL2DRender.ModifyOrigin(DeltaX, DeltaY: Integer): TPoint;
+begin
+  Result := FOrigin;
+  FOrigin.Offset(-DeltaX, -DeltaY);
+end;
+
+procedure TACL2DRender.SetOrigin(const Origin: TPoint);
+begin
+  FOrigin := Origin;
 end;
 
 { TACL2DRenderPath }

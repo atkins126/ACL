@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*                 Fast Code                 *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   FastCode Routines
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.FastCode;
 
 {$I ACL.Config.inc}
@@ -17,7 +19,11 @@ unit ACL.FastCode;
 interface
 
 type
+{$IFDEF FPC}
+  TACLMoveMethod = procedure (const Source; var Dest; Count: SizeInt);
+{$ELSE}
   TACLMoveMethod = procedure (const Source; var Dest; Count: NativeInt);
+{$ENDIF}
 
 var
   FastMove: TACLMoveMethod = Move;

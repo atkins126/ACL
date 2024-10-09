@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*            Font Select Dialog             *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2022                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Color Picker Dialog
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Dialogs.ColorPicker;
 
 {$I ACL.Config.inc}
@@ -16,28 +18,29 @@ unit ACL.UI.Dialogs.ColorPicker;
 interface
 
 uses
-  Winapi.Windows,
+{$IFNDEF FPC}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
-  System.Types,
-  System.SysUtils,
-  System.Classes,
   // Vcl
-  Vcl.Graphics,
-  Vcl.Controls,
-  Vcl.Forms,
-  Vcl.Dialogs,
+  {Vcl.}Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Forms,
+  {Vcl.}Dialogs,
   // ACL
-  ACL.Classes,
-  ACL.Classes.Collections,
   ACL.Graphics,
-  ACL.Geometry,
-  ACL.UI.Controls.BaseControls,
+  ACL.Classes.Collections,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.Buttons,
-  ACL.UI.Dialogs,
   ACL.UI.Controls.ColorPalette,
   ACL.UI.Controls.ColorPicker,
   ACL.UI.Controls.Panel,
+  ACL.UI.Dialogs,
   ACL.Utils.DPIAware,
   ACL.Utils.Common,
   ACL.Utils.Strings;
@@ -64,25 +67,23 @@ type
     procedure PlaceControls(var R: TRect); override;
   public
     class function Execute(var AColor: TColor;
-      AOwnerWnd: THandle = 0; const ACaption: string = ''): Boolean; overload;
+      AOwnerWnd: TWndHandle = 0; const ACaption: string = ''): Boolean; overload;
     class function Execute(var AColor: TAlphaColor;
-      AOwnerWnd: THandle = 0; const ACaption: string = ''): Boolean; overload;
+      AOwnerWnd: TWndHandle = 0; const ACaption: string = ''): Boolean; overload;
     class function Execute(var AColor: TAlphaColor; AAllowEditAlpha: Boolean;
-      AOwnerWnd: THandle = 0; const ACaption: string = ''; AOnApply: TProc = nil): Boolean; overload;
+      AOwnerWnd: TWndHandle = 0; const ACaption: string = ''; AOnApply: TProc = nil): Boolean; overload;
     class function ExecuteQuery(AColor: TAlphaColor;
-      AOwnerWnd: THandle = 0; const ACaption: string = ''): TAlphaColor; overload;
+      AOwnerWnd: TWndHandle = 0; const ACaption: string = ''): TAlphaColor; overload;
     class function ExecuteQuery(AColor: TAlphaColor; AAllowEditAlpha: Boolean;
-      AOwnerWnd: THandle = 0; const ACaption: string = ''): TAlphaColor; overload;
+      AOwnerWnd: TWndHandle = 0; const ACaption: string = ''): TAlphaColor; overload;
   end;
 
 implementation
 
-uses
-  System.Math;
-
 { TACLColorPickerDialog }
 
-class function TACLColorPickerDialog.Execute(var AColor: TColor; AOwnerWnd: THandle; const ACaption: string): Boolean;
+class function TACLColorPickerDialog.Execute(
+  var AColor: TColor; AOwnerWnd: TWndHandle; const ACaption: string): Boolean;
 var
   AGpColor: TAlphaColor;
 begin
@@ -92,13 +93,15 @@ begin
     AColor := AGpColor.ToColor;
 end;
 
-class function TACLColorPickerDialog.Execute(var AColor: TAlphaColor; AOwnerWnd: THandle; const ACaption: string): Boolean;
+class function TACLColorPickerDialog.Execute(
+  var AColor: TAlphaColor; AOwnerWnd: TWndHandle; const ACaption: string): Boolean;
 begin
   Result := Execute(AColor, True, AOwnerWnd, ACaption);
 end;
 
-class function TACLColorPickerDialog.Execute(var AColor: TAlphaColor; AAllowEditAlpha: Boolean;
-  AOwnerWnd: THandle; const ACaption: string; AOnApply: TProc): Boolean;
+class function TACLColorPickerDialog.Execute(
+  var AColor: TAlphaColor; AAllowEditAlpha: Boolean; AOwnerWnd: TWndHandle;
+  const ACaption: string; AOnApply: TProc): Boolean;
 var
   ADialog: TACLColorPickerDialog;
 begin
@@ -113,13 +116,13 @@ begin
 end;
 
 class function TACLColorPickerDialog.ExecuteQuery(
-  AColor: TAlphaColor; AOwnerWnd: THandle; const ACaption: string): TAlphaColor;
+  AColor: TAlphaColor; AOwnerWnd: TWndHandle; const ACaption: string): TAlphaColor;
 begin
   Result := ExecuteQuery(AColor, True, AOwnerWnd, ACaption);
 end;
 
 class function TACLColorPickerDialog.ExecuteQuery(AColor: TAlphaColor;
-  AAllowEditAlpha: Boolean; AOwnerWnd: THandle; const ACaption: string): TAlphaColor;
+  AAllowEditAlpha: Boolean; AOwnerWnd: TWndHandle; const ACaption: string): TAlphaColor;
 begin
   Result := AColor;
   if not Execute(Result, AAllowEditAlpha, AOwnerWnd, ACaption) then
@@ -147,8 +150,8 @@ end;
 
 procedure TACLColorPickerDialog.CreateControls;
 begin
-  CreateControl(FPanel, TACLPanel, Self, NullRect);
-  FPanel.AutoSize := True;
+  CreateControl(FPanel, TACLPanel, Self,
+    NullRect, {$IFDEF FPC}alCustom{$ELSE}alNone{$ENDIF});
   FPanel.Padding.All := 2;
 
   CreateControl(FPicker, TACLColorPicker, FPanel, NullRect, alTop);
@@ -165,6 +168,7 @@ begin
   FPalette.OptionsView.StyleOfficeTintCount := 4;
   FPalette.OnColorChanged := ColorChangeHandler;
 
+  FPanel.AutoSize := True;
   inherited;
 end;
 
@@ -185,7 +189,8 @@ begin
   inherited;
 end;
 
-procedure TACLColorPickerDialog.Initialize(AAllowEditAlpha: Boolean; AColor: PAlphaColor; AOnApply: TProc);
+procedure TACLColorPickerDialog.Initialize(
+  AAllowEditAlpha: Boolean; AColor: PAlphaColor; AOnApply: TProc);
 begin
   FColor := AColor;
   FColorOriginal := AColor^;

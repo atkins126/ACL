@@ -1,32 +1,29 @@
-{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*    General Types for XML Reader/Writer    *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   General Types for stream-based XML
+//             Based on .NET platform code:
+//             https://github.com/microsoft/referencesource/tree/master/System.Xml/System/Xml/Core
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.FileFormats.XML.Types;
 
 {$I ACL.Config.inc}
 {$SCOPEDENUMS ON}
 
-// Ported from .NET platform:
-// https://github.com/microsoft/referencesource/tree/master/System.Xml/System/Xml/Core
-
 interface
 
 uses
   // System
-  System.Character,
-  System.Math,
-  System.Generics.Defaults,
-  System.Generics.Collections,
-  System.SysUtils,
-  System.Types,
+  {System.}Generics.Defaults,
+  {System.}SysUtils,
   // ACL
   ACL.Classes.Collections,
   ACL.Parsers,
@@ -37,6 +34,8 @@ const
   sXMLBoolValues: array[Boolean] of string = ('false', 'true');
 
 type
+  TWideCharArray = {$IFDEF FPC}TUnicodeCharArray{$ELSE}TArray<WideChar>{$ENDIF};
+
   TACLXMLSpace = (
     None,      //# xml:space scope has not been specified.
     Default,   //# The xml:space scope is "default".
@@ -49,32 +48,15 @@ type
   strict private
     FLineNumber: Integer;
     FLinePosition: Integer;
-    FRes: string;
-    FSourceUri: string;
-
-    class function CreateMessage(const ARes: string;
-      const AArgs: array of const; ALineNumber, ALinePosition: Integer): string; static;
-    class function FormatUserMessage(const AMessage: string;
-      ALineNumber: Integer; ALinePosition: Integer): string; static;
   public
-    constructor Create(const ARes, AArg: string); overload;
-    constructor Create(const ARes, AArg, ASourceUri: string); overload;
     constructor Create(const AMessage: string; AInnerException: Exception;
-      ALineNumber: Integer; ALinePosition: Integer; const ASourceUri: string); overload;
-    constructor Create(const ARes: string; const AArg: string;
       ALineNumber: Integer; ALinePosition: Integer); overload;
     constructor Create(const ARes: string; const AArgs: array of const;
-      ALineNumber: Integer; ALinePosition: Integer; const ASourceUri: string = ''); overload;
-    constructor Create(const ARes: string; const AArg: string;
-      ALineNumber: Integer; ALinePosition: Integer; const ASourceUri: string); overload;
-    constructor Create(const ARes: string; const AArgs: array of const; AInnerException: Exception;
-      ALineNumber, ALinePosition: Integer; const ASourceUri: string); overload;
-
+      ALineNumber: Integer; ALinePosition: Integer); overload;
     class function BuildCharExceptionArgs(
-      AInvChar: Char; ANextChar: Char): TArray<string>; overload; static;
-    class function BuildCharExceptionArgs(const AData: TCharArray;
+      AInvChar, ANextChar: WideChar): TArray<string>; overload; static;
+    class function BuildCharExceptionArgs(const AData: TWideCharArray;
       ALength: Integer; AInvCharIndex: Integer): TArray<string>; overload; static;
-
     property LineNumber: Integer read FLineNumber;
     property LinePosition: Integer read FLinePosition;
   end;
@@ -130,7 +112,7 @@ type
 
   TACLXMLCharType = class
   public type
-    TCharProperties = array[Char] of Byte;
+    TCharProperties = array[WideChar] of Byte;
   public const
     //# Characters defined in the XML 1.0 Fourth Edition
     //# PubidChar ::=  0x20 | 0xD | 0xA | [a-zA-Z0-9] | [-'()+,./:=?;!*#@$_%] Section 2.3 of spec
@@ -154,25 +136,23 @@ type
   strict private
     class var FCharProperties: TCharProperties;
     class constructor Initialize;
-    class procedure InitRanges(const ARanges: string; Attribute: Byte); static;
+    class procedure InitRanges(const ARanges: UnicodeString; Attribute: Byte); static;
   public
-    class function CombineSurrogateChar(ALowChar, AHighChar: Char): Integer; static; inline;
-    class function IsAttributeValueChar(C: Char): Boolean; static; inline;
-    class function IsCharData(C: Char): Boolean; static; inline;
-    class function IsHighSurrogate(C: Char): Boolean; static; inline;
-    class function IsLowSurrogate(C: Char): Boolean; static; inline;
-    class function IsNameSingleChar(ACh: Char): Boolean; static; inline;
-    class function IsNCNameSingleChar(ACh: Char): Boolean; static; inline;
-    class function IsOnlyCharData(const S: string): Integer; static; inline;
-    class function IsOnlyWhitespace(const S: string): Boolean; static; inline;
-    class function IsPubidChar(C: Char): Boolean; static; inline;
-    class function IsPublicId(const S: string): Integer; static; inline;
-    class function IsSurrogate(C: Char): Boolean; static; inline;
-    class function IsTextChar(C: Char): Boolean; static; inline;
-    class function IsWhiteSpace(C: Char): Boolean; static; inline;
+    class function CombineSurrogateChar(ALowChar, AHighChar: WideChar): Integer; static; inline;
+    class function IsAttributeValueChar(C: WideChar): Boolean; static; inline;
+    class function IsCharData(C: WideChar): Boolean; static; inline;
+    class function IsHighSurrogate(C: WideChar): Boolean; static; inline;
+    class function IsLowSurrogate(C: WideChar): Boolean; static; inline;
+    class function IsNameSingleChar(ACh: WideChar): Boolean; static; inline;
+    class function IsNCNameSingleChar(ACh: WideChar): Boolean; static; inline;
+    class function IsOnlyCharData(const S: UnicodeString): Integer; static; inline;
+    class function IsPubidChar(C: WideChar): Boolean; static; inline;
+    class function IsPublicId(const S: UnicodeString): Integer; static; inline;
+    class function IsSurrogate(C: WideChar): Boolean; static; inline;
+    class function IsTextChar(C: WideChar): Boolean; static; inline;
+    class function IsWhiteSpace(C: WideChar): Boolean; static; inline;
     class procedure SplitSurrogateChar(ACombinedChar: Integer;
-      out ALowChar: Char; out AHighChar: Char); static; inline;
-
+      out ALowChar: WideChar; out AHighChar: WideChar); static; inline;
     class property CharProperties: TCharProperties read FCharProperties;
   end;
 
@@ -201,7 +181,7 @@ type
     class function EncodeName(const S: string): string; static;
     class function EncodeString(const S: string;
       ARemoveBreakLines, ASkipServiceCharacters: Boolean): string; static;
-    class function IsHTMLCode(var P: PWideChar; var L: Integer): Boolean; static;
+    class function IsHTMLCode(var P: PChar; var L: Integer): Boolean; static;
     class function IsInvalidXmlChar(const C: Word): Boolean; inline;
   end;
 
@@ -212,7 +192,7 @@ const
   SXMLDefaultException = 'An XML error has occurred.';
   SXMLUserException = '%s';
 
-function IfThen(AValue: Boolean; const ATrue: Char; const AFalse: Char): Char; overload; inline;
+function IfThen(AValue: Boolean; const ATrue, AFalse: WideChar): WideChar; overload; inline;
 begin
   if AValue then
     Result := ATrue
@@ -223,106 +203,66 @@ end;
 { EACLXMLException }
 
 constructor EACLXMLException.Create(const AMessage: string;
-  AInnerException: Exception; ALineNumber, ALinePosition: Integer; const ASourceUri: string);
+  AInnerException: Exception; ALineNumber, ALinePosition: Integer);
 begin
-  inherited Create(FormatUserMessage(AMessage, ALineNumber, ALinePosition));
-  FSourceUri := ASourceUri;
-  FLineNumber := ALineNumber;
-  FLinePosition := ALinePosition;
+  if AMessage = '' then
+    Create(SXMLDefaultException, [], ALineNumber, ALinePosition)
+  else if (ALineNumber > 0) or (ALinePosition > 0) then
+    Create(SXMLUserException, [AMessage], ALineNumber, ALinePosition)
+  else
+    inherited Create(AMessage)
 end;
 
-constructor EACLXMLException.Create(const ARes, AArg: string; ALineNumber, ALinePosition: Integer);
-begin
-  Create(ARes, [AArg], nil, ALineNumber, ALinePosition, '');
-end;
-
-constructor EACLXMLException.Create(const ARes: string; const AArgs: array of const;
-  ALineNumber, ALinePosition: Integer; const ASourceUri: string);
-begin
-  Create(ARes, AArgs, nil, ALineNumber, ALinePosition, ASourceUri);
-end;
-
-class function EACLXMLException.CreateMessage(const ARes: string;
-  const AArgs: array of const; ALineNumber, ALinePosition: Integer): string;
+constructor EACLXMLException.Create(const ARes: string;
+  const AArgs: array of const; ALineNumber, ALinePosition: Integer);
+var
+  LMessage: string;
 begin
   try
     if ALineNumber = 0 then
-      Result := Format(ARes, AArgs)
+      LMessage := Format(ARes, AArgs)
     else
-      Result := Format(SXMLMessageWithErrorPosition, [Format(ARes, AArgs), ALineNumber, ALinePosition]);
+      LMessage := Format(SXMLMessageWithErrorPosition,
+        [Format(ARes, AArgs), ALineNumber, ALinePosition]);
   except
-    Result := '';
+    LMessage := '';
   end;
-end;
-
-class function EACLXMLException.FormatUserMessage(const AMessage: string; ALineNumber, ALinePosition: Integer): string;
-begin
-  if AMessage = '' then
-    Result := CreateMessage(SXMLDefaultException, [], ALineNumber, ALinePosition)
-  else
-    if (ALineNumber = 0) and (ALinePosition = 0) then
-      Result := AMessage
-    else
-      Result := CreateMessage(SXMLUserException, [AMessage], ALineNumber, ALinePosition);
-end;
-
-constructor EACLXMLException.Create(const ARes: string; const AArgs: array of const;
-  AInnerException: Exception; ALineNumber, ALinePosition: Integer; const ASourceUri: string);
-begin
-  inherited Create(CreateMessage(ARes, AArgs, ALineNumber, ALinePosition));
-  FRes := ARes;
-  FSourceUri := ASourceUri;
-  FLineNumber := ALineNumber;
+  inherited Create(LMessage);
   FLinePosition := ALinePosition;
+  FLineNumber := ALineNumber;
 end;
 
-class function EACLXMLException.BuildCharExceptionArgs(AInvChar, ANextChar: Char): TArray<string>;
+class function EACLXMLException.BuildCharExceptionArgs(AInvChar, ANextChar: WideChar): TArray<string>;
 var
-  AAStringList: TArray<string>;
-  ACombinedChar: Integer;
+  LCombinedChar: Integer;
 begin
-  SetLength(AAStringList, 2);
+  SetLength(Result{%H-}, 2);
   //# for surrogate characters include both high and low char in the message so that a full character is displayed
   if TACLXMLCharType.IsHighSurrogate(AInvChar) and (ANextChar <> #0) then
   begin
-    ACombinedChar := TACLXMLCharType.CombineSurrogateChar(ANextChar, AInvChar);
-    AAStringList[0] := AInvChar + ANextChar;
-    AAStringList[1] := Format('0x%2x', [Ord(ACombinedChar)]);
+    LCombinedChar := TACLXMLCharType.CombineSurrogateChar(ANextChar, AInvChar);
+    Result[0] := acString(AInvChar + ANextChar);
+    Result[1] := Format('0x%2x', [Ord(LCombinedChar)]);
   end
   else
   begin
     //# don't include 0 character in the string - in means eof-of-string in native code, where this may bubble up to
     if Integer(AInvChar) = 0 then
-      AAStringList[0] := '.'
+      Result[0] := '.'
     else
-      AAStringList[0] := AInvChar;
-    AAStringList[1] := Format('0x%2x', [Ord(AInvChar)]);
+      Result[0] := acString(AInvChar);
+    Result[1] := Format('0x%2x', [Ord(AInvChar)]);
   end;
-  Result := AAStringList;
 end;
 
-class function EACLXMLException.BuildCharExceptionArgs(const AData: TCharArray; ALength, AInvCharIndex: Integer): TArray<string>;
+class function EACLXMLException.BuildCharExceptionArgs(
+  const AData: TWideCharArray; ALength, AInvCharIndex: Integer): TArray<string>;
 begin
   Assert(AInvCharIndex < Length(AData));
   Assert(AInvCharIndex < ALength);
   Assert(ALength <= Length(AData));
-
-  Result := BuildCharExceptionArgs(AData[AInvCharIndex], IfThen(AInvCharIndex + 1 < ALength, AData[AInvCharIndex + 1], #0));
-end;
-
-constructor EACLXMLException.Create(const ARes, AArg: string; ALineNumber, ALinePosition: Integer; const ASourceUri: string);
-begin
-  Create(ARes, [AArg], nil, ALineNumber, ALinePosition, ASourceUri);
-end;
-
-constructor EACLXMLException.Create(const ARes, AArg, ASourceUri: string);
-begin
-  Create(ARes, [AArg], nil, 0, 0, ASourceUri);
-end;
-
-constructor EACLXMLException.Create(const ARes, AArg: string);
-begin
-  Create(ARes, [AArg], nil, 0, 0, '');
+  Result := BuildCharExceptionArgs(AData[AInvCharIndex],
+    IfThen(AInvCharIndex + 1 < ALength, AData[AInvCharIndex + 1], #0));
 end;
 
 { TACLXMLCharType }
@@ -396,10 +336,6 @@ const
     #$212A#$212B#$212E#$212E#$2180#$2182#$3005#$3005#$3007#$3007#$3021#$302F#$3031#$3035#$3041#$3094 +
     #$3099#$309A#$309D#$309E#$30A1#$30FA#$30FC#$30FE#$3105#$312C#$4E00#$9FA5#$AC00#$D7A3;
   CharDataRanges = #$0009#$000A#$000D#$000D#$0020#$D7FF#$E000#$FFFD;
-
-  PublicIDRanges =
-    #$000A#$000A#$000D#$000D#$0020#$0021#$0023#$0025#$0027#$003B#$003D#$003D#$003F#$005A#$005F#$005F +
-    #$0061#$007A;
 
   TextRanges = //# TextChar = CharData - { 0xA | 0xD | < | & | 0x9 | ] | 0xDC00 - 0xDFFF }
     #$0020#$0025#$0027#$003B#$003D#$005C#$005E#$D7FF#$E000#$FFFD;
@@ -484,14 +420,14 @@ begin
   InitRanges(AttrValueRanges,   AttrValue);
 end;
 
-class procedure TACLXMLCharType.InitRanges(const ARanges: string; Attribute: Byte);
+class procedure TACLXMLCharType.InitRanges(const ARanges: UnicodeString; Attribute: Byte);
 var
-  P: PChar;
-  AChar, AEndChar: Char;
+  AChar, AEndChar: WideChar;
+  P: PWideChar;
   L: Integer;
 begin
   L := Length(ARanges);
-  P := PChar(ARanges);
+  P := PWideChar(ARanges);
   while L > 0 do
   begin
     AChar    := P^;
@@ -507,26 +443,27 @@ begin
   end;
 end;
 
-class function TACLXMLCharType.CombineSurrogateChar(ALowChar, AHighChar: Char): Integer;
+class function TACLXMLCharType.CombineSurrogateChar(ALowChar, AHighChar: WideChar): Integer;
 begin
   Result := (Ord(ALowChar) - Ord(SurLowStart)) or ((Ord(AHighChar) - Ord(SurHighStart)) shl 10) + $10000;
 end;
 
-class procedure TACLXMLCharType.SplitSurrogateChar(ACombinedChar: Integer; out ALowChar: Char; out AHighChar: Char);
+class procedure TACLXMLCharType.SplitSurrogateChar(
+  ACombinedChar: Integer; out ALowChar: WideChar; out AHighChar: WideChar);
 var
   V: Integer;
 begin
   V := ACombinedChar - $10000;
-  ALowChar := Char(Ord(SurLowStart) + V mod 1024);
-  AHighChar := Char(Ord(SurHighStart) + V div 1024);
+  ALowChar  := WideChar(Ord(SurLowStart)  + V mod 1024);
+  AHighChar := WideChar(Ord(SurHighStart) + V div 1024);
 end;
 
-class function TACLXMLCharType.IsAttributeValueChar(C: Char): Boolean;
+class function TACLXMLCharType.IsAttributeValueChar(C: WideChar): Boolean;
 begin
   Result := (FCharProperties[C] and AttrValue) <> 0;
 end;
 
-class function TACLXMLCharType.IsCharData(C: Char): Boolean;
+class function TACLXMLCharType.IsCharData(C: WideChar): Boolean;
 begin
   Result := (FCharProperties[C] and CharData) <> 0;
 end;
@@ -537,37 +474,37 @@ end;
 //#            Debug.Assert(start <= end);
 //#            return (uint)(value - start) <= (uint)(end - start);
 //#        }
-class function TACLXMLCharType.IsSurrogate(C: Char): Boolean;
+class function TACLXMLCharType.IsSurrogate(C: WideChar): Boolean;
 begin
   Result := (C >= SurHighStart) and (C <= SurLowEnd);
 end;
 
-class function TACLXMLCharType.IsTextChar(C: Char): Boolean;
+class function TACLXMLCharType.IsTextChar(C: WideChar): Boolean;
 begin
   Result := (FCharProperties[C] and Text) <> 0;
 end;
 
-class function TACLXMLCharType.IsHighSurrogate(C: Char): Boolean;
+class function TACLXMLCharType.IsHighSurrogate(C: WideChar): Boolean;
 begin
   Result := (C >= SurHighStart) and (C <= SurHighEnd);
 end;
 
-class function TACLXMLCharType.IsLowSurrogate(C: Char): Boolean;
+class function TACLXMLCharType.IsLowSurrogate(C: WideChar): Boolean;
 begin
   Result := (C >= SurLowStart) and (C <= SurLowEnd);
 end;
 
-class function TACLXMLCharType.IsNCNameSingleChar(ACh: Char): Boolean;
+class function TACLXMLCharType.IsNCNameSingleChar(ACh: WideChar): Boolean;
 begin
   Result := (FCharProperties[ACh] and NCNameSC) <> 0;
 end;
 
-class function TACLXMLCharType.IsNameSingleChar(ACh: Char): Boolean;
+class function TACLXMLCharType.IsNameSingleChar(ACh: WideChar): Boolean;
 begin
   Result := IsNCNameSingleChar(ACh) or (ACh = ':');
 end;
 
-class function TACLXMLCharType.IsOnlyCharData(const S: string): Integer;
+class function TACLXMLCharType.IsOnlyCharData(const S: UnicodeString): Integer;
 var
   I: Integer;
 begin
@@ -587,22 +524,12 @@ begin
   Result := 0;
 end;
 
-class function TACLXMLCharType.IsOnlyWhitespace(const S: string): Boolean;
-var
-  I: Integer;
-begin
-  for I := 1 to Length(S) do
-    if (FCharProperties[S[I]] and Whitespace) = 0 then
-      Exit(False);
-  Result := True;
-end;
-
-class function TACLXMLCharType.IsWhiteSpace(C: Char): Boolean;
+class function TACLXMLCharType.IsWhiteSpace(C: WideChar): Boolean;
 begin
   Result := FCharProperties[C] and Whitespace <> 0;
 end;
 
-class function TACLXMLCharType.IsPubidChar(C: Char): Boolean;
+class function TACLXMLCharType.IsPubidChar(C: WideChar): Boolean;
 begin
   if C < #$0080 then
     Result := (PublicIdBitmap[Ord(C) shr 4] and (1 shl (Ord(C) and $0F))) <> 0
@@ -610,7 +537,7 @@ begin
     Result := False;
 end;
 
-class function TACLXMLCharType.IsPublicId(const S: string): Integer;
+class function TACLXMLCharType.IsPublicId(const S: UnicodeString): Integer;
 var
   I: Integer;
 begin
@@ -625,7 +552,7 @@ end;
 class constructor TACLXMLConvert.Create;
 begin
   FMap := TACLStringsMap.Create;
-  FMap.Add(#9, #9);
+  FMap.Add(#09, #09);
   FMap.Add(#10, #10);
   FMap.Add(#13, #13);
   FMap.Add(#39, 'apos');
@@ -664,7 +591,7 @@ end;
 
 class function TACLXMLConvert.DecodeName(const S: string): string;
 
-  function GetReplacement(const S: UnicodeString): UnicodeString;
+  function GetReplacement(const S: string): string;
   begin
     if not FMap.TryGetKey(S, Result) then
     begin
@@ -678,10 +605,10 @@ class function TACLXMLConvert.DecodeName(const S: string): string;
 var
   B: TACLStringBuilder;
   L, LS: Integer;
-  P, PS: PWideChar;
-  V: UnicodeString;
+  P, PS: PChar;
+  V: string;
 begin
-  P := PWideChar(S);
+  P := PChar(S);
   L := Length(S);
   B := TACLStringBuilder.Get(L);
   try
@@ -722,7 +649,7 @@ begin
   Result := EncodeString(S, False, True);
 end;
 
-class function TACLXMLConvert.IsHTMLCode(var P: PWideChar; var L: Integer): Boolean;
+class function TACLXMLConvert.IsHTMLCode(var P: PChar; var L: Integer): Boolean;
 begin
   while (L > 0) and CharInSet(P^, ['0'..'9', '#', 'A'..'Z', 'a'..'z']) do
   begin
@@ -732,9 +659,10 @@ begin
   Result := P^ = ';';
 end;
 
-class function TACLXMLConvert.EncodeString(const S: string; ARemoveBreakLines, ASkipServiceCharacters: Boolean): string;
+class function TACLXMLConvert.EncodeString(
+  const S: string; ARemoveBreakLines, ASkipServiceCharacters: Boolean): string;
 
-  function EncodeChar(const AChar: Char): string; inline;
+  function EncodeChar(const AChar: WideChar): string; inline;
   begin
     Result := '_x' + IntToHex(Word(AChar), 4) + '_';
   end;
@@ -756,7 +684,7 @@ begin
         ABuilder.Append(' ')
       else if not ASkipServiceCharacters and FMap.TryGetValue(AChar, AReplacement) then
         ABuilder.Append('&').Append(AReplacement).Append(';')
-      else if IsInvalidXmlChar(Word(AChar)) then
+      else if IsInvalidXmlChar(Ord(AChar)) then
         ABuilder.Append(EncodeChar(AChar))
       else if IsEncodedCharacter(S, I, ALength, X) then
         ABuilder.Append(EncodeChar('_'))

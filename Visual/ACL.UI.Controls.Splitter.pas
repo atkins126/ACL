@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*             Splitter Control              *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Splitter
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Splitter;
 
 {$I ACL.Config.inc}
@@ -16,28 +18,30 @@ unit ACL.UI.Controls.Splitter;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Messages,
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.SysUtils,
-  System.Types,
-  System.Math,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
   // ACL
   ACL.Classes,
-  ACL.Classes.StringList,
   ACL.FileFormats.INI,
   ACL.Geometry,
   ACL.Graphics,
-  ACL.UI.Controls.BaseControls,
-  ACL.UI.Forms,
+  ACL.UI.Controls.Base,
   ACL.UI.Resources,
   ACL.Utils.Common,
-  ACL.Utils.DPIAware,
-  ACL.Utils.FileSystem;
+  ACL.Utils.DPIAware;
 
 type
   TACLSplitter = class;
@@ -64,7 +68,7 @@ type
     // Storing
     procedure RestoreSize;
     procedure StoreSize;
-    //
+    //# Properties
     property Control: TControl read GetControl;
     property ControlParentSize: Integer read GetParentSize;
     property ControlSize: Integer read GetControlSize write SetControlSize;
@@ -101,13 +105,11 @@ type
     function GetAlign: TAlign;
     function GetIsControlVisible: Boolean;
     procedure DoToggle;
-    procedure SetAlign(AValue: TAlign);
+    procedure SetAlign(AValue: TAlign); reintroduce;
     procedure SetCanToggle(AValue: Boolean);
     procedure SetControl(AControl: TControl);
   protected
     function CreateViewInfo: TACLSplitterViewInfo;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
-    procedure AdjustSize; override;
     procedure DblClick; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
@@ -116,14 +118,16 @@ type
     procedure Paint; override;
     procedure RecreateViewInfo;
     procedure UpdateControlBounds;
-    //
+    procedure UpdateTransparency; override;
+    //# Properties
     property Moving: Boolean read FMoving;
     property ViewInfo: TACLSplitterViewInfo read FViewInfo;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
-    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+    procedure AdjustSize; override;
+    procedure ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string);
+    procedure ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string);
     procedure Refresh;
     procedure Toggle;
   published
@@ -131,6 +135,7 @@ type
     property CanToggle: Boolean read FCanToggle write SetCanToggle default True;
     property Control: TControl read FControl write SetControl;
     property Cursor stored False;
+    //# Events
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
   end;
 
@@ -146,10 +151,9 @@ begin
   inherited Create(AOwner);
   Align := alLeft;
   ControlStyle := [csCaptureMouse, csClickEvents, csDoubleClicks];
+  FDefaultSize := TSize.Create(5, 5);
   FCanToggle := True;
   RecreateViewInfo;
-  Height := 5;
-  Width := 5;
 end;
 
 destructor TACLSplitter.Destroy;
@@ -176,7 +180,7 @@ begin
   SetCursorPos(APoint.X, APoint.Y);
 end;
 
-procedure TACLSplitter.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLSplitter.ConfigLoad(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   if Control <> nil then
   begin
@@ -187,7 +191,7 @@ begin
   end;
 end;
 
-procedure TACLSplitter.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: UnicodeString);
+procedure TACLSplitter.ConfigSave(AConfig: TACLIniFile; const ASection, AItem: string);
 begin
   if Control <> nil then
   begin
@@ -298,9 +302,9 @@ begin
   AdjustSize;
 end;
 
-function TACLSplitter.GetBackgroundStyle: TACLControlBackgroundStyle;
+procedure TACLSplitter.UpdateTransparency;
 begin
-  Result := cbsTransparent;
+  ControlStyle := ControlStyle - [csOpaque];
 end;
 
 function TACLSplitter.GetAlign: TAlign;

@@ -1,32 +1,36 @@
-﻿{*********************************************}
-{*                                           *}
-{*        Artem's Components Library         *}
-{*             Logging Routines              *}
-{*                                           *}
-{*           (c) Artem Izmaylov              *}
-{*               2006-2022                   *}
-{*              www.aimp.ru                  *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Components Library aka ACL
+//             v6.0
+//
+//  Purpose:   Debug Logger
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.Utils.Logger;
 
 {$I ACL.Config.inc}
+
 {$SCOPEDENUMS ON}
 
 interface
 
 uses
+{$IFDEF MSWINDOWS}
   Winapi.Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.SysUtils,
+  {System.}Classes,
+  {System.}SysUtils,
   // ACL
   ACL.Threading,
+  ACL.Utils.Common,
   ACL.Utils.FileSystem,
-  ACL.Utils.Shell,
-  ACL.Utils.Strings,
-  ACL.Utils.Stream;
+  ACL.Utils.Strings;
 
 type
 
@@ -48,8 +52,10 @@ type
     destructor Destroy; override;
     // high-level
     procedure Add(const ATag: string; const E: Exception); overload;
-    procedure Add(const ATag, AFormatLine: string; const AArgs: array of const; AType: TEntryType = TEntryType.Debug); overload;
-    procedure Add(const ATag, AText: string; AType: TEntryType = TEntryType.Debug); overload;
+    procedure Add(const ATag, AFormatLine: string; const AArgs: array of const;
+      AType: TEntryType = TEntryType.Debug); overload;
+    procedure Add(const ATag, AText: string;
+      AType: TEntryType = TEntryType.Debug); overload;
     // low-level
     procedure Write(const ABuffer: TBytes); overload;
     procedure Write(const ABuffer; ACount: Integer); overload;
@@ -70,7 +76,7 @@ type
     FStreamOwnership: TStreamOwnership;
   protected
     procedure WriteCore(const Buffer; Count: Integer); override;
-    //
+    //# Properties
     property Stream: TStream read FStream;
   public
     constructor Create(AStream: TStream; AOwnership: TStreamOwnership = soOwned);
@@ -86,7 +92,7 @@ type
     FFileName: string;
   public
     constructor Create(const AFileName: string; AAppendIfExists: Boolean = True);
-    //
+    //# Properties
     property FileName: string read FFileName;
   end;
 
@@ -110,8 +116,10 @@ procedure AddToDebugLog(const ATag, AText: string); overload;
 function GetDebugLogFileName: string;
 implementation
 
+{$IFDEF MSWINDOWS}
 uses
-  System.StrUtils;
+  ACL.Utils.Shell;
+{$ENDIF}
 
 var
   FGeneralLog: TACLCriticalSection;
@@ -184,7 +192,9 @@ begin
     FGeneralLog.Enter;
     try
       if FGeneralLogFileName = '' then
-        FGeneralLogFileName := ShellGetMyDocuments + acExtractFileNameWithoutExt(acSelfExeName) + '.debug.log';
+        FGeneralLogFileName :=
+          {$IFDEF MSWINDOWS}ShellPathMyDocuments{$ELSE}GetUserDir{$ENDIF} +
+          acExtractFileNameWithoutExt(acSelfExeName) + '.debug.log';
     finally
       FGeneralLog.Leave;
     end;
@@ -207,21 +217,20 @@ begin
 end;
 
 procedure TACLLog.Add(const ATag: string; const E: Exception);
-var
-  AStackTrace: string;
 begin
   Lock.Enter;
   try
     Add(ATag, Format('Error: %s - %s', [E.ClassName, E.ToString]), TEntryType.Error);
-
-    AStackTrace := E.StackTrace;
-    if AStackTrace <> '' then
+  {$IFNDEF FPC}
+    var LStackTrace := E.StackTrace;
+    if LStackTrace <> '' then
     begin
       WriteSeparator;
-      Write(AStackTrace);
+      Write(LStackTrace);
       WriteLine;
       WriteSeparator;
     end;
+  {$ENDIF}
   finally
     Lock.Leave;
   end;
@@ -272,7 +281,7 @@ end;
 
 procedure TACLLog.Write(const AText: string);
 begin
-  Write(Encoding.GetBytes(AText));
+  Write(Encoding.GetBytes(acUString(AText)));
 end;
 
 procedure TACLLog.WriteHeader(const S: string);

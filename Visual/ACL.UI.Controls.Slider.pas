@@ -1,14 +1,16 @@
-﻿{*********************************************}
-{*                                           *}
-{*     Artem's Visual Components Library     *}
-{*              Slider Control               *}
-{*                                           *}
-{*            (c) Artem Izmaylov             *}
-{*                 2006-2023                 *}
-{*                www.aimp.ru                *}
-{*                                           *}
-{*********************************************}
-
+﻿////////////////////////////////////////////////////////////////////////////////
+//
+//  Project:   Artem's Controls Library aka ACL
+//             v6.0
+//
+//  Purpose:   Slider
+//
+//  Author:    Artem Izmaylov
+//             © 2006-2024
+//             www.aimp.ru
+//
+//  FPC:       OK
+//
 unit ACL.UI.Controls.Slider;
 
 {$I ACL.Config.inc}
@@ -16,54 +18,54 @@ unit ACL.UI.Controls.Slider;
 interface
 
 uses
-  Winapi.Windows,
-  Winapi.Messages,
+  Messages,
+{$IFDEF FPC}
+  LCLIntf,
+  LCLType,
+{$ELSE}
+  {Winapi.}Windows,
+{$ENDIF}
   // System
-  System.Classes,
-  System.Math,
-  System.SysUtils,
-  System.Types,
+  {System.}Classes,
+  {System.}Math,
+  {System.}SysUtils,
+  {System.}Types,
   System.UITypes,
   // Vcl
-  Vcl.Controls,
-  Vcl.Graphics,
-  Vcl.Forms,
+  {Vcl.}Controls,
+  {Vcl.}Graphics,
+  {Vcl.}Forms,
   // ACL
   ACL.Classes,
   ACL.Classes.Collections,
-  ACL.Classes.StringList,
-  ACL.Timers,
   ACL.FastCode,
   ACL.Geometry,
   ACL.Graphics,
   ACL.Graphics.SkinImage,
-  ACL.Graphics.SkinImageSet,
-  ACL.UI.Controls.BaseControls,
+  ACL.Math,
+  ACL.Timers,
+  ACL.UI.Controls.Base,
   ACL.UI.Controls.Buttons,
-  ACL.UI.Forms,
   ACL.UI.HintWindow,
   ACL.UI.Resources,
   ACL.Utils.Common,
   ACL.Utils.DPIAware,
-  ACL.Utils.Strings,
-  ACL.Utils.FileSystem;
+  ACL.Utils.Strings;
 
 type
   TACLSlider = class;
 
   TACLSliderIndent = 1..10;
   TACLSliderMarkSize = 1..5;
+  TACLSliderMovingState = (smaStart, smaMoving, smaStop);
 
   TACLSliderGetHintEvent = procedure (Sender: TObject; AValue: Single; var AHint: string) of object;
-
-  TACLSliderMovingState = (smaStart, smaMoving, smaStop);
 
   { TACLSliderCustomOptions }
 
   TACLSliderCustomOptions = class(TACLCustomOptionsPersistent)
   protected
     FOwner: TACLSlider;
-
     procedure DoChanged(AChanges: TACLPersistentChanges); override;
   public
     constructor Create(AOwner: TACLSlider); virtual;
@@ -116,7 +118,7 @@ type
     function FormatCurrentValue(const AValue: Single): string;
     function HasLabels: Boolean;
     function HasRangeLabels: Boolean;
-    //
+    //# Properties
     property IsCurrentValueMasked: Boolean read FIsCurrentValueMasked;
   published
     property CurrentValue: string index 0 read GetText write SetText;
@@ -151,7 +153,7 @@ type
     procedure SetPage(AValue: Single);
     procedure SetPaginate(const Value: Boolean);
     procedure SetReverse(AValue: Boolean);
-    //
+    //# Filers
     procedure ReadDefault(Reader: TReader);
     procedure WriteDefault(Writer: TWriter);
   protected
@@ -162,7 +164,7 @@ type
     procedure Validate; overload;
   public
     constructor Create(AOwner: TACLSlider); override;
-    //
+    //# Properties
     property Range: Single read GetRange;
   published
     property Default: Single read FDefault write FDefault stored IsDefaultStored;
@@ -182,9 +184,9 @@ type
   protected
     procedure InitializeResources; override;
   public
-    procedure Draw(DC: HDC; const R: TRect; AEnabled: Boolean);
-    procedure DrawThumb(DC: HDC; const R: TRect; AState: TACLButtonState);
-    //
+    procedure Draw(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean);
+    procedure DrawThumb(ACanvas: TCanvas; const R: TRect; AState: TACLButtonState);
+    //# Properties
     property MarkColor[Enabled: Boolean]: TAlphaColor read GetMarkColor;
   published
     property ColorMark: TACLResourceColor index 10 read GetColor write SetColor stored IsColorStored;
@@ -200,7 +202,7 @@ type
   TACLSliderTextViewInfo = record
     Bounds: TRect;
     HorzAlignment: TAlignment;
-    Text: UnicodeString;
+    Text: string;
     TextColor: TColor;
     TextSize: TSize;
 
@@ -228,7 +230,7 @@ type
     FOwner: TACLSlider;
     FThumbBarRect: TRect;
     FThumbRect: TRect;
-    FTickMarks: TACLList<TRect>;
+    FTickMarks: TACLListOf<TRect>;
     FTrackBarRect: TRect;
 
     function CalculateProgressCore(X: Integer): Single;
@@ -252,7 +254,7 @@ type
     procedure Calculate; virtual;
     function CalculateProgress(X, Y: Integer): Single; virtual; abstract;
     function MeasureSize: TSize; virtual;
-    //
+    //# Properties
     property CurrentDpi: Integer read GetCurrentDpi;
     property DefaultValueRect: TRect read FDefaultValueRect;
     property LabelCurrentValue: TACLSliderTextViewInfo read FLabelCurrentValue;
@@ -264,7 +266,7 @@ type
     property Style: TACLStyleSlider read GetStyle;
     property ThumbBarRect: TRect read FThumbBarRect;
     property ThumbRect: TRect read FThumbRect;
-    property TickMarks: TACLList<TRect> read FTickMarks;
+    property TickMarks: TACLListOf<TRect> read FTickMarks;
     property TrackBarRect: TRect read FTrackBarRect;
   end;
 
@@ -354,9 +356,6 @@ type
     function CanAutoSize(var NewWidth, NewHeight: Integer): Boolean; override;
     procedure DoGetHint(const P: TPoint; var AHint: string); override;
     procedure FocusChanged; override;
-    function GetBackgroundStyle: TACLControlBackgroundStyle; override;
-    procedure SetDefaultSize; override;
-
     procedure NextPage(ADirection: Integer; APageSize: Single);
 
     // Keyboard
@@ -394,7 +393,7 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure SetBounds(ALeft, ATop, AWidth, AHeight: Integer); override;
-    // Properties
+    //# Properties
     property Moving: Boolean read FMoving;
     property PositionAsInteger: Integer read GetPositionAsInteger write SetPositionAsInteger;
     property ViewInfo: TACLSliderViewInfo read FViewInfo;
@@ -410,7 +409,7 @@ type
     property Position: Single read FPosition write SetPosition stored IsPositionStored;
     property Style: TACLStyleSlider read GetStyleSlider write SetStyleSlider;
     property Transparent;
-    //
+    //# Events
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property OnDblClick;
     property OnDrawBackground: TACLCustomDrawEvent read FOnDrawBackground write FOnDrawBackground;
@@ -422,8 +421,10 @@ type
 
 implementation
 
+{$IFNDEF FPC}
 uses
-  ACL.Math;
+  ACL.Graphics.SkinImageSet;
+{$ENDIF}
 
 { TACLSliderCustomOptions }
 
@@ -651,7 +652,7 @@ end;
 
 procedure TACLSliderOptionsValue.SetMax(AValue: Single);
 begin
-  AValue := System.Math.Max(AValue, Min + 1);
+  AValue := {System.}Math.Max(AValue, Min + 1);
   if AValue <> FMax then
   begin
     FMax := AValue;
@@ -661,7 +662,7 @@ end;
 
 procedure TACLSliderOptionsValue.SetMin(AValue: Single);
 begin
-  AValue := System.Math.Min(AValue, Max - 1);
+  AValue := {System.}Math.Min(AValue, Max - 1);
   if AValue <> FMin then
   begin
     FMin := AValue;
@@ -671,7 +672,7 @@ end;
 
 procedure TACLSliderOptionsValue.SetPage(AValue: Single);
 begin
-  AValue := System.Math.Max(AValue, 0.01);
+  AValue := {System.}Math.Max(AValue, 0.01);
   SetSingleFieldValue(FPage, AValue, [apcLayout]);
 end;
 
@@ -692,19 +693,23 @@ end;
 
 procedure TACLSliderOptionsValue.WriteDefault(Writer: TWriter);
 begin
+{$IFDEF FPC}
+  Writer.WriteFloat(Default);
+{$ELSE}
   Writer.WriteDouble(Default);
+{$ENDIF}
 end;
 
 { TACLStyleSlider }
 
-procedure TACLStyleSlider.Draw(DC: HDC; const R: TRect; AEnabled: Boolean);
+procedure TACLStyleSlider.Draw(ACanvas: TCanvas; const R: TRect; AEnabled: Boolean);
 begin
-  Texture.Draw(DC, R, Ord(AEnabled));
+  Texture.Draw(ACanvas, R, Ord(AEnabled));
 end;
 
-procedure TACLStyleSlider.DrawThumb(DC: HDC; const R: TRect; AState: TACLButtonState);
+procedure TACLStyleSlider.DrawThumb(ACanvas: TCanvas; const R: TRect; AState: TACLButtonState);
 begin
-  TextureThumb.Draw(DC, R, Ord(AState));
+  TextureThumb.Draw(ACanvas, R, Ord(AState));
 end;
 
 procedure TACLStyleSlider.InitializeResources;
@@ -747,7 +752,7 @@ end;
 constructor TACLSliderViewInfo.Create(AOwner: TACLSlider);
 begin
   FOwner := AOwner;
-  FTickMarks := TACLList<TRect>.Create;
+  FTickMarks := TACLListOf<TRect>.Create;
 end;
 
 destructor TACLSliderViewInfo.Destroy;
@@ -781,7 +786,8 @@ end;
 
 procedure TACLSliderViewInfo.CalculateLabels(ACanvas: TCanvas; var R: TRect);
 
-  procedure InitializeViewInfo(var AViewInfo: TACLSliderTextViewInfo; const AText: UnicodeString; ACustomTextWidth: Integer);
+  procedure InitializeViewInfo(var AViewInfo: TACLSliderTextViewInfo;
+    const AText: string; ACustomTextWidth: Integer);
   begin
     if AText <> '' then
     begin
@@ -1358,6 +1364,7 @@ begin
   FOptions := CreateOptions;
   FOptionsValue := CreateOptionsValue;
   FOptionsLabels := CreateOptionsLabels;
+  FDefaultSize := TSize.Create(20, 100);
   FViewInfo := CreateViewInfo;
   FocusOnClick := True;
   ParentDoubleBuffered := False;
@@ -1375,27 +1382,6 @@ begin
   FreeAndNil(FOptions);
   FreeAndNil(FViewInfo);
   inherited Destroy;
-end;
-
-function TACLSlider.IsPositionStored: Boolean;
-begin
-  Result := not IsZero(FPosition)
-end;
-
-procedure TACLSlider.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
-begin
-  if csLoading in ComponentState then
-    inherited SetBounds(ALeft, ATop, AWidth, AHeight)
-  else
-  begin
-    ViewInfo.AdjustSize(AWidth, AHeight);
-    inherited SetBounds(ALeft, ATop, AWidth, AHeight);
-  end;
-end;
-
-procedure TACLSlider.SetDefaultSize;
-begin
-  SetBounds(0, 0, 20, 100);
 end;
 
 procedure TACLSlider.Calculate;
@@ -1487,14 +1473,6 @@ begin
       OnGetHint(Self, Position, AHint);
 end;
 
-function TACLSlider.GetBackgroundStyle: TACLControlBackgroundStyle;
-begin
-  if Transparent then
-    Result := cbsTransparent
-  else
-    Result := cbsOpaque;
-end;
-
 procedure TACLSlider.NextPage(ADirection: Integer; APageSize: Single);
 var
   ALevelUp: Boolean;
@@ -1538,6 +1516,7 @@ begin
   end;
 
   ShowMovingHint(Position, True);
+  Key := 0;
 end;
 
 function TACLSlider.DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean;
@@ -1631,6 +1610,7 @@ procedure TACLSlider.ShowMovingHint(APosition: Single; AAutoHide: Boolean);
 var
   AHint: string;
 begin
+  AHint := '';
 //  if OptionsLabels.IsCurrentValueMasked then
 //    AHint := OptionsLabels.FormatCurrentValue(APosition);
   if Assigned(OnGetHint) then
@@ -1679,22 +1659,22 @@ begin
   if AColor.IsValid then
   begin
     for I := 0 to ViewInfo.TickMarks.Count - 1 do
-      acFillRect(ACanvas.Handle, ViewInfo.TickMarks.List[I], AColor);
+      acFillRect(ACanvas, ViewInfo.TickMarks.List[I], AColor);
   end;
 end;
 
 procedure TACLSlider.DrawThumbBar(ACanvas: TCanvas; const ARect: TRect);
 begin
   if not CallCustomDrawEvent(Self, OnDrawThumb, ACanvas, ARect) then
-    Style.DrawThumb(ACanvas.Handle, ARect, FThumbState);
+    Style.DrawThumb(ACanvas, ARect, FThumbState);
 end;
 
 procedure TACLSlider.DrawTrackBar(ACanvas: TCanvas; const ARect: TRect);
 begin
   if not CallCustomDrawEvent(Self, OnDrawBackground, ACanvas, ARect) then
-    Style.Draw(ACanvas.Handle, ARect, Enabled);
+    Style.Draw(ACanvas, ARect, Enabled);
   if not ViewInfo.DefaultValueRect.IsEmpty then
-    acFillRect(ACanvas.Handle, ViewInfo.DefaultValueRect, Style.ColorDefaultValue.Value);
+    acFillRect(ACanvas, ViewInfo.DefaultValueRect, Style.ColorDefaultValue.Value);
 end;
 
 procedure TACLSlider.Paint;
@@ -1706,6 +1686,22 @@ begin
   DrawText(Canvas, ViewInfo.LabelCurrentValue);
   DrawText(Canvas, ViewInfo.LabelMinValue);
   DrawText(Canvas, ViewInfo.LabelMaxValue);
+end;
+
+function TACLSlider.IsPositionStored: Boolean;
+begin
+  Result := not IsZero(FPosition)
+end;
+
+procedure TACLSlider.SetBounds(ALeft, ATop, AWidth, AHeight: Integer);
+begin
+  if (csLoading in ComponentState) or IsInScaling then
+    inherited SetBounds(ALeft, ATop, AWidth, AHeight)
+  else
+  begin
+    ViewInfo.AdjustSize(AWidth, AHeight);
+    inherited SetBounds(ALeft, ATop, AWidth, AHeight);
+  end;
 end;
 
 procedure TACLSlider.UpdateThumbState(const P: TPoint);
