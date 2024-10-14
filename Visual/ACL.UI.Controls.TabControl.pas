@@ -588,7 +588,7 @@ begin
     Result.Top := dpiApply(TACLStyleTabControl.Offset, FCurrentPPI);
 
   if OptionsView.TabPosition = tpBottom then
-    acExchangeIntegers(Result.Top, Result.Bottom);
+    TACLMath.Exchange<Integer>(Result.Top, Result.Bottom);
 end;
 
 procedure TACLCustomTabControl.CalculateTabPlaces(const R: TRect);
@@ -738,13 +738,13 @@ end;
 
 procedure TACLCustomTabControl.DrawItem(ACanvas: TCanvas; AViewItem: TACLTabViewItem);
 var
-  ATemp: TACLBitmapLayer;
+  ATemp: TACLDib;
 begin
   if not AViewItem.Bounds.IsEmpty then
   begin
     if (OptionsView.Style = tsTab) and (OptionsView.TabPosition = tpBottom) then
     begin
-      ATemp := TACLBitmapLayer.Create(AViewItem.Bounds);
+      ATemp := TACLDib.Create(AViewItem.Bounds);
       try
         acBitBlt(ATemp.Handle, ACanvas.Handle, ATemp.ClientRect, AViewItem.Bounds.TopLeft);
         Style.DrawTab(ATemp.Canvas, ATemp.ClientRect, AViewItem.Active, Focused, OptionsView.Style);

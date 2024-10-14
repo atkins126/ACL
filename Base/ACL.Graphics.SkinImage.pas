@@ -256,8 +256,6 @@ type
       AFrameIndex: Integer = 0; AAlpha: Byte = MaxByte); overload;
     procedure Draw(ACanvas: TCanvas; const R: TRect;
       AFrameIndex: Integer; AEnabled: Boolean; AAlpha: Byte = MaxByte); overload;
-    procedure Draw(ACanvas: TCanvas; const R: TRect;
-      AFrameIndex1, AFrameIndex2, AMixAlpha: Integer); overload;
     procedure DrawClipped(ACanvas: TCanvas; const AClipRect, R: TRect;
       AFrameIndex: Integer; AAlpha: Byte = MaxByte);
     // HitTest
@@ -962,28 +960,6 @@ begin
     finally
       ALayer.Free;
     end;
-  end;
-end;
-
-procedure TACLSkinImage.Draw(ACanvas: TCanvas;
-  const R: TRect; AFrameIndex1, AFrameIndex2, AMixAlpha: Integer);
-var
-  ALayer1, ALayer2: TACLDib;
-  I: Integer;
-begin
-  ALayer1 := TACLDib.Create(R);
-  ALayer2 := TACLDib.Create(R);
-  try
-    ALayer1.Reset;
-    ALayer2.Reset;
-    Draw(ALayer1.Canvas, ALayer1.ClientRect, AFrameIndex1);
-    Draw(ALayer2.Canvas, ALayer2.ClientRect, AFrameIndex2);
-    for I := 0 to ALayer1.ColorCount - 1 do
-      TACLColors.AlphaBlend(ALayer1.Colors^[I], ALayer2.Colors^[I], AMixAlpha, False);
-    ALayer1.DrawBlend(ACanvas, R);
-  finally
-    ALayer1.Free;
-    ALayer2.Free;
   end;
 end;
 
@@ -1807,7 +1783,7 @@ end;
 procedure TACLSkinImage.SetFrameSize(const AValue: TSize);
 var
   ABitmap: TACLDib;
-  AFrameBitmap: TACLBitmapLayer;
+  AFrameBitmap: TACLDib;
   AFrameRect: TRect;
   AFrameCount: Integer;
   I: Integer;
@@ -1822,7 +1798,7 @@ begin
         ABitmap.Reset;
         //ABitmap.AlphaFormat := afPremultiplied;
         AFrameRect := TRect.Create(AValue);
-        AFrameBitmap := TACLBitmapLayer.Create(FrameWidth, FrameHeight);
+        AFrameBitmap := TACLDib.Create(FrameWidth, FrameHeight);
         try
           for I := 0 to AFrameCount - 1 do
           begin
@@ -2267,7 +2243,7 @@ end;
 class procedure TACLSkinImageRenderer.doAlphaBlendTile(const R, SrcR: TRect);
 var
   AClipRgn: Integer;
-  ALayer: TACLBitmapLayer;
+  ALayer: TACLDib;
   R1: TRect;
   W, H: Integer;
   X, Y, XCount, YCount: Integer;
@@ -2281,7 +2257,7 @@ begin
 
   if XCount * YCount > 10 then
   begin
-    ALayer := TACLBitmapLayer.Create(R);
+    ALayer := TACLDib.Create(R);
     try
       acTileBlt(ALayer.Handle, FMemDC, ALayer.ClientRect, SrcR);
       AlphaBlend(FDstCanvas.Handle, R.Left, R.Top, R.Right - R.Left, R.Bottom - R.Top,

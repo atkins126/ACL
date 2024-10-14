@@ -178,6 +178,12 @@ type
     procedure SetScaledFont(AFont: TFont);
   end;
 
+  // Refer to following articles for more information:
+  //  https://en.wikipedia.org/wiki/Blend_modes
+  //  https://en.wikipedia.org/wiki/Alpha_compositing
+  TACLBlendMode = (bmNormal, bmMultiply, bmScreen, bmOverlay, bmAddition,
+    bmSubstract, bmDifference, bmDivide, bmLighten, bmDarken, bmGrayscale);
+
   { TACLDib }
 
   TACLDib = class
@@ -237,15 +243,19 @@ type
     procedure MakeTransparent(const AColor: TColor); overload;
     procedure Premultiply(R: TRect); overload;
     procedure Premultiply; overload;
-    procedure Reset(const R: TRect); overload;
-    procedure Reset; overload;
+    procedure Reset(const R: TRect); overload; virtual;
+    procedure Reset; overload; virtual;
     function Resize(const ANewBounds: TRect): Boolean; overload;
     function Resize(const ANewWidth, ANewHeight: Integer): Boolean; overload;
 
     //# Draw
     procedure DrawBlend(ACanvas: TCanvas; const P: TPoint; AAlpha: Byte = MaxByte); overload;
-    procedure DrawBlend(ACanvas: TCanvas; const R: TRect; AAlpha: Byte = MaxByte); overload;
-    procedure DrawBlend(ACanvas: TCanvas; const R, SrcRect: TRect; AAlpha: Byte); overload;
+    procedure DrawBlend(ACanvas: TCanvas; const P: TPoint;
+      AMode: TACLBlendMode; AAlpha: Byte = MaxByte); overload;
+    procedure DrawBlend(ACanvas: TCanvas; const R, SrcRect: TRect;
+      AAlpha: Byte; ASmoothStretch: Boolean = False); overload;
+    procedure DrawBlend(ACanvas: TCanvas; const R: TRect;
+      AAlpha: Byte = MaxByte; ASmoothStretch: Boolean = False); overload;
     procedure DrawCopy(ACanvas: TCanvas; const P: TPoint); overload;
     procedure DrawCopy(ACanvas: TCanvas; const R: TRect; ASmoothStretch: Boolean = False); overload;
 
@@ -631,10 +641,10 @@ uses
   gtk2Def,
   glib2,
 {$ENDIF}
+  ACL.Math,
   ACL.Graphics.Ex,
 {$IFDEF MSWINDOWS}
   ACL.Graphics.Ex.Gdip,
-  ACL.Math,
 {$ELSE}
   ACL.Graphics.Ex.Cairo,
 {$ENDIF}
@@ -1189,7 +1199,7 @@ begin
     LTextSize := acTextSize(ACanvas, LText);
     if AEndEllipsis then
       acTextEllipsize(ACanvas, LText, LTextSize, R.Height);
-    acExchangeIntegers(LTextSize.cx, LTextSize.cy);
+    TACLMath.Exchange<Integer>(LTextSize.cx, LTextSize.cy);
     LTextOffset := acTextAlign(R, LTextSize, TAlignment(AVertAlignment), MapVert[AHorzAlignment]);
     acTextOut(ACanvas, LTextOffset.X, LTextOffset.Y + LTextSize.cy, LText);
   finally
@@ -2197,7 +2207,7 @@ begin
   if ACombineFunc <> rcmCopy then
     CombineRgn(Handle, Handle, ARgn, CombineFuncMap[ACombineFunc])
   else
-    acExchangePointers(FHandle, ARgn);
+    TACLMath.Exchange<TRegionHandle>(FHandle, ARgn);
 
   DeleteObject(ARgn)
 end;
@@ -2677,22 +2687,44 @@ begin
   DrawBlend(ACanvas, Bounds(P.X, P.Y, Width, Height), AAlpha);
 end;
 
-procedure TACLDib.DrawBlend(ACanvas: TCanvas; const R: TRect; AAlpha: Byte);
+procedure TACLDib.DrawBlend(ACanvas: TCanvas;
+  const R: TRect; AAlpha: Byte; ASmoothStretch: Boolean);
 begin
-  DrawBlend(ACanvas, R, ClientRect, AAlpha);
+  DrawBlend(ACanvas, R, ClientRect, AAlpha, ASmoothStretch);
 end;
 
-procedure TACLDib.DrawBlend(ACanvas: TCanvas; const R, SrcRect: TRect; AAlpha: Byte);
+procedure TACLDib.DrawBlend(ACanvas: TCanvas;
+  const R, SrcRect: TRect; AAlpha: Byte; ASmoothStretch: Boolean);
 {$IFDEF MSWINDOWS}
 var
   LBlendFunc: TBlendFunction;
+  LGpCanvas: GpGraphics;
+  LGpHandle: GpImage;
 begin
-  LBlendFunc.AlphaFormat := AC_SRC_ALPHA;
-  LBlendFunc.BlendOp := AC_SRC_OVER;
-  LBlendFunc.BlendFlags := 0;
-  LBlendFunc.SourceConstantAlpha := AAlpha;
-  AlphaBlend(ACanvas.Handle, R.Left, R.Top, R.Right - R.Left, R.Bottom - R.Top,
-    Handle, SrcRect.Left, SrcRect.Top, SrcRect.Width, SrcRect.Height, LBlendFunc);
+  if ASmoothStretch and not R.EqualSizes(SrcRect) then
+  begin
+    LGpHandle := GpCreateBitmap(Width, Height, PByte(Colors));
+    GdipCheck(GdipCreateFromHDC(ACanvas.Handle, LGpCanvas));
+    try
+      GdipSetCompositingMode(LGpCanvas, CompositingModeSourceOver);
+      GdipSetInterpolationMode(LGpCanvas, InterpolationModeLowQuality);
+      GdipSetPixelOffsetMode(LGpCanvas, PixelOffsetModeHalf);
+      GpDrawImage(LGpCanvas, LGpHandle,
+        TACLGdiplusAlphaBlendAttributes.Get(AAlpha), R, SrcRect, False);
+    finally
+      GdipDeleteGraphics(LGpCanvas);
+      GdipDisposeImage(LGpHandle);
+    end;
+  end
+  else
+  begin
+    LBlendFunc.AlphaFormat := AC_SRC_ALPHA;
+    LBlendFunc.BlendOp := AC_SRC_OVER;
+    LBlendFunc.BlendFlags := 0;
+    LBlendFunc.SourceConstantAlpha := AAlpha;
+    AlphaBlend(ACanvas.Handle, R.Left, R.Top, R.Right - R.Left, R.Bottom - R.Top,
+      Handle, SrcRect.Left, SrcRect.Top, SrcRect.Width, SrcRect.Height, LBlendFunc);
+  end;
 {$ELSE}
 var
   LSurface: Pcairo_surface_t;
@@ -3001,6 +3033,25 @@ begin
   Result := FHandle;
 end;
 {$ENDIF}
+
+procedure TACLDib.DrawBlend(ACanvas: TCanvas; const P: TPoint; AMode: TACLBlendMode; AAlpha: Byte);
+var
+  LDib: TACLDib;
+begin
+  if AMode = bmNormal then
+    DrawBlend(ACanvas, P, AAlpha)
+  else
+  begin
+    LDib := TACLDib.Create(Width, Height);
+    try
+      acBitBlt(LDib.Handle, ACanvas.Handle, LDib.ClientRect, P);
+      FBlendFunctions[AMode](LDib, Self, AAlpha);
+      LDib.DrawCopy(ACanvas, P);
+    finally
+      LDib.Free;
+    end;
+  end;
+end;
 
 { TACLDibCanvas }
 
