@@ -49,7 +49,9 @@ uses
   ACL.Classes.Collections,
   ACL.Timers,
   ACL.Geometry,
+  ACL.Geometry.Utils,
   ACL.Graphics,
+  ACL.Graphics.Images,
   ACL.Threading,
   ACL.UI.Controls.Base,
   ACL.UI.Controls.BaseEditors,
@@ -208,11 +210,7 @@ type
 implementation
 
 uses
-{$IFDEF FPC}
-  ACL.Graphics.Ex.Cairo;
-{$ELSE}
-  ACL.Graphics.Ex.Gdip;
-{$ENDIF}
+  ACL.Graphics.Ex;
 
 type
 
@@ -719,7 +717,7 @@ begin
   ABounds := ClientRect;
   ABeakSize.cy := dpiApply(BeakSize, FCurrentPPI);
   ABeakSize.cx := {2 * }ABeakSize.cy;
-  AButtonCenter := acMapRect(Owner.Handle, Handle, Owner.ClientRect).CenterPoint;
+  AButtonCenter := acMapRect(Owner, Self, Owner.ClientRect).CenterPoint;
   AContentMargins := TRect.CreateMargins(dpiApply(acIndentBetweenElements, FCurrentPPI));
 
   if (AButtonCenter.X < ABounds.Left + ABeakSize.cx) or (AButtonCenter.X > ABounds.Right - ABeakSize.cx) then
@@ -760,7 +758,7 @@ begin
     end;
 
   ARegion := CreatePolygonRgn({$IFDEF FPC}@{$ENDIF}FPolyline[0], Length(FPolyline), WINDING);
-  SetWindowRgn(Handle, ARegion, True);
+  acRegionSetToWindow(Handle, ARegion, True);
   DeleteObject(ARegion);
 
   if AContentMargins <> FContentMargins then
@@ -796,16 +794,14 @@ end;
 
 procedure TACLUIInsightSearchPopupWindow.Paint;
 begin
-  GpPaintCanvas.BeginPaint(Canvas);
+  ExPainter.BeginPaint(Canvas);
   try
-  {$IFNDEF FPC}
-    GpPaintCanvas.SmoothingMode := smNone;
-    GpPaintCanvas.PixelOffsetMode := pomHalf;
-  {$ENDIF}
-    GpPaintCanvas.FillRectangle(ClientRect, TAlphaColor.FromColor(Color));
-    GpPaintCanvas.Line(FPolyline, TAlphaColor.FromColor(FBorderColor), 2);
+    ExPainter.SetPixelOffsetMode(ipomHalf);
+    ExPainter.SetGeometrySmoothing(TACLBoolean.False);
+    ExPainter.FillRectangle(ClientRect, TAlphaColor.FromColor(Color));
+    ExPainter.Line(FPolyline, TAlphaColor.FromColor(FBorderColor), 2);
   finally
-    GpPaintCanvas.EndPaint;
+    ExPainter.EndPaint;
   end;
 end;
 
@@ -997,7 +993,7 @@ begin
   AWinControl := AControl.Parent;
   Result := AWinControl.HandleAllocated and IsWindowVisible(AWinControl.Handle);
   if Result then
-    ABounds := acMapRect(AWinControl.Handle, 0, AControl.BoundsRect);
+    ABounds := AControl.BoundsRect + AWinControl.ClientOrigin;
 end;
 
 class function TACLUIInsightAdapterControl.GetCaption(AObject: TObject; out AValue: string): Boolean;
@@ -1018,7 +1014,10 @@ var
 begin
   Result := AWinControl.HandleAllocated and IsWindowVisible(AWinControl.Handle);
   if Result then
-    ABounds := acMapRect(AWinControl.Handle, 0, Rect(0, 0, AWinControl.Width, AWinControl.Height));
+  begin
+    ABounds := Rect(0, 0, AWinControl.Width, AWinControl.Height);
+    ABounds := ABounds + AWinControl.ClientOrigin;
+  end;
 end;
 
 class procedure TACLUIInsightAdapterWinControl.GetChildren(AObject: TObject; ABuilder: TACLUIInsightSearchQueueBuilder);

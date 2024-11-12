@@ -508,13 +508,6 @@ type
 
 implementation
 
-uses
-{$IFDEF FPC}
-  ACL.Graphics.Ex.Cairo;
-{$ELSE}
-  ACL.Graphics.Ex.Gdip;
-{$ENDIF}
-
 type
   TACLBindingDiagramLinkAccess = class(TACLBindingDiagramLink);
 
@@ -876,7 +869,7 @@ function TACLBindingDiagramObjectViewInfo.CalculateCaptionSize: TSize;
 begin
   if (FCaptionSize = NullSize) and SubClass.OptionsView.ShowCaption then
   begin
-    MeasureCanvas.Font := SubClass.Font;
+    MeasureCanvas.SetScaledFont(SubClass.Font);
     MeasureCanvas.Font.Style := CaptionFontStyle;
     FCaptionSize := acTextSize(MeasureCanvas, &Object.Caption);
     Inc(FCaptionSize.cx, 2 * dpiApply(acTextIndent, CurrentDpi));
@@ -976,16 +969,16 @@ begin
 
   if not IsRectEmpty(RemoveButtonRect) then
   begin
-    GpPaintCanvas.BeginPaint(ACanvas);
+    ExPainter.BeginPaint(ACanvas);
     try
-      GPPaintCanvas.Line(RemoveButtonRect.Left, RemoveButtonRect.Top,
+      ExPainter.Line(RemoveButtonRect.Left, RemoveButtonRect.Top,
         RemoveButtonRect.Right, RemoveButtonRect.Bottom,
         Style.ColorObjectCaptionText.Value, 2, ssSolid);
-      GPPaintCanvas.Line(RemoveButtonRect.Right, RemoveButtonRect.Top,
+      ExPainter.Line(RemoveButtonRect.Right, RemoveButtonRect.Top,
         RemoveButtonRect.Left, RemoveButtonRect.Bottom,
         Style.ColorObjectCaptionText.Value, 2, ssSolid);
     finally
-      GPPaintCanvas.EndPaint;
+      ExPainter.EndPaint;
     end;
   end;
 end;

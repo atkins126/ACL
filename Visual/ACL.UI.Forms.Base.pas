@@ -150,6 +150,7 @@ type
     constructor CreateNew(AOwner: TComponent; ADummy: Integer = 0); override;
     procedure AfterConstruction; override;
     procedure BeforeDestruction; override;
+    procedure InitPopupMode(AControl: TWinControl);
   {$IFDEF FPC}
     procedure MouseWheelHandler(var Message: TMessage); virtual;
   {$ENDIF}
@@ -767,6 +768,18 @@ begin
 {$ENDIF}
 end;
 
+procedure TACLBasicForm.InitPopupMode(AControl: TWinControl);
+begin
+  if AControl <> nil then
+  begin
+    PopupParent := GetParentForm(AControl); // выставит pmExplicit автоматом
+    if PopupParent = nil then
+      PopupMode := pmAuto;
+  end
+  else
+    PopupMode := pmNone;
+end;
+
 function TACLBasicForm.DialogChar(var Message: TWMKey): Boolean;
 begin
 {$IFDEF FPC}
@@ -785,8 +798,9 @@ end;
 procedure TACLBasicForm.InitializeNewForm;
 begin
   //#AI:
-  // В TCustomForm.InitializeNewForm сначала выставляются дефолтные размеры формы, а уже потом Visible в False.
-  // На Wine зз-за этого форма на секунду становится видимой в нулевых координатах.
+  // В TCustomForm.InitializeNewForm сначала выставляются дефолтные размеры
+  // формы, а уже потом Visible в False. На Wine зз-за этого форма на секунду
+  // становится видимой в нулевых координатах.
   Visible := False;
   inherited;
 {$IFNDEF FPC}
@@ -795,6 +809,10 @@ begin
 {$ENDIF}
   if not ParentFont then
     Font.Height := acGetFontHeight(FCurrentPPI, Font.Size);
+{$IFDEF DELPHI120}
+  Font.IsDPIRelated := True;
+  Font.PixelsPerInch := PixelsPerInch;
+{$ENDIF}
 end;
 
 procedure TACLBasicForm.Loaded;
@@ -913,7 +931,7 @@ begin
       if (Parent <> nil) and not (csDesigning in ComponentState) then
         Font := TWinControlAccess(Parent).Font
       else
-        acAssignFont(Font, TACLApplication.DefaultFont, FCurrentPPI, acGetSystemDpi);
+        Font.Assign(TACLApplication.DefaultFont, acGetSystemDpi, FCurrentPPI);
 
       ParentFont := True;
     finally
@@ -1061,18 +1079,19 @@ end;
 
 constructor TACLCustomForm.CreateDialog(AOwnerHandle: TWndHandle; ANew: Boolean = False);
 var
-  AOwner: TComponent;
+  LOwner: TComponent;
 begin
   FOwnerHandle := AOwnerHandle;
-  AOwner := FindControl(AOwnerHandle);
-  if AOwner is TCustomForm then
-    AOwner := GetParentForm(TCustomForm(AOwner)); // to make a poOwnerFormCenter works correctly
-  if AOwner = nil then
-    AOwner := Application;
+  LOwner := FindControl(FOwnerHandle);
+  if LOwner is TCustomForm then
+    LOwner := GetParentForm(TCustomForm(LOwner)); // to make a poOwnerFormCenter works correctly
+  if LOwner = nil then
+    LOwner := Application;
   if ANew then
-    CreateNew(AOwner)
+    CreateNew(LOwner)
   else
-    Create(AOwner);
+    Create(LOwner);
+  InitPopupMode(Safe.CastOrNil<TWinControl>(Owner));
 end;
 
 procedure TACLCustomForm.CreateHandle;
@@ -1310,7 +1329,7 @@ end;
 
 procedure TACLCustomForm.ResourceChanged(Sender: TObject; Resource: TACLResource = nil);
 begin
-  if FInCreation = acFalse then
+  if (FInCreation = acFalse) and not (csDestroying in ComponentState) then
     ResourceChanged;
 end;
 

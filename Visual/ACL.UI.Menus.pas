@@ -66,6 +66,7 @@ uses
   ACL.MUI,
   ACL.ObjectLinks,
   ACL.Threading,
+  ACL.UI.Animation,
   ACL.UI.Application,
   ACL.UI.Controls.Base,
   ACL.UI.Controls.ScrollBar,
@@ -381,7 +382,7 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     procedure BeforeDestruction; override;
-    function CreateMenuItem: TMenuItem; {$IFNDEF FPC}override;{$ENDIF}
+    function CreateMenuItem: TMenuItem; {$IFDEF FPC}virtual;{$ELSE}override;{$ENDIF}
     procedure ScaleForDpi(ATargetDpi: Integer);
     procedure Popup(const P: TPoint); reintroduce; overload;
     procedure Popup(X, Y: Integer); overload; override;
@@ -1747,7 +1748,7 @@ var
   I: Integer;
   LItem: TItemInfo;
 begin
-  MeasureCanvas.Font := Font;
+  MeasureCanvas.SetScaledFont(Font);
   for I := 0 to Items.Count - 1 do
   begin
     LItem := Items.List[I];
@@ -2056,7 +2057,7 @@ end;
 
 function TACLMenuPopupWindow.AllowFading: Boolean;
 begin
-  Result := acUIFadingEnabled;
+  Result := acUIAnimations;
 end;
 
 function TACLMenuPopupWindow.CalculateAutoSize: TSize;
@@ -2531,7 +2532,7 @@ begin
       LBitmap.Free;
     end;
   end;
-  SetWindowRgn(Handle, LRegion, True);
+  acRegionSetToWindow(Handle, LRegion, True);
 end;
 
 procedure TACLMenuPopupWindow.Scroll(ACode: TScrollCode; var APosition: Integer);
@@ -2572,9 +2573,9 @@ constructor TACLMenuPopupLooper.Create(AOwner: TACLMenuPopupWindow);
 
   function GetMenuDelayTime: Integer;
   begin
+    Result := 400; // Default delay in Windows.
     SystemParametersInfo(SPI_GETMENUSHOWDELAY, 0, @Result, 0);
-    if Result = 0 then
-      Result := 1;
+    Result := Max(Result, 1);
   end;
 
 begin

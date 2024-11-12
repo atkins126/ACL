@@ -867,13 +867,6 @@ type
   TACLScrollToMode = (MakeVisible, MakeTop, MakeCenter);
   {$SCOPEDENUMS OFF}
 
-const
-  acDefaultUIFadingEnabled = True;
-
-var
-  acUIFadingEnabled: Boolean = acDefaultUIFadingEnabled;
-  acUIFadingTime: Integer = 200;
-
 function CallCustomDrawEvent(Sender: TObject;
   AEvent: TACLCustomDrawEvent; ACanvas: TCanvas; const R: TRect): Boolean;
 function CreateControl(AClass: TControlClass; AParent: TWinControl;
@@ -908,6 +901,9 @@ function acRestoreFocus(ASavedFocus: TWndHandle): Boolean;
 function acSafeSetFocus(AControl: TWinControl): Boolean;
 function acSaveFocus: TWndHandle;
 procedure acSetFocus(AWnd: TWndHandle);
+
+function acMapPoint(ASource, ATarget: TWinControl; const P: TPoint): TPoint;
+function acMapRect(ASource, ATarget: TWinControl; const R: TRect): TRect;
 
 // Keyboard
 function acGetShiftState: TShiftState;
@@ -1263,6 +1259,27 @@ end;
 procedure acSetFocus(AWnd: TWndHandle);
 begin
   SetFocus(AWnd);
+end;
+
+function acMapPoint(ASource, ATarget: TWinControl; const P: TPoint): TPoint;
+begin
+{$IFDEF FPC}
+  Result := ATarget.ScreenToClient(ASource.ClientToScreen(P));
+{$ELSE}
+  Result := P;
+  MapWindowPoints(ASource.Handle, ATarget.Handle, Result, 1);
+{$ENDIF}
+end;
+
+function acMapRect(ASource, ATarget: TWinControl; const R: TRect): TRect;
+begin
+{$IFDEF FPC}
+  Result.TopLeft     := acMapPoint(ASource, ATarget, R.TopLeft);
+  Result.BottomRight := acMapPoint(ASource, ATarget, R.BottomRight);
+{$ELSE}
+  Result := R;
+  MapWindowPoints(ASource.Handle, ATarget.Handle, Result, 2);
+{$ENDIF}
 end;
 
 function CallCustomDrawEvent(Sender: TObject; AEvent: TACLCustomDrawEvent;
@@ -1723,7 +1740,8 @@ begin
   FBounds.Enum(
     procedure (const AControl: TControl; const R: TRect)
     begin
-      AControl.Invalidate;
+      if AControl.Parent <> nil then
+        AControl.Invalidate;
     end);
 {$ELSE}
 var

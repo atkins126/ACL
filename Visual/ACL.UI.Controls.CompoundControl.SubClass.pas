@@ -22,9 +22,9 @@ uses
   LCLIntf,
   LCLType,
 {$ELSE}
-  {Winapi.}Messages,
-  {Winapi.}Windows,
+  Windows,
 {$ENDIF}
+  Messages,
   // System
   {System.}Classes,
   {System.}Generics.Collections,
@@ -339,6 +339,9 @@ type
     // DropTarget
     function CreateDefaultDropTarget: TACLDropTarget; virtual;
     procedure UpdateDropTarget(ADropTarget: TACLDropTarget);
+
+    // Messages
+    procedure CMCancelMode(var Message: TMessage); message CM_CANCELMODE;
 
     property AutoScrollTimer: TACLTimer read FAutoScrollTimer;
     property DragWindow: TDragImageList{nullable} read FDragWindow;
@@ -827,6 +830,8 @@ type
 
     function GetFocused: Boolean; virtual;
     function GetFullRefreshChanges: TIntegerSet; virtual;
+    // Messages
+    procedure CMCancelMode(var Message: TMessage); message CM_CANCELMODE;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -889,11 +894,13 @@ type
     procedure BeginUpdate;
     procedure EndUpdate;
     function IsUpdateLocked: Boolean;
-    //
+
+    // Coords Transform
     function ClientToScreen(const P: TPoint): TPoint; overload;
     function ClientToScreen(const R: TRect): TRect; overload;
     function ScreenToClient(const P: TPoint): TPoint;
-    //
+
+    // Properties
     property ActionType: TACLControlActionType read FActionType;
     property Bounds: TRect read FBounds write SetBounds;
     property Container: IACLCompoundControlSubClassContainer read FContainer;
@@ -1399,6 +1406,11 @@ function TACLCompoundControlDragAndDropController.CanStartDropSource(
   var AActions: TACLDropSourceActions; ASourceObject: TObject): Boolean;
 begin
   Result := not SubClass.DoDropSourceBegin(AActions, DropSourceConfig);
+end;
+
+procedure TACLCompoundControlDragAndDropController.CMCancelMode(var Message: TMessage);
+begin
+  if not IsDropSourceOperation then Cancel;
 end;
 
 procedure TACLCompoundControlDragAndDropController.StartDropSource(
@@ -2179,19 +2191,19 @@ end;
 
 procedure TACLCompoundControlScrollBarPartViewInfo.SetState(AValue: TACLButtonState);
 var
-  AAnimator: TACLBitmapFadingAnimation;
+  LAnimation: TACLBitmapAnimation;
 begin
   if AValue <> FState then
   begin
     AnimationManager.RemoveOwner(Self);
 
-    if acUIFadingEnabled and (AValue = absNormal) and (FState = absHover) then
+    if acUIAnimations and (AValue = absNormal) and (FState = absHover) then
     begin
-      AAnimator := TACLBitmapFadingAnimation.Create(Self, acUIFadingTime);
-      DrawTo(AAnimator.AllocateFrame1(Bounds).Canvas, 0, 0);
+      LAnimation := TACLBitmapAnimation.Create(Self, Bounds, TACLAnimatorFadeOut.Create);
+      DrawTo(LAnimation.BuildFrame1.Canvas, 0, 0);
       FState := AValue;
-      DrawTo(AAnimator.AllocateFrame2(Bounds).Canvas, 0, 0);
-      AAnimator.Run;
+      DrawTo(LAnimation.BuildFrame2.Canvas, 0, 0);
+      LAnimation.Run;
     end
     else
       FState := AValue;
@@ -2951,6 +2963,12 @@ function TACLCompoundControlSubClass.ClientToScreen(const R: TRect): TRect;
 begin
   Result.BottomRight := ClientToScreen(R.BottomRight);
   Result.TopLeft := ClientToScreen(R.TopLeft);
+end;
+
+procedure TACLCompoundControlSubClass.CMCancelMode(var Message: TMessage);
+begin
+  DragAndDropController.Dispatch(Message);
+  inherited;
 end;
 
 function TACLCompoundControlSubClass.ClientToScreen(const P: TPoint): TPoint;
